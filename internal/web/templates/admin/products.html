@@ -1,0 +1,36 @@
+{{define "admin_products"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="container wide">
+  <div class="row">
+    <h1>商品管理</h1>
+    <a class="btn" href="/admin/products/new">新建商品</a>
+  </div>
+  <table>
+    <thead><tr><th>ID</th><th>名称</th><th>分类</th><th>价格</th><th>状态</th><th>排序</th><th>置顶</th><th>库存</th><th>已售</th><th>操作</th></tr></thead>
+    <tbody>
+      {{range .Products}}
+      <tr>
+        <td>{{.Product.ID}}</td>
+        <td>{{.Product.Name}}</td>
+        <td>{{if .Product.Category}}{{.Product.Category}}{{else}}默认分类{{end}}</td>
+        <td>{{money .Product.PriceCents}}</td>
+        <td>{{productStatusText .Product.Status}}</td>
+        <td>{{.Product.SortOrder}}</td>
+        <td>{{if .Product.IsPinned}}是{{else}}-{{end}}</td>
+        <td>{{.Available}}</td>
+        <td>{{.Sold}}</td>
+        <td>
+          <a href="/admin/products/{{.Product.ID}}/edit">编辑</a>
+          <a href="/admin/products/{{.Product.ID}}/cards">卡密</a>
+        </td>
+      </tr>
+      {{else}}
+      <tr><td colspan="10">暂无商品</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</main>
+</body>
+</html>
+{{end}}

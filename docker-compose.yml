@@ -1,0 +1,53 @@
+services:
+  bepusdt:
+    image: v03413/bepusdt:latest
+    container_name: bepusdt
+    restart: unless-stopped
+    ports:
+      - "${BEPUSDT_PORT:-8081}:8080"
+    environment:
+      LISTEN: 0.0.0.0:8080
+      SQLITE: /var/lib/bepusdt/sqlite.db
+    volumes:
+      - bepusdt_data:/var/lib/bepusdt
+
+  shop:
+    build:
+      context: .
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    container_name: card-shop
+    restart: unless-stopped
+    depends_on:
+      - bepusdt
+    ports:
+      - "${SHOP_PORT:-8080}:8080"
+    environment:
+      SHOP_LISTEN_ADDR: ":8080"
+      SHOP_DATABASE_PATH: /app/data/shop.db
+      SHOP_PUBLIC_BASE_URL: ${SHOP_PUBLIC_BASE_URL:-http://localhost:8080}
+      BEPUSDT_NOTIFY_URL: ${BEPUSDT_NOTIFY_URL:-http://shop:8080/notify/bepusdt}
+      BEPUSDT_BASE_URL: ${BEPUSDT_BASE_URL:-http://bepusdt:8080}
+      BEPUSDT_API_TOKEN: ${BEPUSDT_API_TOKEN:-change-me-bepusdt-api-token}
+      BEPUSDT_FIAT: ${BEPUSDT_FIAT:-CNY}
+      BEPUSDT_TRADE_TYPE: ${BEPUSDT_TRADE_TYPE:-usdt.trc20}
+      BEPUSDT_TRADE_TYPES: ${BEPUSDT_TRADE_TYPES:-}
+      BEPUSDT_TIMEOUT_SEC: ${BEPUSDT_TIMEOUT_SEC:-1200}
+      SHOP_ADMIN_USERNAME: ${SHOP_ADMIN_USERNAME:-admin}
+      SHOP_ADMIN_PASSWORD: ${SHOP_ADMIN_PASSWORD:-change-me-admin-password}
+      SHOP_SESSION_SECRET: ${SHOP_SESSION_SECRET:-change-me-session-secret}
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-0x4AAAAAAD-83GuuhsY2-KeZ}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - shop_data:/app/data
+
+volumes:
+  bepusdt_data:
+  shop_data:

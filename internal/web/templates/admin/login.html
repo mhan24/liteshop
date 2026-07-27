@@ -1,0 +1,16 @@
+{{define "admin_login"}}
+{{template "head" .}}
+<main class="container narrow">
+  <article class="card">
+    <h1>后台登录</h1>
+    {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
+    <form method="post" action="/admin/login" class="form">
+      <label>用户名<input type="text" name="username" required></label>
+      <label>密码<input type="password" name="password" required></label>
+      <button class="btn" type="submit">登录</button>
+    </form>
+  </article>
+</main>
+</body>
+</html>
+{{end}}

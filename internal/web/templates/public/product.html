@@ -1,0 +1,43 @@
+{{define "public_product"}}
+{{template "head" .}}
+{{template "public_nav" .}}
+<main class="container narrow">
+  <a href="/" class="muted">← 返回商品列表</a>
+  <article class="card">
+    <span class="eyebrow">{{if .SiteEyebrow}}{{.SiteEyebrow}}{{else}}Auto Delivery{{end}}</span>
+    <h1>{{.Product.Name}}</h1>
+    <p class="desc">{{.Product.Description}}</p>
+    <p class="price">{{money .Product.PriceCents}} CNY</p>
+    <p class="stock">当前库存 {{.Available}}</p>
+    {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
+    {{if gt .Available 0}}
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    <form method="post" action="/orders" class="form">
+      <input type="hidden" name="product_id" value="{{.Product.ID}}">
+      {{if gt (len .TradeTypes) 1}}
+      <label>收款币种/网络
+        <select name="trade_type" required>
+          {{range .TradeTypes}}<option value="{{.}}"{{if eq $.TradeType .}} selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </label>
+      {{else}}
+      <input type="hidden" name="trade_type" value="{{index .TradeTypes 0}}">
+      {{end}}
+      <label>购买数量
+        <input type="number" name="qty" value="{{if .Qty}}{{.Qty}}{{else}}1{{end}}" min="1" max="{{.Available}}" required>
+      </label>
+      <label>邮箱（必填，用于查询订单和接收卡密）
+        <input type="email" name="contact" value="{{.Contact}}" maxlength="200" required>
+      </label>
+      <div class="cf-turnstile" data-sitekey="{{.TurnstileSiteKey}}" data-action="turnstile-spin-v2"></div>
+      <button class="btn" type="submit">去支付</button>
+    </form>
+    {{else}}
+    <div class="alert">商品已售罄。</div>
+    {{end}}
+  </article>
+</main>
+{{template "public_footer" .}}
+</body>
+</html>
+{{end}}

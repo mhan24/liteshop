@@ -1,0 +1,28 @@
+{{define "admin_orders"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="container wide">
+  <h1>订单管理</h1>
+  <table>
+    <thead><tr><th>ID</th><th>订单号</th><th>商品</th><th>金额</th><th>联系方式</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody>
+      {{range .Orders}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td><code>{{.OrderNo}}</code></td>
+        <td>{{.ProductName}} x{{.Qty}}</td>
+        <td>{{money .AmountCents}} {{.Fiat}}</td>
+        <td>{{.BuyerContact}}</td>
+        <td><span class="status {{.Status}}">{{statusText .Status}}</span></td>
+        <td>{{date .CreatedAt}}</td>
+        <td><a href="/admin/orders/{{.ID}}">详情</a></td>
+      </tr>
+      {{else}}
+      <tr><td colspan="8">暂无订单</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</main>
+</body>
+</html>
+{{end}}

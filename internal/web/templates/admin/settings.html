@@ -1,0 +1,39 @@
+{{define "admin_settings"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="container narrow">
+  <article class="card">
+    <h1>支付设置</h1>
+    <p class="muted">保存后立即生效，优先级高于 .env。API Token 不回显，留空表示保持不变。</p>
+    {{if .Saved}}<div class="ok">已保存。</div>{{end}}
+    {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
+    <form method="post" action="/admin/settings" class="form">
+      <label>BEpusdt Base URL
+        <input type="text" name="bepusdt_base_url" value="{{.BepusdtBaseURL}}" placeholder="https://pay.setup0.de" required>
+      </label>
+      <label>BEpusdt API Token
+        <input type="password" name="bepusdt_api_token" placeholder="{{if .BepusdtTokenSet}}已配置，留空保持不变{{else}}未配置{{end}}">
+      </label>
+      <label>法币
+        <input type="text" name="fiat" value="{{.Fiat}}" maxlength="10" required>
+      </label>
+      <label>收款类型（逗号分隔）
+        <textarea name="trade_types" rows="5" required>{{.TradeTypes}}</textarea>
+      </label>
+      <label>支付超时时间（秒）
+        <input type="number" name="bepusdt_timeout_sec" value="{{.TimeoutSec}}" min="1" required>
+      </label>
+      <label>前台公开地址
+        <input type="text" name="shop_public_base_url" value="{{.PublicBaseURL}}" placeholder="https://shop.3737.de" required>
+      </label>
+      <label>BEpusdt 回调地址
+        <input type="text" name="bepusdt_notify_url" value="{{.NotifyURL}}" placeholder="留空则使用 前台公开地址 + /notify/bepusdt">
+      </label>
+      <button class="btn" type="submit">保存</button>
+    </form>
+    <p class="muted">收款类型示例：usdt.trc20,usdt.erc20,usdt.bep20,usdt.polygon,usdc.trc20。多个类型会在前台下单页变成下拉选择。</p>
+  </article>
+</main>
+</body>
+</html>
+{{end}}

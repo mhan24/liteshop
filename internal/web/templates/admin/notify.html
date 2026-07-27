@@ -1,0 +1,80 @@
+{{define "admin_notify"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="container wide">
+  <h1>通知设置</h1>
+  <p class="muted">保存后立即生效，优先级高于 .env。密码/Token 不回显；留空表示保持不变。</p>
+  {{if .Notice}}<div class="{{if .NoticeOK}}ok{{else}}alert{{end}}">{{.Notice}}</div>{{end}}
+  <div class="grid two">
+    <article class="card">
+      <h2>通知渠道与文案</h2>
+      <form method="post" action="/admin/notify" class="form">
+        <label>SMTP Host
+          <input type="text" name="smtp_host" value="{{.SMTPHost}}" placeholder="mail.setup0.de">
+        </label>
+        <label>SMTP Port
+          <input type="number" name="smtp_port" value="{{.SMTPPort}}" min="1" max="65535">
+        </label>
+        <label>SMTP Username
+          <input type="text" name="smtp_username" value="{{.SMTPUsername}}" placeholder="shop@setup0.de">
+        </label>
+        <label>SMTP Password
+          <input type="password" name="smtp_password" placeholder="{{if .SMTPPasswordSet}}已配置，留空保持不变{{else}}未配置{{end}}">
+        </label>
+        <label>SMTP From
+          <input type="text" name="smtp_from" value="{{.SMTPFrom}}" placeholder="shop@setup0.de">
+        </label>
+        <label>Telegram Chat ID
+          <input type="text" name="telegram_chat_id" value="{{.TelegramChatID}}" placeholder="管理通知 Chat ID">
+        </label>
+        <label>Telegram Bot Token
+          <input type="password" name="telegram_bot_token" placeholder="{{if .TelegramTokenSet}}已配置，留空保持不变{{else}}未配置{{end}}">
+        </label>
+        <label>邮件主题模板
+          <input type="text" name="mail_paid_subject" value="{{.MailPaidSubject}}">
+        </label>
+        <label>邮件正文模板
+          <textarea name="mail_paid_body" rows="12">{{.MailPaidBody}}</textarea>
+        </label>
+        <label>Telegram 正文模板
+          <textarea name="telegram_paid_body" rows="8">{{.TelegramPaidBody}}</textarea>
+        </label>
+        <details class="details muted">
+          <summary>可用占位符说明</summary>
+          <table>
+            <tbody>
+              <tr><td><code>{{"{{order_no}}"}}</code></td><td>商户订单号，例如 S2026...</td></tr>
+              <tr><td><code>{{"{{product_name}}"}}</code></td><td>商品名称</td></tr>
+              <tr><td><code>{{"{{qty}}"}}</code></td><td>购买数量</td></tr>
+              <tr><td><code>{{"{{amount}}"}}</code></td><td>法币金额，保留两位小数，例如 11.00</td></tr>
+              <tr><td><code>{{"{{fiat}}"}}</code></td><td>法币代码，例如 CNY / USD</td></tr>
+              <tr><td><code>{{"{{trade_type}}"}}</code></td><td>收款币种/网络，例如 usdt.bep20</td></tr>
+              <tr><td><code>{{"{{contact}}"}}</code></td><td>买家下单邮箱</td></tr>
+              <tr><td><code>{{"{{paid_at}}"}}</code></td><td>支付时间，北京时间，格式 2006-01-02 15:04:05</td></tr>
+              <tr><td><code>{{"{{cards}}"}}</code></td><td>本次发放的卡密，多个卡密按一行一个拼接</td></tr>
+              <tr><td><code>{{"{{order_url}}"}}</code></td><td>前台订单查询链接；查询时仍需输入下单邮箱</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <button class="btn" type="submit">保存通知设置</button>
+      </form>
+    </article>
+    <article class="card">
+      <h2>测试推送</h2>
+      <form method="post" action="/admin/notify/test-email" class="form">
+        <label>测试邮箱
+          <input type="email" name="test_email" placeholder="you@gmail.com" required>
+        </label>
+        <button class="btn" type="submit">发送测试邮件</button>
+      </form>
+      <hr>
+      <form method="post" action="/admin/notify/test-telegram" class="form">
+        <p class="muted">使用上面保存的 Telegram Bot Token / Chat ID 发送一条测试消息。</p>
+        <button class="btn" type="submit">发送 Telegram 测试</button>
+      </form>
+    </article>
+  </div>
+</main>
+</body>
+</html>
+{{end}}

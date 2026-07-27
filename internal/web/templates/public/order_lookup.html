@@ -1,0 +1,22 @@
+{{define "public_order_lookup"}}
+{{template "head" .}}
+{{template "public_nav" .}}
+<main class="container narrow">
+  <a href="/" class="muted">← 返回首页</a>
+  <article class="card">
+    <h1>订单查询</h1>
+    <form method="get" action="/order" class="form">
+      <label>订单号
+        <input type="text" name="order_no" placeholder="S2026..." required>
+      </label>
+      <label>下单邮箱
+        <input type="email" name="contact" maxlength="200" required>
+      </label>
+      <button class="btn" type="submit">查询订单/卡密</button>
+    </form>
+  </article>
+</main>
+{{template "public_footer" .}}
+</body>
+</html>
+{{end}}

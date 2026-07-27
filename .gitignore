@@ -1,0 +1,9 @@
+data/
+*.db
+*.db-*
+.env
+*.log
+/shop
+/shop-linux-arm64
+/liteshop
+/cardshop

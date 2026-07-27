@@ -1,0 +1,50 @@
+{{define "admin_site"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="container narrow">
+  <article class="card">
+    <h1>站点设置</h1>
+    <p class="muted">用于前台首页标题、副标题、公告，以及 SEO/分享信息。保存后立即生效。</p>
+    {{if .Saved}}<div class="ok">已保存。</div>{{end}}
+    {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
+    <form method="post" action="/admin/site" class="form">
+      <label>站点标题
+        <input type="text" name="site_title" value="{{.SiteTitle}}" maxlength="80" required>
+      </label>
+      <label>副标题
+        <input type="text" name="site_subtitle" value="{{.SiteSubtitle}}" maxlength="160">
+      </label>
+      <label>眉标文本（首页/结账页小标题）
+        <input type="text" name="site_eyebrow" value="{{.SiteEyebrow}}" maxlength="40" placeholder="Auto Delivery">
+      </label>
+      <label>简介/公告
+        <textarea name="site_announcement" rows="6" maxlength="4000">{{.Announcement}}</textarea>
+      </label>
+      <label>SEO Description
+        <textarea name="seo_description" rows="4" maxlength="220">{{.SEODescription}}</textarea>
+      </label>
+      <label>SEO Keywords（英文逗号分隔）
+        <input type="text" name="seo_keywords" value="{{.SEOKeywords}}" maxlength="220">
+      </label>
+      <label>联系方式（显示在底部）
+        <textarea name="site_contact" rows="4" maxlength="1000">{{.SiteContact}}</textarea>
+      </label>
+      <label>友情链接（每行一个：名称|https://example.com）
+        <textarea name="site_friend_links" rows="5" maxlength="3000">{{.FriendLinks}}</textarea>
+      </label>
+      <label>版权所有
+        <input type="text" name="site_copyright" value="{{.SiteCopyright}}" maxlength="200">
+      </label>
+      <label>隐私政策（/privacy）
+        <textarea name="privacy_policy" rows="10" maxlength="12000">{{.Privacy}}</textarea>
+      </label>
+      <label>服务条款（/terms）
+        <textarea name="terms_of_service" rows="10" maxlength="12000">{{.Terms}}</textarea>
+      </label>
+      <button class="btn" type="submit">保存</button>
+    </form>
+  </article>
+</main>
+</body>
+</html>
+{{end}}

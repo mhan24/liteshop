@@ -1,0 +1,260 @@
+package notify
+
+import (
+	"crypto/tls"
+	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"mime"
+	"net/http"
+	"net/smtp"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"shop/internal/config"
+	"shop/internal/db"
+	"shop/internal/models"
+)
+
+type Notifier struct {
+	cfg config.Config
+	db  *sql.DB
+}
+
+func New(cfg config.Config, database *sql.DB) *Notifier {
+	return &Notifier{cfg: cfg, db: database}
+}
+
+const (
+	defaultMailPaidSubject = "支付成功发卡通知 - {{order_no}}"
+	defaultMailPaidBody    = `您好：
+
+您的订单已支付成功。
+
+订单号：{{order_no}}
+商品：{{product_name}} x{{qty}}
+金额：{{amount}} {{fiat}}
+收款类型：{{trade_type}}
+支付时间：{{paid_at}}
+
+卡密：
+{{cards}}
+
+请妥善保管卡密。订单查询：{{order_url}}
+查询时使用下单邮箱：{{contact}}
+
+如需帮助，请直接回复本邮件。`
+	defaultTelegramPaidBody = `✅ 支付成功
+
+订单号：{{order_no}}
+商品：{{product_name}} x{{qty}}
+金额：{{amount}} {{fiat}}
+收款类型：{{trade_type}}
+
+卡密：
+{{cards}}
+
+查询订单：{{order_url}}`
+)
+
+func (n *Notifier) PaidTemplates() (string, string, string) {
+	subject := defaultMailPaidSubject
+	mailBody := defaultMailPaidBody
+	telegramBody := defaultTelegramPaidBody
+	if n.db == nil {
+		return subject, mailBody, telegramBody
+	}
+	if v, err := db.GetSetting(n.db, "mail_paid_subject"); err == nil && strings.TrimSpace(v) != "" {
+		subject = v
+	}
+	if v, err := db.GetSetting(n.db, "mail_paid_body"); err == nil && strings.TrimSpace(v) != "" {
+		mailBody = v
+	}
+	if v, err := db.GetSetting(n.db, "telegram_paid_body"); err == nil && strings.TrimSpace(v) != "" {
+		telegramBody = v
+	}
+	return subject, mailBody, telegramBody
+}
+
+func renderTemplate(tpl string, data map[string]string) string {
+	out := tpl
+	for k, v := range data {
+		out = strings.ReplaceAll(out, "{{"+k+"}}", v)
+	}
+	return out
+}
+
+func (n *Notifier) CurrentConfig() config.Config {
+	cfg := n.cfg
+	if n.db == nil {
+		return cfg
+	}
+	get := func(key string) string {
+		v, err := db.GetSetting(n.db, key)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(v)
+	}
+	if v := get("smtp_host"); v != "" {
+		cfg.SMTPHost = v
+	}
+	if v := get("smtp_port"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.SMTPPort = port
+		}
+	}
+	if v := get("smtp_username"); v != "" {
+		cfg.SMTPUsername = v
+	}
+	if v := get("smtp_password"); v != "" {
+		cfg.SMTPPassword = v
+	}
+	if v := get("smtp_from"); v != "" {
+		cfg.SMTPFrom = v
+	}
+	if v := get("telegram_bot_token"); v != "" {
+		cfg.TelegramBotToken = v
+	}
+	if v := get("telegram_chat_id"); v != "" {
+		cfg.TelegramChatID = v
+	}
+	return cfg
+}
+
+func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
+	cfg := n.CurrentConfig()
+	subjectTpl, mailBodyTpl, telegramBodyTpl := n.PaidTemplates()
+	cardLines := make([]string, 0, len(cards))
+	for _, c := range cards {
+		cardLines = append(cardLines, c.Content)
+	}
+	paidAt := order.PaidAt
+	if paidAt <= 0 {
+		paidAt = models.Now()
+	}
+	data := map[string]string{
+		"order_no":     order.OrderNo,
+		"product_name": order.ProductName,
+		"qty":          strconv.Itoa(order.Qty),
+		"amount":       fmt.Sprintf("%.2f", float64(order.AmountCents)/100),
+		"fiat":         order.Fiat,
+		"trade_type":   order.TradeType,
+		"contact":      order.BuyerContact,
+		"paid_at":      models.FormatBeijing(paidAt),
+		"cards":        strings.Join(cardLines, "\n"),
+		"order_url":    strings.TrimRight(cfg.PublicBaseURL, "/") + "/order/" + order.OrderNo,
+	}
+	subject := renderTemplate(subjectTpl, data)
+	mailBody := renderTemplate(mailBodyTpl, data)
+	telegramBody := renderTemplate(telegramBodyTpl, data)
+	if cfg.SMTPHost != "" && strings.Contains(order.BuyerContact, "@") {
+		if err := n.sendMailWithConfig(cfg, order.BuyerContact, subject, mailBody); err != nil {
+			log.Printf("send paid mail failed: order=%s to=%s err=%v", order.OrderNo, order.BuyerContact, err)
+		}
+	}
+	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+		if err := n.sendTelegramWithConfig(cfg, telegramBody); err != nil {
+			log.Printf("send paid telegram failed: order=%s err=%v", order.OrderNo, err)
+		}
+	}
+}
+
+func (n *Notifier) SendTestEmail(to string) error {
+	cfg := n.CurrentConfig()
+	if cfg.SMTPHost == "" {
+		return errors.New("SMTP 未配置")
+	}
+	if !strings.Contains(to, "@") {
+		return errors.New("测试邮箱无效")
+	}
+	return n.sendMailWithConfig(cfg, to, "发卡系统 SMTP 测试", "SMTP OK")
+}
+
+func (n *Notifier) SendTestTelegram() error {
+	cfg := n.CurrentConfig()
+	if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
+		return errors.New("Telegram 未配置")
+	}
+	return n.sendTelegramWithConfig(cfg, "发卡系统 Telegram 测试")
+}
+
+func (n *Notifier) sendMailWithConfig(cfg config.Config, to, subject, body string) error {
+	from := cfg.SMTPFrom
+	if from == "" {
+		from = cfg.SMTPUsername
+	}
+	addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
+	auth := smtp.PlainAuth("", cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPHost)
+	domain := "localhost"
+	if at := strings.LastIndex(from, "@"); at >= 0 && at < len(from)-1 {
+		domain = from[at+1:]
+	}
+	headers := []string{
+		"From: " + from,
+		"To: " + to,
+		"Subject: " + mime.BEncoding.Encode("utf-8", subject),
+		"Date: " + time.Now().Format(time.RFC1123Z),
+		"Message-ID: <" + models.RandomToken(12) + "@" + domain + ">",
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=utf-8",
+	}
+	msg := []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + body)
+	if cfg.SMTPPort == 465 {
+		conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.SMTPHost})
+		if err != nil {
+			return err
+		}
+		client, err := smtp.NewClient(conn, cfg.SMTPHost)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+		if err := client.Auth(auth); err != nil {
+			return err
+		}
+		if err := client.Mail(from); err != nil {
+			return err
+		}
+		if err := client.Rcpt(to); err != nil {
+			return err
+		}
+		w, err := client.Data()
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write(msg); err != nil {
+			return err
+		}
+		if err := w.Close(); err != nil {
+			return err
+		}
+		return client.Quit()
+	}
+	return smtp.SendMail(addr, auth, from, []string{to}, msg)
+}
+
+func (n *Notifier) sendTelegramWithConfig(cfg config.Config, text string) error {
+	endpoint := "https://api.telegram.org/bot" + cfg.TelegramBotToken + "/sendMessage"
+	form := url.Values{}
+	form.Set("chat_id", cfg.TelegramChatID)
+	form.Set("text", text)
+	resp, err := n.cfgHTTPClient().PostForm(endpoint, form)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("telegram send failed: %s", resp.Status)
+	}
+	return nil
+}
+
+func (n *Notifier) cfgHTTPClient() *http.Client {
+	return &http.Client{Timeout: 10 * time.Second}
+}

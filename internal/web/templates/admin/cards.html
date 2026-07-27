@@ -1,0 +1,41 @@
+{{define "admin_cards"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="container wide">
+  <div class="row">
+    <h1>卡密管理：{{.Product.Name}}</h1>
+    <a class="btn" href="/admin/products">返回商品</a>
+  </div>
+  <p class="muted">可用库存：{{.Available}}。每行导入一个卡密。</p>
+  <article class="card">
+    <form method="post" action="/admin/products/{{.Product.ID}}/cards" class="form">
+      <label>导入卡密<textarea name="cards" rows="6" placeholder="CARD-001&#10;CARD-002"></textarea></label>
+      <button class="btn" type="submit">导入</button>
+    </form>
+  </article>
+  <table>
+    <thead><tr><th>ID</th><th>内容</th><th>状态</th><th>订单ID</th><th>创建时间</th><th>售出时间</th><th>操作</th></tr></thead>
+    <tbody>
+      {{range .Cards}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td><code>{{.Content}}</code></td>
+        <td>{{cardStatusText .Status}}</td>
+        <td>{{if .OrderID}}{{.OrderID}}{{else}}-{{end}}</td>
+        <td>{{date .CreatedAt}}</td>
+        <td>{{date .SoldAt}}</td>
+        <td>
+          {{if eq .Status "available"}}
+          <form method="post" action="/admin/cards/{{.ID}}/delete" class="inline" onsubmit="return confirm('确定删除该可用卡密吗？')"><button type="submit">删除</button></form>
+          {{else}}-{{end}}
+        </td>
+      </tr>
+      {{else}}
+      <tr><td colspan="7">暂无卡密</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</main>
+</body>
+</html>
+{{end}}
