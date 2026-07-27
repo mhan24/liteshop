@@ -4,7 +4,6 @@
 <main class="container narrow">
   <a href="/" class="muted">← 返回商品列表</a>
   <article class="card">
-    <span class="eyebrow">{{if .SiteEyebrow}}{{.SiteEyebrow}}{{else}}Auto Delivery{{end}}</span>
     <h1>{{.Product.Name}}</h1>
     <p class="desc">{{.Product.Description}}</p>
     <p class="price">{{money .Product.PriceCents}} CNY</p>

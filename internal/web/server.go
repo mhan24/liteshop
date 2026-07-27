@@ -53,7 +53,6 @@ type CategoryView struct {
 type SiteSettings struct {
 	Title          string
 	Subtitle       string
-	Eyebrow        string
 	Announcement   string
 	SEODescription string
 	SEOKeywords    string
@@ -211,7 +210,6 @@ func (s *Server) siteSettings() SiteSettings {
 	st := SiteSettings{
 		Title:          "自动发卡",
 		Subtitle:       "选择商品下单，使用加密货币完成支付，支付成功后自动发放卡密。",
-		Eyebrow:        "Auto Delivery",
 		Announcement:   "",
 		SEODescription: "",
 		SEOKeywords:    "自动发卡,发卡系统,USDT,数字货币支付",
@@ -233,9 +231,6 @@ func (s *Server) siteSettings() SiteSettings {
 	}
 	if v := get("site_subtitle"); v != "" {
 		st.Subtitle = v
-	}
-	if v := get("site_eyebrow"); v != "" {
-		st.Eyebrow = v
 	}
 	st.Announcement = get("site_announcement")
 	if v := get("seo_description"); v != "" {
@@ -268,7 +263,6 @@ func (s *Server) publicData(r *http.Request, title string) map[string]any {
 		"Title":          title,
 		"SiteTitle":      st.Title,
 		"SiteSubtitle":   st.Subtitle,
-		"SiteEyebrow":    st.Eyebrow,
 		"Announcement":   st.Announcement,
 		"SEODescription": st.SEODescription,
 		"SEOKeywords":    st.SEOKeywords,
@@ -373,7 +367,6 @@ func (s *Server) handleAdminSite(w http.ResponseWriter, r *http.Request) {
 			"Title":          "站点设置",
 			"SiteTitle":      st.Title,
 			"SiteSubtitle":   st.Subtitle,
-			"SiteEyebrow":    st.Eyebrow,
 			"Announcement":   st.Announcement,
 			"SEODescription": st.SEODescription,
 			"SEOKeywords":    st.SEOKeywords,
@@ -393,7 +386,6 @@ func (s *Server) handleAdminSite(w http.ResponseWriter, r *http.Request) {
 	values := map[string]string{
 		"site_title":        strings.TrimSpace(r.FormValue("site_title")),
 		"site_subtitle":     strings.TrimSpace(r.FormValue("site_subtitle")),
-		"site_eyebrow":      strings.TrimSpace(r.FormValue("site_eyebrow")),
 		"site_announcement": strings.TrimSpace(r.FormValue("site_announcement")),
 		"seo_description":   strings.TrimSpace(r.FormValue("seo_description")),
 		"seo_keywords":      strings.TrimSpace(r.FormValue("seo_keywords")),
@@ -403,8 +395,8 @@ func (s *Server) handleAdminSite(w http.ResponseWriter, r *http.Request) {
 		"privacy_policy":    strings.TrimSpace(r.FormValue("privacy_policy")),
 		"terms_of_service":  strings.TrimSpace(r.FormValue("terms_of_service")),
 	}
-	if len([]rune(values["site_title"])) > 80 || len([]rune(values["site_subtitle"])) > 160 || len([]rune(values["site_eyebrow"])) > 40 || len([]rune(values["seo_description"])) > 220 || len([]rune(values["seo_keywords"])) > 220 || len([]rune(values["site_announcement"])) > 4000 || len([]rune(values["site_contact"])) > 1000 || len([]rune(values["site_friend_links"])) > 3000 || len([]rune(values["site_copyright"])) > 200 || len([]rune(values["privacy_policy"])) > 12000 || len([]rune(values["terms_of_service"])) > 12000 {
-		s.render(w, 400, "admin_site", map[string]any{"Title": "站点设置", "SiteTitle": values["site_title"], "SiteSubtitle": values["site_subtitle"], "SiteEyebrow": values["site_eyebrow"], "Announcement": values["site_announcement"], "SEODescription": values["seo_description"], "SEOKeywords": values["seo_keywords"], "SiteContact": values["site_contact"], "FriendLinks": values["site_friend_links"], "SiteCopyright": values["site_copyright"], "Privacy": values["privacy_policy"], "Terms": values["terms_of_service"], "Error": "字段长度超出限制。"})
+	if len([]rune(values["site_title"])) > 80 || len([]rune(values["site_subtitle"])) > 160 || len([]rune(values["seo_description"])) > 220 || len([]rune(values["seo_keywords"])) > 220 || len([]rune(values["site_announcement"])) > 4000 || len([]rune(values["site_contact"])) > 1000 || len([]rune(values["site_friend_links"])) > 3000 || len([]rune(values["site_copyright"])) > 200 || len([]rune(values["privacy_policy"])) > 12000 || len([]rune(values["terms_of_service"])) > 12000 {
+		s.render(w, 400, "admin_site", map[string]any{"Title": "站点设置", "SiteTitle": values["site_title"], "SiteSubtitle": values["site_subtitle"], "Announcement": values["site_announcement"], "SEODescription": values["seo_description"], "SEOKeywords": values["seo_keywords"], "SiteContact": values["site_contact"], "FriendLinks": values["site_friend_links"], "SiteCopyright": values["site_copyright"], "Privacy": values["privacy_policy"], "Terms": values["terms_of_service"], "Error": "字段长度超出限制。"})
 		return
 	}
 	for key, value := range values {
