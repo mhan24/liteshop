@@ -139,12 +139,16 @@ func ensureProductColumns(db *sql.DB) error {
 	return nil
 }
 
-func SeedAdmin(db *sql.DB, username, password string) error {
+func HasAdmin(db *sql.DB) bool {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(1) FROM admins WHERE id = 1`).Scan(&count); err != nil {
-		return err
+		return false
 	}
-	if count > 0 {
+	return count > 0
+}
+
+func SeedAdmin(db *sql.DB, username, password string) error {
+	if HasAdmin(db) {
 		return nil
 	}
 	_, err := db.Exec(`INSERT INTO admins(id, username, password_hash, created_at) VALUES(1, ?, ?, ?)`, username, models.HashPassword(password), models.Now())

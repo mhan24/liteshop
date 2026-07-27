@@ -8,17 +8,12 @@ import (
 
 	"shop/internal/config"
 	"shop/internal/db"
+	"shop/internal/models"
 	"shop/internal/web"
 )
 
 func main() {
 	cfg := config.Load()
-	if cfg.AdminPassword == "admin123" {
-		log.Println("warning: SHOP_ADMIN_PASSWORD is using the default value; please change it")
-	}
-	if cfg.SessionSecret == "change-me-session-secret" {
-		log.Println("warning: SHOP_SESSION_SECRET is using the default value; please change it")
-	}
 	if err := os.MkdirAll(filepath.Dir(cfg.DatabasePath), 0o755); err != nil {
 		log.Fatal(err)
 	}
@@ -27,9 +22,16 @@ func main() {
 		log.Fatal(err)
 	}
 	defer database.Close()
-	if err := db.SeedAdmin(database, cfg.AdminUsername, cfg.AdminPassword); err != nil {
+
+	adminPassword := cfg.AdminPassword
+	if adminPassword == "" && !db.HasAdmin(database) {
+		adminPassword = models.RandomToken(8)
+		log.Printf("generated one-time admin password (change it in backend): %s", adminPassword)
+	}
+	if err := db.SeedAdmin(database, cfg.AdminUsername, adminPassword); err != nil {
 		log.Fatal(err)
 	}
+
 	handler, err := web.NewHandler(cfg, database)
 	if err != nil {
 		log.Fatal(err)

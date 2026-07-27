@@ -38,6 +38,12 @@
       <label>服务条款（/terms）
         <textarea name="terms_of_service" rows="10" maxlength="12000">{{.Terms}}</textarea>
       </label>
+      <label>Turnstile Site Key
+        <input type="text" name="turnstile_site_key" value="{{.TurnstileSiteKey}}" maxlength="128">
+      </label>
+      <label>Turnstile Secret（留空保持不变）
+        <input type="password" name="turnstile_secret" placeholder="{{if .TurnstileSecretSet}}已配置，留空保持不变{{else}}未配置{{end}}" maxlength="128">
+      </label>
       <button class="btn" type="submit">保存</button>
     </form>
   </article>

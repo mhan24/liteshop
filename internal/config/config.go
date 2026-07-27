@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bufio"
 	"os"
 	"strconv"
 	"strings"
@@ -72,34 +71,9 @@ func ParseTradeTypes(list, fallback string) []string {
 	return out
 }
 
-func loadDotEnv(path string) {
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, "\"'")
-		if key == "" || os.Getenv(key) != "" {
-			continue
-		}
-		_ = os.Setenv(key, value)
-	}
-}
-
+// Load reads optional process environment. Runtime settings are overridden by the
+// admin backend and persisted in the database, so .env is no longer required.
 func Load() Config {
-	loadDotEnv(".env")
 	publicBase := strings.TrimRight(getenv("SHOP_PUBLIC_BASE_URL", "http://localhost:8080"), "/")
 	notifyURL := strings.TrimSpace(os.Getenv("BEPUSDT_NOTIFY_URL"))
 	if notifyURL == "" {
@@ -112,8 +86,8 @@ func Load() Config {
 		PublicBaseURL:     publicBase,
 		NotifyURL:         notifyURL,
 		AdminUsername:     getenv("SHOP_ADMIN_USERNAME", "admin"),
-		AdminPassword:     getenv("SHOP_ADMIN_PASSWORD", "admin123"),
-		SessionSecret:     getenv("SHOP_SESSION_SECRET", "change-me-session-secret"),
+		AdminPassword:     getenv("SHOP_ADMIN_PASSWORD", ""),
+		SessionSecret:     getenv("SHOP_SESSION_SECRET", ""),
 		TurnstileSecret:   getenv("TURNSTILE_SECRET", ""),
 		TurnstileSiteKey:  getenv("TURNSTILE_SITE_KEY", "0x4AAAAAAD-83GuuhsY2-KeZ"),
 		BepusdtBaseURL:    strings.TrimRight(getenv("BEPUSDT_BASE_URL", "http://localhost:8081"), "/"),

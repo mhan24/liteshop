@@ -364,18 +364,20 @@ func (s *Server) handleAdminSite(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		st := s.siteSettings()
 		s.render(w, 200, "admin_site", map[string]any{
-			"Title":          "站点设置",
-			"SiteTitle":      st.Title,
-			"SiteSubtitle":   st.Subtitle,
-			"Announcement":   st.Announcement,
-			"SEODescription": st.SEODescription,
-			"SEOKeywords":    st.SEOKeywords,
-			"SiteContact":    st.Contact,
-			"FriendLinks":    st.FriendLinks,
-			"SiteCopyright":  st.Copyright,
-			"Privacy":        st.Privacy,
-			"Terms":          st.Terms,
-			"Saved":          r.URL.Query().Get("saved") == "1",
+			"Title":              "站点设置",
+			"SiteTitle":          st.Title,
+			"SiteSubtitle":       st.Subtitle,
+			"Announcement":       st.Announcement,
+			"SEODescription":     st.SEODescription,
+			"SEOKeywords":        st.SEOKeywords,
+			"SiteContact":        st.Contact,
+			"FriendLinks":        st.FriendLinks,
+			"SiteCopyright":      st.Copyright,
+			"Privacy":            st.Privacy,
+			"Terms":              st.Terms,
+			"TurnstileSiteKey":   s.turnstileSiteKey(),
+			"TurnstileSecretSet": s.turnstileSecret() != "",
+			"Saved":              r.URL.Query().Get("saved") == "1",
 		})
 		return
 	}
@@ -384,19 +386,23 @@ func (s *Server) handleAdminSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	values := map[string]string{
-		"site_title":        strings.TrimSpace(r.FormValue("site_title")),
-		"site_subtitle":     strings.TrimSpace(r.FormValue("site_subtitle")),
-		"site_announcement": strings.TrimSpace(r.FormValue("site_announcement")),
-		"seo_description":   strings.TrimSpace(r.FormValue("seo_description")),
-		"seo_keywords":      strings.TrimSpace(r.FormValue("seo_keywords")),
-		"site_contact":      strings.TrimSpace(r.FormValue("site_contact")),
-		"site_friend_links": strings.TrimSpace(r.FormValue("site_friend_links")),
-		"site_copyright":    strings.TrimSpace(r.FormValue("site_copyright")),
-		"privacy_policy":    strings.TrimSpace(r.FormValue("privacy_policy")),
-		"terms_of_service":  strings.TrimSpace(r.FormValue("terms_of_service")),
+		"site_title":         strings.TrimSpace(r.FormValue("site_title")),
+		"site_subtitle":      strings.TrimSpace(r.FormValue("site_subtitle")),
+		"site_announcement":  strings.TrimSpace(r.FormValue("site_announcement")),
+		"seo_description":    strings.TrimSpace(r.FormValue("seo_description")),
+		"seo_keywords":       strings.TrimSpace(r.FormValue("seo_keywords")),
+		"site_contact":       strings.TrimSpace(r.FormValue("site_contact")),
+		"site_friend_links":  strings.TrimSpace(r.FormValue("site_friend_links")),
+		"site_copyright":     strings.TrimSpace(r.FormValue("site_copyright")),
+		"privacy_policy":     strings.TrimSpace(r.FormValue("privacy_policy")),
+		"terms_of_service":   strings.TrimSpace(r.FormValue("terms_of_service")),
+		"turnstile_site_key": strings.TrimSpace(r.FormValue("turnstile_site_key")),
 	}
-	if len([]rune(values["site_title"])) > 80 || len([]rune(values["site_subtitle"])) > 160 || len([]rune(values["seo_description"])) > 220 || len([]rune(values["seo_keywords"])) > 220 || len([]rune(values["site_announcement"])) > 4000 || len([]rune(values["site_contact"])) > 1000 || len([]rune(values["site_friend_links"])) > 3000 || len([]rune(values["site_copyright"])) > 200 || len([]rune(values["privacy_policy"])) > 12000 || len([]rune(values["terms_of_service"])) > 12000 {
-		s.render(w, 400, "admin_site", map[string]any{"Title": "站点设置", "SiteTitle": values["site_title"], "SiteSubtitle": values["site_subtitle"], "Announcement": values["site_announcement"], "SEODescription": values["seo_description"], "SEOKeywords": values["seo_keywords"], "SiteContact": values["site_contact"], "FriendLinks": values["site_friend_links"], "SiteCopyright": values["site_copyright"], "Privacy": values["privacy_policy"], "Terms": values["terms_of_service"], "Error": "字段长度超出限制。"})
+	if v := strings.TrimSpace(r.FormValue("turnstile_secret")); v != "" {
+		values["turnstile_secret"] = v
+	}
+	if len([]rune(values["site_title"])) > 80 || len([]rune(values["site_subtitle"])) > 160 || len([]rune(values["seo_description"])) > 220 || len([]rune(values["seo_keywords"])) > 220 || len([]rune(values["site_announcement"])) > 4000 || len([]rune(values["site_contact"])) > 1000 || len([]rune(values["site_friend_links"])) > 3000 || len([]rune(values["site_copyright"])) > 200 || len([]rune(values["privacy_policy"])) > 12000 || len([]rune(values["terms_of_service"])) > 12000 || len([]rune(values["turnstile_site_key"])) > 128 || len([]rune(values["turnstile_secret"])) > 128 {
+		s.render(w, 400, "admin_site", map[string]any{"Title": "站点设置", "SiteTitle": values["site_title"], "SiteSubtitle": values["site_subtitle"], "Announcement": values["site_announcement"], "SEODescription": values["seo_description"], "SEOKeywords": values["seo_keywords"], "SiteContact": values["site_contact"], "FriendLinks": values["site_friend_links"], "SiteCopyright": values["site_copyright"], "Privacy": values["privacy_policy"], "Terms": values["terms_of_service"], "TurnstileSiteKey": values["turnstile_site_key"], "TurnstileSecretSet": values["turnstile_secret"] != "", "Error": "字段长度超出限制。"})
 		return
 	}
 	for key, value := range values {
@@ -620,7 +626,7 @@ func normalizeTradeTypes(v string) (string, error) {
 var turnstileHTTP = &http.Client{Timeout: 10 * time.Second}
 
 func (s *Server) verifyTurnstile(r *http.Request) error {
-	secret := s.cfg.TurnstileSecret
+	secret := s.turnstileSecret()
 	if secret == "" {
 		return errors.New("TURNSTILE_SECRET is not configured")
 	}
@@ -774,7 +780,7 @@ func (s *Server) productPageData(r *http.Request, p models.Product, available in
 	data["Product"] = p
 	data["Available"] = available
 	data["TradeTypes"] = s.tradeTypes()
-	data["TurnstileSiteKey"] = s.cfg.TurnstileSiteKey
+	data["TurnstileSiteKey"] = s.turnstileSiteKey()
 	data["Qty"] = 1
 	if len(data["TradeTypes"].([]string)) > 0 {
 		data["TradeType"] = data["TradeTypes"].([]string)[0]
@@ -1257,8 +1263,31 @@ func (s *Server) sessionID(r *http.Request) (string, bool) {
 	return parts[0], true
 }
 
+func (s *Server) sessionSecret() string {
+	if v, err := db.GetSetting(s.db, "session_secret"); err == nil && strings.TrimSpace(v) != "" {
+		return v
+	}
+	secret := models.RandomToken(32)
+	_ = db.SetSetting(s.db, "session_secret", secret)
+	return secret
+}
+
+func (s *Server) turnstileSecret() string {
+	if v, err := db.GetSetting(s.db, "turnstile_secret"); err == nil && strings.TrimSpace(v) != "" {
+		return v
+	}
+	return s.cfg.TurnstileSecret
+}
+
+func (s *Server) turnstileSiteKey() string {
+	if v, err := db.GetSetting(s.db, "turnstile_site_key"); err == nil && strings.TrimSpace(v) != "" {
+		return v
+	}
+	return s.cfg.TurnstileSiteKey
+}
+
 func (s *Server) signSession(id string) string {
-	h := hmac.New(sha256.New, []byte(s.cfg.SessionSecret))
+	h := hmac.New(sha256.New, []byte(s.sessionSecret()))
 	h.Write([]byte(id))
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
