@@ -3,48 +3,48 @@
 {{template "admin_nav" .}}
 <main class="container narrow">
   <article class="card">
-    <h1>站点设置</h1>
-    <p class="muted">用于前台首页标题、副标题、公告，以及 SEO/分享信息。保存后立即生效。</p>
-    {{if .Saved}}<div class="ok">已保存。</div>{{end}}
+    <h1>{{t .Lang "site_settings"}}</h1>
+    <p class="muted">{{t .Lang "save_effect_now"}}</p>
+    {{if .Saved}}<div class="ok">{{t .Lang "save"}}</div>{{end}}
     {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
     <form method="post" action="/admin/site" class="form">
-      <label>站点标题
+      <label>{{t .Lang "site_title"}}
         <input type="text" name="site_title" value="{{.SiteTitle}}" maxlength="80" required>
       </label>
-      <label>副标题
+      <label>{{t .Lang "description"}}
         <input type="text" name="site_subtitle" value="{{.SiteSubtitle}}" maxlength="160">
       </label>
-      <label>简介/公告
+      <label>{{t .Lang "description"}}
         <textarea name="site_announcement" rows="6" maxlength="4000">{{.Announcement}}</textarea>
       </label>
       <label>SEO Description
         <textarea name="seo_description" rows="4" maxlength="220">{{.SEODescription}}</textarea>
       </label>
-      <label>SEO Keywords（英文逗号分隔）
+      <label>SEO Keywords
         <input type="text" name="seo_keywords" value="{{.SEOKeywords}}" maxlength="220">
       </label>
-      <label>联系方式（显示在底部）
+      <label>{{t .Lang "contact_info"}}
         <textarea name="site_contact" rows="4" maxlength="1000">{{.SiteContact}}</textarea>
       </label>
-      <label>友情链接（每行一个：名称|https://example.com）
+      <label>{{t .Lang "friend_links"}}
         <textarea name="site_friend_links" rows="5" maxlength="3000">{{.FriendLinks}}</textarea>
       </label>
-      <label>版权所有
+      <label>{{t .Lang "copyright"}}（{{"{{site_title}}"}} / {{"{{year}}"}}）
         <input type="text" name="site_copyright" value="{{.SiteCopyright}}" maxlength="200">
       </label>
-      <label>隐私政策（/privacy）
+      <label>{{t .Lang "privacy_policy"}}
         <textarea name="privacy_policy" rows="10" maxlength="12000">{{.Privacy}}</textarea>
       </label>
-      <label>服务条款（/terms）
+      <label>{{t .Lang "terms_service"}}
         <textarea name="terms_of_service" rows="10" maxlength="12000">{{.Terms}}</textarea>
       </label>
-      <label>Turnstile Site Key
+      <label>{{t .Lang "turnstile_site_key"}}
         <input type="text" name="turnstile_site_key" value="{{.TurnstileSiteKey}}" maxlength="128">
       </label>
-      <label>Turnstile Secret（留空保持不变）
-        <input type="password" name="turnstile_secret" placeholder="{{if .TurnstileSecretSet}}已配置，留空保持不变{{else}}未配置{{end}}" maxlength="128">
+      <label>{{t .Lang "turnstile_secret"}}
+        <input type="password" name="turnstile_secret" placeholder="{{if .TurnstileSecretSet}}{{t .Lang "configured_keep"}}{{else}}{{t .Lang "not_configured"}}{{end}}" maxlength="128">
       </label>
-      <button class="btn" type="submit">保存</button>
+      <button class="btn" type="submit">{{t .Lang "save"}}</button>
     </form>
   </article>
 </main>

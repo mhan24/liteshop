@@ -139,6 +139,41 @@ func ensureProductColumns(db *sql.DB) error {
 	return nil
 }
 
+func ResetAllTables(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	tables := []string{"cards", "orders", "products", "settings", "admins"}
+	for _, t := range tables {
+		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", t)); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM sqlite_sequence WHERE name IN ('products','cards','orders')`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func AllSettings(db *sql.DB) (map[string]string, error) {
+	rows, err := db.Query(`SELECT key, value FROM settings ORDER BY key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
 func HasAdmin(db *sql.DB) bool {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(1) FROM admins WHERE id = 1`).Scan(&count); err != nil {

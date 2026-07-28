@@ -1,0 +1,67 @@
+html,
+body,
+#app {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: #f5f7fa;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+.page-wrap {
+  min-height: calc(100vh - 64px);
+  padding: 16px;
+}
+@media (max-width: 768px) {
+  .page-wrap {
+    padding: 12px;
+  }
+  .product-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .app-header {
+    padding: 0 12px;
+    gap: 12px;
+  }
+  .brand a {
+    font-size: 16px;
+  }
+  .top-menu {
+    gap: 12px;
+  }
+  .ant-layout-header {
+    height: 56px !important;
+    line-height: 56px !important;
+  }
+  .ant-pagination,
+  .ant-table-pagination {
+    font-size: 12px;
+  }
+  .ant-form-item-label > label {
+    font-size: 13px;
+  }
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.fade-leave-to {
+  opacity: 0;
+}
+.product-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.price-text {
+  font-size: 22px;
+  font-weight: 700;
+  color: #111;
+}
+.muted {
+  color: rgba(0, 0, 0, 0.45);
+}

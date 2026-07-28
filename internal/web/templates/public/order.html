@@ -2,36 +2,36 @@
 {{template "head" .}}
 {{template "public_nav" .}}
 <main class="container narrow">
-  <a href="/" class="muted">← 返回首页</a>
+  <a href="/" class="muted">{{t .Lang "back_home"}}</a>
   <article class="card">
-    <h1>订单查询</h1>
+    <h1>{{t .Lang "order_query"}}</h1>
     {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
     {{if .NeedContact}}
     <form method="get" action="/order/{{.OrderNo}}" class="form">
-      <label>下单邮箱
+      <label>{{t .Lang "contact_placeholder"}}
         <input type="email" name="contact" maxlength="200" required>
       </label>
-      <button class="btn" type="submit">查询订单</button>
+      <button class="btn" type="submit">{{t .Lang "query_order"}}</button>
     </form>
     {{end}}
     {{with .Order}}
     <dl class="kv">
-      <dt>订单号</dt><dd><code>{{.OrderNo}}</code></dd>
-      <dt>商品</dt><dd>{{.ProductName}} x{{.Qty}}</dd>
-      <dt>金额</dt><dd>{{money .AmountCents}} {{.Fiat}}</dd>
-      <dt>收款类型</dt><dd><code>{{.TradeType}}</code></dd>
-      <dt>状态</dt><dd><span class="status {{.Status}}">{{statusText .Status}}</span></dd>
-      <dt>创建时间</dt><dd>{{date .CreatedAt}}</dd>
-      {{if .PaidAt}}<dt>支付时间</dt><dd>{{date .PaidAt}}</dd>{{end}}
-      {{if and (eq .Status "pending") .PaymentURL}}<dt>支付</dt><dd><a class="btn" href="{{.PaymentURL}}">继续支付</a></dd>{{end}}
+      <dt>{{t $.Lang "order_no"}}</dt><dd><code>{{.OrderNo}}</code></dd>
+      <dt>{{t $.Lang "product_label"}}</dt><dd>{{.ProductName}} x{{.Qty}}</dd>
+      <dt>{{t $.Lang "amount"}}</dt><dd>{{money .AmountCents}} {{.Fiat}}</dd>
+      <dt>{{t $.Lang "trade_type"}}</dt><dd><code>{{.TradeType}}</code></dd>
+      <dt>{{t $.Lang "status"}}</dt><dd><span class="status {{.Status}}">{{statusText .Status}}</span></dd>
+      <dt>{{t $.Lang "created_at"}}</dt><dd>{{date .CreatedAt}}</dd>
+      {{if .PaidAt}}<dt>{{t $.Lang "paid_at"}}</dt><dd>{{date .PaidAt}}</dd>{{end}}
+      {{if and (eq .Status "pending") .PaymentURL}}<dt>{{t $.Lang "pay"}}</dt><dd><a class="btn" href="{{.PaymentURL}}">{{t $.Lang "pay_now"}}</a></dd>{{end}}
     </dl>
     {{end}}
     {{if .Cards}}
-    <h2>卡密</h2>
+    <h2>{{t .Lang "cards_label"}}</h2>
     <div class="cards">
       {{range .Cards}}<code>{{.Content}}</code>{{end}}
     </div>
-    <p class="muted">请立即保存卡密；页面刷新后需再次通过订单号 + 联系方式查询。</p>
+    <p class="muted">{{t .Lang "cards_hint"}}</p>
     {{end}}
   </article>
 </main>

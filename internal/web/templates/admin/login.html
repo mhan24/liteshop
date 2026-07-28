@@ -2,12 +2,12 @@
 {{template "head" .}}
 <main class="container narrow">
   <article class="card">
-    <h1>后台登录</h1>
+    <h1>{{t .Lang "admin_login_title"}}</h1>
     {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
     <form method="post" action="/admin/login" class="form">
-      <label>用户名<input type="text" name="username" required></label>
-      <label>密码<input type="password" name="password" required></label>
-      <button class="btn" type="submit">登录</button>
+      <label>{{t .Lang "username"}}<input type="text" name="username" required></label>
+      <label>{{t .Lang "password"}}<input type="password" name="password" required></label>
+      <button class="btn" type="submit">{{t .Lang "login"}}</button>
     </form>
   </article>
 </main>

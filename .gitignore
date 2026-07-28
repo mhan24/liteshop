@@ -7,3 +7,5 @@ data/
 /shop-linux-arm64
 /liteshop
 /cardshop
+/frontend/node_modules
+/internal/web/spa

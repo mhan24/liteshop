@@ -2,12 +2,12 @@
 {{template "head" .}}
 {{template "admin_nav" .}}
 <main class="container">
-  <h1>后台首页</h1>
+  <h1>{{t .Lang "dashboard"}}</h1>
   <section class="stats">
-    <div class="stat"><b>{{.Products}}</b><span>商品</span></div>
-    <div class="stat"><b>{{.AvailableCards}}</b><span>可用卡密</span></div>
-    <div class="stat"><b>{{.PendingOrders}}</b><span>待支付订单</span></div>
-    <div class="stat"><b>{{.PaidOrders}}</b><span>已支付订单</span></div>
+    <div class="stat"><b>{{.Products}}</b><span>{{t .Lang "admin_products"}}</span></div>
+    <div class="stat"><b>{{.AvailableCards}}</b><span>{{t .Lang "available_stock"}}</span></div>
+    <div class="stat"><b>{{.PendingOrders}}</b><span>{{t .Lang "status"}}: pending</span></div>
+    <div class="stat"><b>{{.PaidOrders}}</b><span>{{t .Lang "status"}}: paid</span></div>
   </section>
 </main>
 </body>

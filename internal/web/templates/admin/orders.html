@@ -2,9 +2,9 @@
 {{template "head" .}}
 {{template "admin_nav" .}}
 <main class="container wide">
-  <h1>订单管理</h1>
+  <h1>{{t .Lang "admin_orders"}}</h1>
   <table>
-    <thead><tr><th>ID</th><th>订单号</th><th>商品</th><th>金额</th><th>联系方式</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+    <thead><tr><th>{{t .Lang "id"}}</th><th>{{t .Lang "order_no"}}</th><th>{{t .Lang "product_label"}}</th><th>{{t .Lang "amount"}}</th><th>{{t .Lang "contact"}}</th><th>{{t .Lang "status"}}</th><th>{{t .Lang "created_time"}}</th><th>{{t .Lang "actions"}}</th></tr></thead>
     <tbody>
       {{range .Orders}}
       <tr>
@@ -15,10 +15,10 @@
         <td>{{.BuyerContact}}</td>
         <td><span class="status {{.Status}}">{{statusText .Status}}</span></td>
         <td>{{date .CreatedAt}}</td>
-        <td><a href="/admin/orders/{{.ID}}">详情</a></td>
+        <td><a href="/admin/orders/{{.ID}}">{{t $.Lang "detail"}}</a></td>
       </tr>
       {{else}}
-      <tr><td colspan="8">暂无订单</td></tr>
+      <tr><td colspan="8">{{t .Lang "no_orders"}}</td></tr>
       {{end}}
     </tbody>
   </table>

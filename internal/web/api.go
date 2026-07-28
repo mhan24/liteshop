@@ -1,0 +1,996 @@
+package web
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"shop/internal/bepusdt"
+	"shop/internal/db"
+	"shop/internal/models"
+)
+
+type apiResponse struct {
+	OK bool `json:"ok"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]any{"error": msg})
+}
+
+func (s *Server) registerAPI(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/setup", s.apiSetupStatus)
+	mux.HandleFunc("POST /api/v1/setup", s.apiSetup)
+	mux.HandleFunc("GET /api/v1/site", s.apiSite)
+	mux.HandleFunc("GET /api/v1/products", s.apiProducts)
+	mux.HandleFunc("GET /api/v1/products/{id}", s.apiProduct)
+	mux.HandleFunc("POST /api/v1/orders", s.apiCreateOrder)
+	mux.HandleFunc("GET /api/v1/orders", s.apiOrdersByContact)
+	mux.HandleFunc("GET /api/v1/orders/{orderNo}", s.apiOrder)
+	mux.HandleFunc("GET /api/v1/pages/{slug}", s.apiPage)
+	mux.HandleFunc("POST /api/v1/lang", s.apiSetLang)
+
+	mux.HandleFunc("GET /api/v1/admin/session", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSession)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/admin/login", s.apiAdminLogin)
+	mux.Handle("POST /api/v1/admin/logout", s.requireAdminAPI(http.HandlerFunc(s.apiAdminLogout)))
+	mux.Handle("GET /api/v1/admin/dashboard", s.requireAdminAPI(http.HandlerFunc(s.apiDashboard)))
+
+	mux.Handle("GET /api/v1/admin/products", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProducts)))
+	mux.Handle("GET /api/v1/admin/products/{id}", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProduct)))
+	mux.Handle("POST /api/v1/admin/products", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProductCreate)))
+	mux.Handle("POST /api/v1/admin/products/{id}/edit", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProductUpdate)))
+	mux.Handle("GET /api/v1/admin/products/{id}/cards", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCards)))
+	mux.Handle("POST /api/v1/admin/products/{id}/cards", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCardsImport)))
+	mux.Handle("POST /api/v1/admin/cards/{id}/delete", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCardDelete)))
+	mux.Handle("GET /api/v1/admin/orders", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrders)))
+	mux.Handle("GET /api/v1/admin/orders/{id}", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrder)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/expire", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderExpire)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/resend", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderResend)))
+	mux.Handle("GET /api/v1/admin/settings", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSettings)))
+	mux.Handle("POST /api/v1/admin/settings", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSettingsSave)))
+	mux.Handle("GET /api/v1/admin/notify", s.requireAdminAPI(http.HandlerFunc(s.apiAdminNotify)))
+	mux.Handle("POST /api/v1/admin/notify", s.requireAdminAPI(http.HandlerFunc(s.apiAdminNotifySave)))
+	mux.Handle("POST /api/v1/admin/notify/test-email", s.requireAdminAPI(http.HandlerFunc(s.apiAdminNotifyTestEmail)))
+	mux.Handle("POST /api/v1/admin/notify/test-telegram", s.requireAdminAPI(http.HandlerFunc(s.apiAdminNotifyTestTelegram)))
+	mux.Handle("GET /api/v1/admin/site", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSite)))
+	mux.Handle("POST /api/v1/admin/site", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSiteSave)))
+	mux.Handle("GET /api/v1/admin/account", s.requireAdminAPI(http.HandlerFunc(s.apiAdminAccount)))
+	mux.Handle("POST /api/v1/admin/account", s.requireAdminAPI(http.HandlerFunc(s.apiAdminAccountSave)))
+	mux.Handle("GET /api/v1/admin/system/backup", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSystemBackup)))
+	mux.Handle("POST /api/v1/admin/system/restore", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSystemRestore)))
+	mux.Handle("POST /api/v1/admin/system/reset", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSystemReset)))
+}
+
+func productJSON(p models.Product) map[string]any {
+	return map[string]any{
+		"id":          p.ID,
+		"name":        p.Name,
+		"description": p.Description,
+		"price_cents": p.PriceCents,
+		"status":      p.Status,
+		"category":    p.Category,
+		"sort_order":  p.SortOrder,
+		"is_pinned":   p.IsPinned,
+		"created_at":  p.CreatedAt,
+		"updated_at":  p.UpdatedAt,
+	}
+}
+
+func orderJSON(o models.Order) map[string]any {
+	return map[string]any{
+		"id":                   o.ID,
+		"order_no":             o.OrderNo,
+		"product_id":           o.ProductID,
+		"product_name":         o.ProductName,
+		"qty":                  o.Qty,
+		"amount_cents":         o.AmountCents,
+		"fiat":                 o.Fiat,
+		"trade_type":           o.TradeType,
+		"buyer_contact":        o.BuyerContact,
+		"status":               o.Status,
+		"trade_id":             o.TradeID,
+		"payment_url":          o.PaymentURL,
+		"block_transaction_id": o.BlockTransactionID,
+		"created_at":           o.CreatedAt,
+		"updated_at":           o.UpdatedAt,
+		"paid_at":              o.PaidAt,
+	}
+}
+
+func cardJSON(c models.Card) map[string]any {
+	return map[string]any{
+		"id":         c.ID,
+		"product_id": c.ProductID,
+		"order_id":   c.OrderID,
+		"content":    c.Content,
+		"status":     c.Status,
+		"created_at": c.CreatedAt,
+		"updated_at": c.UpdatedAt,
+		"sold_at":    c.SoldAt,
+	}
+}
+
+func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
+	st := s.siteSettings()
+	rawCopyright, _ := db.GetSetting(s.db, "site_copyright")
+	if strings.TrimSpace(rawCopyright) == "" {
+		rawCopyright = "© {{year}} {{site_title}}. All rights reserved."
+	}
+	writeJSON(w, 200, map[string]any{
+		"title":           st.Title,
+		"subtitle":        st.Subtitle,
+		"announcement":    st.Announcement,
+		"seo_description": st.SEODescription,
+		"seo_keywords":    st.SEOKeywords,
+		"contact":         st.Contact,
+		"friend_links":    parseFriendLinks(st.FriendLinks),
+		"copyright":       renderSiteVars(rawCopyright, st.Title),
+		"lang":            chooseLang(r),
+	})
+}
+
+func (s *Server) apiProducts(w http.ResponseWriter, r *http.Request) {
+	products, err := s.listProductViews(true)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	groups := groupIndexProducts(products)
+	out := []map[string]any{}
+	for _, g := range groups {
+		items := []map[string]any{}
+		for _, p := range g.Products {
+			items = append(items, map[string]any{"product": productJSON(p.Product), "available": p.Available, "reserved": p.Reserved, "sold": p.Sold})
+		}
+		out = append(out, map[string]any{"name": g.Name, "default_key": g.DefaultKey, "products": items})
+	}
+	writeJSON(w, 200, map[string]any{"categories": out})
+}
+
+func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	p, available, err := s.getProductView(id)
+	if err != nil || p.Status != "active" {
+		writeError(w, 404, "not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"product":            productJSON(p),
+		"available":          available,
+		"trade_types":        s.tradeTypes(),
+		"turnstile_site_key": s.turnstileSiteKey(),
+	})
+}
+
+func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ProductID         int64  `json:"product_id"`
+		Qty               int    `json:"qty"`
+		Contact           string `json:"contact"`
+		TradeType         string `json:"trade_type"`
+		TurnstileResponse string `json:"cf-turnstile-response"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	if err := s.verifyTurnstileToken(input.TurnstileResponse, clientIP(r)); err != nil {
+		writeError(w, 403, "turnstile failed")
+		return
+	}
+	if input.Qty <= 0 {
+		input.Qty = 1
+	}
+	if input.Qty > 100 {
+		input.Qty = 100
+	}
+	if !validEmail(input.Contact) {
+		writeError(w, 400, "invalid email")
+		return
+	}
+	p, available, err := s.getProductView(input.ProductID)
+	if err != nil || p.Status != "active" {
+		writeError(w, 404, "not found")
+		return
+	}
+	if input.Qty > available {
+		writeError(w, 400, "out of stock")
+		return
+	}
+	tradeType := strings.TrimSpace(input.TradeType)
+	if tradeType == "" {
+		tradeType = s.tradeTypes()[0]
+	}
+	if !s.tradeTypeAllowed(tradeType) {
+		writeError(w, 400, "invalid trade type")
+		return
+	}
+	now := models.Now()
+	order := models.Order{
+		OrderNo:      models.NewOrderNo(),
+		ProductID:    p.ID,
+		ProductName:  p.Name,
+		Qty:          input.Qty,
+		AmountCents:  p.PriceCents * int64(input.Qty),
+		Fiat:         s.fiat(),
+		TradeType:    tradeType,
+		BuyerContact: input.Contact,
+		Status:       "pending",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := s.createPendingOrder(&order); err != nil {
+		writeError(w, 400, "out of stock")
+		return
+	}
+	payCfg := s.paymentConfig()
+	redirectURL := payCfg.PublicBaseURL + "/order/" + order.OrderNo + "?contact=" + input.Contact
+	paymentURL, tradeID, err := s.payClient().CreateTransaction(bepusdt.CreateInput{
+		OrderID:     order.OrderNo,
+		AmountYuan:  float64(order.AmountCents) / 100,
+		Fiat:        s.fiat(),
+		TradeType:   tradeType,
+		Name:        p.Name,
+		NotifyURL:   payCfg.NotifyURL,
+		RedirectURL: redirectURL,
+		TimeoutSec:  payCfg.BepusdtTimeoutSec,
+	})
+	if err != nil {
+		_ = s.failOrder(order.ID)
+		writeError(w, 502, err.Error())
+		return
+	}
+	_, _ = s.db.Exec(`UPDATE orders SET trade_id = ?, payment_url = ?, updated_at = ? WHERE id = ?`, tradeID, paymentURL, models.Now(), order.ID)
+	writeJSON(w, 200, map[string]any{"order_no": order.OrderNo, "payment_url": paymentURL})
+}
+
+func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
+	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
+	if !validEmail(contact) {
+		writeError(w, 400, "invalid email")
+		return
+	}
+	rows, err := s.db.Query(`SELECT id, order_no, product_name, qty, amount_cents, fiat, trade_type, status, payment_url, created_at, paid_at FROM orders WHERE buyer_contact = ? ORDER BY id DESC LIMIT 10`, contact)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id int64
+		var orderNo, productName, fiat, tradeType, status, paymentURL string
+		var qty int
+		var amountCents int64
+		var createdAt, paidAt int64
+		if err := rows.Scan(&id, &orderNo, &productName, &qty, &amountCents, &fiat, &tradeType, &status, &paymentURL, &createdAt, &paidAt); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		item := map[string]any{
+			"product_name": productName,
+			"qty":          qty,
+			"amount":       fmt.Sprintf("%.2f", float64(amountCents)/100),
+			"fiat":         fiat,
+			"trade_type":   tradeType,
+			"status":       status,
+			"created_at":   createdAt,
+			"paid_at":      paidAt,
+		}
+		if status == "pending" {
+			item["order_no"] = orderNo
+			item["url"] = "/order/" + orderNo + "?contact=" + contact
+			item["payment_url"] = paymentURL
+		} else if status != "paid" {
+			item["order_no"] = orderNo
+			item["url"] = "/order/" + orderNo + "?contact=" + contact
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, 200, map[string]any{"orders": out})
+}
+
+func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
+	orderNo := r.PathValue("orderNo")
+	order, err := s.getOrderByNo(orderNo)
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
+	resp := map[string]any{"order": orderJSON(order)}
+	if contact != "" && contact == order.BuyerContact {
+		if order.Status == "paid" {
+			cards, _ := s.getOrderCards(order.ID)
+			list := []map[string]any{}
+			for _, c := range cards {
+				list = append(list, cardJSON(c))
+			}
+			resp["cards"] = list
+		}
+	}
+	writeJSON(w, 200, resp)
+}
+
+func (s *Server) apiPage(w http.ResponseWriter, r *http.Request) {
+	st := s.siteSettings()
+	slug := r.PathValue("slug")
+	if slug == "privacy" {
+		writeJSON(w, 200, map[string]any{"content": st.Privacy})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"content": st.Terms})
+}
+
+func (s *Server) apiSetLang(w http.ResponseWriter, r *http.Request) {
+	lang := strings.TrimSpace(r.URL.Query().Get("lang"))
+	if lang != "en" && lang != "zh" {
+		lang = "zh"
+	}
+	http.SetCookie(w, &http.Cookie{Name: "lang", Value: lang, Path: "/", MaxAge: 31536000, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	writeJSON(w, 200, map[string]any{"ok": true, "lang": lang})
+}
+
+func (s *Server) apiAdminSession(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	var hash string
+	err := s.db.QueryRow(`SELECT password_hash FROM admins WHERE id = 1 AND username = ?`, strings.TrimSpace(input.Username)).Scan(&hash)
+	if err != nil || !models.CheckPassword(input.Password, hash) {
+		writeError(w, 403, "invalid credentials")
+		return
+	}
+	s.startSession(w)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
+	if id, ok := s.sessionID(r); ok {
+		s.sessMu.Lock()
+		delete(s.sessions, id)
+		s.sessMu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: "", Path: "/", MaxAge: -1})
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
+	var products, availableCards, pendingOrders, paidOrders int
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM products`).Scan(&products)
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'available'`).Scan(&availableCards)
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status = 'pending'`).Scan(&pendingOrders)
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status = 'paid'`).Scan(&paidOrders)
+	writeJSON(w, 200, map[string]any{"products": products, "available_cards": availableCards, "pending_orders": pendingOrders, "paid_orders": paidOrders})
+}
+
+func (s *Server) apiAdminProducts(w http.ResponseWriter, r *http.Request) {
+	views, err := s.listProductViews(false)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	out := []map[string]any{}
+	for _, v := range views {
+		item := productJSON(v.Product)
+		item["available"] = v.Available
+		item["reserved"] = v.Reserved
+		item["sold"] = v.Sold
+		out = append(out, item)
+	}
+	writeJSON(w, 200, map[string]any{"products": out})
+}
+
+func (s *Server) apiAdminProduct(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	p, available, err := s.getProductView(id)
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"product": productJSON(p), "available": available})
+}
+
+func productFromJSON(input map[string]any) (models.Product, error) {
+	name := strings.TrimSpace(str(input["name"]))
+	if name == "" {
+		return models.Product{}, errString("name required")
+	}
+	priceText := strings.TrimSpace(str(input["price"]))
+	if priceText == "" {
+		priceText = strings.TrimSpace(str(input["price_cents"]))
+		if priceText != "" {
+			if n, err := strconv.ParseInt(priceText, 10, 64); err == nil {
+				priceText = strconv.FormatFloat(float64(n)/100, 'f', 2, 64)
+			}
+		}
+	}
+	price, err := models.CentsFromYuan(priceText)
+	if err != nil || price <= 0 {
+		return models.Product{}, errString("invalid price")
+	}
+	status := "disabled"
+	if str(input["status"]) == "active" || input["status"] == true {
+		status = "active"
+	}
+	sortOrder, _ := strconv.Atoi(strings.TrimSpace(str(input["sort_order"])))
+	if sortOrder < 0 {
+		sortOrder = 0
+	}
+	return models.Product{
+		Name:        name,
+		Description: strings.TrimSpace(str(input["description"])),
+		PriceCents:  price,
+		Status:      status,
+		Category:    strings.TrimSpace(str(input["category"])),
+		SortOrder:   sortOrder,
+		IsPinned:    input["is_pinned"] == true,
+	}, nil
+}
+
+type strErr string
+
+func (e strErr) Error() string { return string(e) }
+func errString(s string) error { return strErr(s) }
+
+func str(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(t)
+	default:
+		return ""
+	}
+}
+
+func (s *Server) apiAdminProductCreate(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	p, err := productFromJSON(input)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	now := models.Now()
+	if _, err := s.db.Exec(`INSERT INTO products(name, description, price_cents, status, category, sort_order, is_pinned, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.Description, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, now, now); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminProductUpdate(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	var input map[string]any
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	p, err := productFromJSON(input)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	if _, err := s.db.Exec(`UPDATE products SET name = ?, description = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, updated_at = ? WHERE id = ?`, p.Name, p.Description, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, models.Now(), id); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminCards(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	rows, err := s.db.Query(`SELECT id, product_id, order_id, content, status, created_at, updated_at, sold_at FROM cards WHERE product_id = ? ORDER BY id DESC LIMIT 500`, id)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var c models.Card
+		if err := rows.Scan(&c.ID, &c.ProductID, &c.OrderID, &c.Content, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.SoldAt); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		out = append(out, cardJSON(c))
+	}
+	writeJSON(w, 200, map[string]any{"cards": out})
+}
+
+func (s *Server) apiAdminCardsImport(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	var input struct {
+		Cards string `json:"cards"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input)
+	tx, err := s.db.Begin()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer tx.Rollback()
+	now := models.Now()
+	for _, line := range strings.Split(input.Cards, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?, ?, 'available', ?, ?)`, id, line, now, now); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminCardDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	_, _ = s.db.Exec(`DELETE FROM cards WHERE id = ? AND status = 'available'`, id)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminOrders(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders ORDER BY id DESC LIMIT 200`)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var o models.Order
+		if err := rows.Scan(&o.ID, &o.OrderNo, &o.ProductID, &o.ProductName, &o.Qty, &o.AmountCents, &o.Fiat, &o.TradeType, &o.BuyerContact, &o.Status, &o.TradeID, &o.PaymentURL, &o.BlockTransactionID, &o.CreatedAt, &o.UpdatedAt, &o.PaidAt); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		out = append(out, orderJSON(o))
+	}
+	writeJSON(w, 200, map[string]any{"orders": out})
+}
+
+func (s *Server) apiAdminOrder(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	o, err := s.getOrderByID(id)
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	cards, _ := s.getOrderCards(o.ID)
+	list := []map[string]any{}
+	for _, c := range cards {
+		list = append(list, cardJSON(c))
+	}
+	writeJSON(w, 200, map[string]any{"order": orderJSON(o), "cards": list})
+}
+
+func (s *Server) apiAdminOrderExpire(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	_ = s.expireOrder(id)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminOrderResend(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	o, err := s.getOrderByID(id)
+	if err == nil && o.Status == "paid" {
+		cards, _ := s.getOrderCards(o.ID)
+		go s.notifier.SendPaid(o, cards)
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminSettings(w http.ResponseWriter, r *http.Request) {
+	cfg := s.paymentConfig()
+	writeJSON(w, 200, map[string]any{
+		"bepusdt_base_url":      cfg.BepusdtBaseURL,
+		"bepusdt_api_token_set": cfg.BepusdtToken != "",
+		"fiat":                  s.fiat(),
+		"trade_types":           strings.Join(s.tradeTypes(), ","),
+		"bepusdt_timeout_sec":   cfg.BepusdtTimeoutSec,
+		"shop_public_base_url":  cfg.PublicBaseURL,
+		"bepusdt_notify_url":    cfg.NotifyURL,
+	})
+}
+
+func (s *Server) saveIfPresent(map[string]string) {}
+
+func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	setIfPresent := func(key, field string) {
+		if v, ok := input[field]; ok {
+			_ = db.SetSetting(s.db, key, strings.TrimSpace(str(v)))
+		}
+	}
+	setIfPresent("bepusdt_base_url", "bepusdt_base_url")
+	setIfPresent("fiat", "fiat")
+	setIfPresent("trade_types", "trade_types")
+	setIfPresent("bepusdt_timeout_sec", "bepusdt_timeout_sec")
+	setIfPresent("shop_public_base_url", "shop_public_base_url")
+	setIfPresent("bepusdt_notify_url", "bepusdt_notify_url")
+	if v := strings.TrimSpace(str(input["bepusdt_api_token"])); v != "" {
+		_ = db.SetSetting(s.db, "bepusdt_api_token", v)
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
+	cfg := s.notifier.CurrentConfig()
+	subject, mailBody, telegramBody := s.notifier.PaidTemplates()
+	writeJSON(w, 200, map[string]any{
+		"smtp_host":          cfg.SMTPHost,
+		"smtp_port":          cfg.SMTPPort,
+		"smtp_username":      cfg.SMTPUsername,
+		"smtp_from":          cfg.SMTPFrom,
+		"smtp_password_set":  cfg.SMTPPassword != "",
+		"telegram_chat_id":   cfg.TelegramChatID,
+		"telegram_token_set": cfg.TelegramBotToken != "",
+		"mail_paid_subject":  subject,
+		"mail_paid_body":     mailBody,
+		"telegram_paid_body": telegramBody,
+	})
+}
+
+func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	setIfPresent := func(key, field string) {
+		if v, ok := input[field]; ok {
+			_ = db.SetSetting(s.db, key, strings.TrimSpace(str(v)))
+		}
+	}
+	setIfPresent("smtp_host", "smtp_host")
+	setIfPresent("smtp_port", "smtp_port")
+	setIfPresent("smtp_username", "smtp_username")
+	setIfPresent("smtp_from", "smtp_from")
+	setIfPresent("telegram_chat_id", "telegram_chat_id")
+	setIfPresent("mail_paid_subject", "mail_paid_subject")
+	setIfPresent("mail_paid_body", "mail_paid_body")
+	setIfPresent("telegram_paid_body", "telegram_paid_body")
+	if v := strings.TrimSpace(str(input["smtp_password"])); v != "" {
+		_ = db.SetSetting(s.db, "smtp_password", v)
+	}
+	if v := strings.TrimSpace(str(input["telegram_bot_token"])); v != "" {
+		_ = db.SetSetting(s.db, "telegram_bot_token", v)
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminNotifyTestEmail(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Email string `json:"test_email"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
+	if !validEmail(strings.TrimSpace(input.Email)) {
+		writeError(w, 400, "invalid email")
+		return
+	}
+	if err := s.notifier.SendTestEmail(strings.TrimSpace(input.Email)); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminNotifyTestTelegram(w http.ResponseWriter, r *http.Request) {
+	if err := s.notifier.SendTestTelegram(); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
+	st := s.siteSettings()
+	rawCopyright, _ := db.GetSetting(s.db, "site_copyright")
+	if strings.TrimSpace(rawCopyright) == "" {
+		rawCopyright = "© {{year}} {{site_title}}. All rights reserved."
+	}
+	writeJSON(w, 200, map[string]any{
+		"site_title":           st.Title,
+		"site_subtitle":        st.Subtitle,
+		"site_announcement":    st.Announcement,
+		"seo_description":      st.SEODescription,
+		"seo_keywords":         st.SEOKeywords,
+		"site_contact":         st.Contact,
+		"site_friend_links":    st.FriendLinks,
+		"site_copyright":       rawCopyright,
+		"privacy_policy":       st.Privacy,
+		"terms_of_service":     st.Terms,
+		"turnstile_site_key":   s.turnstileSiteKey(),
+		"turnstile_secret_set": s.turnstileSecret() != "",
+	})
+}
+
+func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	setIfPresent := func(key, field string) {
+		if v, ok := input[field]; ok {
+			_ = db.SetSetting(s.db, key, strings.TrimSpace(str(v)))
+		}
+	}
+	for key, field := range map[string]string{
+		"site_title": "site_title", "site_subtitle": "site_subtitle", "site_announcement": "site_announcement",
+		"seo_description": "seo_description", "seo_keywords": "seo_keywords", "site_contact": "site_contact",
+		"site_friend_links": "site_friend_links", "site_copyright": "site_copyright",
+		"privacy_policy": "privacy_policy", "terms_of_service": "terms_of_service", "turnstile_site_key": "turnstile_site_key",
+	} {
+		setIfPresent(key, field)
+	}
+	if v := strings.TrimSpace(str(input["turnstile_secret"])); v != "" {
+		_ = db.SetSetting(s.db, "turnstile_secret", v)
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminAccount(w http.ResponseWriter, r *http.Request) {
+	var username string
+	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = 1`).Scan(&username)
+	writeJSON(w, 200, map[string]any{"username": username})
+}
+
+func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Username        string `json:"username"`
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+		ConfirmPassword string `json:"confirm_password"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	var hash string
+	if err := s.db.QueryRow(`SELECT password_hash FROM admins WHERE id = 1`).Scan(&hash); err != nil {
+		writeError(w, 500, "no admin")
+		return
+	}
+	if !models.CheckPassword(input.CurrentPassword, hash) {
+		writeError(w, 400, "current password wrong")
+		return
+	}
+	username := strings.TrimSpace(input.Username)
+	if username == "" {
+		writeError(w, 400, "username empty")
+		return
+	}
+	if input.NewPassword != "" {
+		if len(input.NewPassword) < 8 {
+			writeError(w, 400, "password too short")
+			return
+		}
+		if input.NewPassword != input.ConfirmPassword {
+			writeError(w, 400, "password mismatch")
+			return
+		}
+		hash = models.HashPassword(input.NewPassword)
+	}
+	if _, err := s.db.Exec(`UPDATE admins SET username = ?, password_hash = ? WHERE id = 1`, username, hash); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminSystemBackup(w http.ResponseWriter, r *http.Request) {
+	settings, err := db.AllSettings(s.db)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename=liteshop-settings.json")
+	writeJSON(w, 200, map[string]any{"app": "liteshop", "settings": settings})
+}
+
+func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		writeError(w, 400, "bad upload")
+		return
+	}
+	file, _, err := r.FormFile("backup_file")
+	if err != nil {
+		writeError(w, 400, "no file")
+		return
+	}
+	defer file.Close()
+	var payload struct {
+		Settings map[string]string `json:"settings"`
+	}
+	if err := json.NewDecoder(io.LimitReader(file, 8<<20)).Decode(&payload); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	count := 0
+	for k, v := range payload.Settings {
+		if len(k) > 80 || len(v) > 20000 {
+			continue
+		}
+		if err := db.SetSetting(s.db, k, v); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		count++
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "count": count})
+}
+
+func (s *Server) apiAdminSystemReset(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Confirm string `json:"confirm"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
+	if strings.TrimSpace(input.Confirm) != "DELETE" {
+		writeError(w, 400, "confirm required")
+		return
+	}
+	if err := db.ResetAllTables(s.db); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	s.sessMu.Lock()
+	s.sessions = make(map[string]time.Time)
+	s.sessMu.Unlock()
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+var _ = sql.ErrNoRows
+
+func (s *Server) apiSetupStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"initialized": db.HasAdmin(s.db), "site_title": s.siteSettings().Title})
+}
+
+func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
+	if db.HasAdmin(s.db) {
+		writeError(w, 400, "already initialized")
+		return
+	}
+	var input struct {
+		SiteTitle       string `json:"site_title"`
+		Username        string `json:"username"`
+		Password        string `json:"password"`
+		Confirm         string `json:"confirm"`
+		PublicBaseURL   string `json:"public_base_url"`
+		BepusdtBaseURL  string `json:"bepusdt_base_url"`
+		BepusdtAPIToken string `json:"bepusdt_api_token"`
+		TradeTypes      string `json:"trade_types"`
+		Fiat            string `json:"fiat"`
+		TurnstileSite   string `json:"turnstile_site_key"`
+		TurnstileSecret string `json:"turnstile_secret"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	username := strings.TrimSpace(input.Username)
+	if username == "" {
+		username = "admin"
+	}
+	if len(input.Password) < 8 {
+		writeError(w, 400, "密码至少 8 位")
+		return
+	}
+	if input.Password != input.Confirm {
+		writeError(w, 400, "两次密码不一致")
+		return
+	}
+	siteTitle := strings.TrimSpace(input.SiteTitle)
+	if siteTitle == "" {
+		siteTitle = "LiteShop"
+	}
+	if err := db.SeedAdmin(s.db, username, input.Password); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	settings := map[string]string{
+		"site_title":          siteTitle,
+		"site_copyright":      "© {{year}} {{site_title}}. All rights reserved.",
+		"bepusdt_fiat":        "CNY",
+		"bepusdt_timeout_sec": "1200",
+	}
+	if input.Fiat != "" {
+		settings["bepusdt_fiat"] = strings.TrimSpace(input.Fiat)
+	}
+	if strings.TrimSpace(input.PublicBaseURL) != "" {
+		settings["shop_public_base_url"] = strings.TrimSpace(input.PublicBaseURL)
+	}
+	if strings.TrimSpace(input.BepusdtBaseURL) != "" {
+		settings["bepusdt_base_url"] = strings.TrimSpace(input.BepusdtBaseURL)
+	}
+	if strings.TrimSpace(input.BepusdtAPIToken) != "" {
+		settings["bepusdt_api_token"] = strings.TrimSpace(input.BepusdtAPIToken)
+	}
+	if strings.TrimSpace(input.TradeTypes) != "" {
+		settings["bepusdt_trade_types"] = strings.TrimSpace(input.TradeTypes)
+	}
+	if strings.TrimSpace(input.TurnstileSite) != "" {
+		settings["turnstile_site_key"] = strings.TrimSpace(input.TurnstileSite)
+	}
+	if strings.TrimSpace(input.TurnstileSecret) != "" {
+		settings["turnstile_secret"] = strings.TrimSpace(input.TurnstileSecret)
+	}
+	for k, v := range settings {
+		if err := db.SetSetting(s.db, k, v); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}

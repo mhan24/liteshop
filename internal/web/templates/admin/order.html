@@ -4,30 +4,29 @@
 <main class="container narrow">
   <article class="card">
     <div class="row">
-      <h1>订单详情</h1>
-      <a class="btn" href="/admin/orders">返回订单</a>
+      <h1>{{t .Lang "order_detail"}}</h1>
+      <a class="btn" href="/admin/orders">{{t .Lang "back_orders"}}</a>
     </div>
     {{with .Order}}
     <dl class="kv">
-      <dt>订单号</dt><dd><code>{{.OrderNo}}</code></dd>
-      <dt>商品</dt><dd>{{.ProductName}} x{{.Qty}}</dd>
-      <dt>金额</dt><dd>{{money .AmountCents}} {{.Fiat}}</dd>
-      <dt>收款类型</dt><dd><code>{{.TradeType}}</code></dd>
-      <dt>联系方式</dt><dd>{{.BuyerContact}}</dd>
-      <dt>状态</dt><dd><span class="status {{.Status}}">{{statusText .Status}}</span></dd>
-      <dt>BEpusdt Trade ID</dt><dd><code>{{if .TradeID}}{{.TradeID}}{{else}}-{{end}}</code></dd>
-      <dt>链上交易</dt><dd><code>{{if .BlockTransactionID}}{{.BlockTransactionID}}{{else}}-{{end}}</code></dd>
-      <dt>创建时间</dt><dd>{{date .CreatedAt}}</dd>
-      <dt>支付时间</dt><dd>{{date .PaidAt}}</dd>
-      {{if .PaymentURL}}<dt>收银台</dt><dd><a href="{{.PaymentURL}}" target="_blank">打开</a></dd>{{end}}
+      <dt>{{t $.Lang "order_no"}}</dt><dd><code>{{.OrderNo}}</code></dd>
+      <dt>{{t $.Lang "product_label"}}</dt><dd>{{.ProductName}} x{{.Qty}}</dd>
+      <dt>{{t $.Lang "amount"}}</dt><dd>{{money .AmountCents}} {{.Fiat}}</dd>
+      <dt>{{t $.Lang "contact"}}</dt><dd>{{.BuyerContact}}</dd>
+      <dt>{{t $.Lang "status"}}</dt><dd><span class="status {{.Status}}">{{statusText .Status}}</span></dd>
+      <dt>{{t $.Lang "be_trade_id"}}</dt><dd><code>{{if .TradeID}}{{.TradeID}}{{else}}-{{end}}</code></dd>
+      <dt>{{t $.Lang "chain_tx"}}</dt><dd><code>{{if .BlockTransactionID}}{{.BlockTransactionID}}{{else}}-{{end}}</code></dd>
+      <dt>{{t $.Lang "created_time"}}</dt><dd>{{date .CreatedAt}}</dd>
+      <dt>{{t $.Lang "paid_at"}}</dt><dd>{{date .PaidAt}}</dd>
+      {{if .PaymentURL}}<dt>{{t $.Lang "checkout"}}</dt><dd><a href="{{.PaymentURL}}" target="_blank">{{t $.Lang "checkout"}}</a></dd>{{end}}
     </dl>
     <div class="actions">
-      {{if eq .Status "pending"}}<form method="post" action="/admin/orders/{{.ID}}/expire" class="inline"><button type="submit">标记过期并释放库存</button></form>{{end}}
-      {{if eq .Status "paid"}}<form method="post" action="/admin/orders/{{.ID}}/resend" class="inline"><button type="submit">重发通知</button></form>{{end}}
+      {{if eq .Status "pending"}}<form method="post" action="/admin/orders/{{.ID}}/expire" class="inline"><button type="submit">{{t $.Lang "mark_expired"}}</button></form>{{end}}
+      {{if eq .Status "paid"}}<form method="post" action="/admin/orders/{{.ID}}/resend" class="inline"><button type="submit">{{t $.Lang "resend_notify"}}</button></form>{{end}}
     </div>
     {{end}}
     {{if .Cards}}
-    <h2>卡密</h2>
+    <h2>{{t .Lang "cards_label"}}</h2>
     <div class="cards">{{range .Cards}}<code>{{.Content}}</code>{{end}}</div>
     {{end}}
   </article>

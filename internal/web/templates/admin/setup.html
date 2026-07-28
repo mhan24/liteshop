@@ -1,0 +1,48 @@
+{{define "admin_setup"}}
+{{template "head" .}}
+<main class="container narrow">
+  <article class="card">
+    <h1>{{t .Lang "setup_title"}}</h1>
+    <p class="muted">{{t .Lang "setup_intro"}}</p>
+    {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
+    <form method="post" action="/setup" class="form">
+      <label>{{t .Lang "site_title"}}
+        <input type="text" name="site_title" value="{{if .SiteTitle}}{{.SiteTitle}}{{else}}LiteShop{{end}}" maxlength="80" required>
+      </label>
+      <label>{{t .Lang "admin_username"}}
+        <input type="text" name="admin_username" value="{{if .AdminUsername}}{{.AdminUsername}}{{else}}admin{{end}}" maxlength="40" required>
+      </label>
+      <label>{{t .Lang "admin_password"}}
+        <input type="password" name="admin_password" minlength="8" required>
+      </label>
+      <label>{{t .Lang "confirm_admin_password"}}
+        <input type="password" name="admin_confirm" minlength="8" required>
+      </label>
+      <label>{{t .Lang "public_base_url"}}
+        <input type="text" name="shop_public_base_url" value="{{.SuggestedBaseURL}}" placeholder="https://shop.example.com">
+      </label>
+      <label>{{t .Lang "bepusdt_base_url"}}
+        <input type="text" name="bepusdt_base_url" placeholder="https://pay.example.com">
+      </label>
+      <label>{{t .Lang "bepusdt_api_token"}}
+        <input type="text" name="bepusdt_api_token">
+      </label>
+      <label>{{t .Lang "trade_types"}}
+        <input type="text" name="bepusdt_trade_types" placeholder="usdt.trc20,usdt.erc20,usdt.bep20">
+      </label>
+      <label>{{t .Lang "fiat"}}
+        <input type="text" name="bepusdt_fiat" value="CNY" maxlength="10">
+      </label>
+      <label>{{t .Lang "turnstile_site_key"}}
+        <input type="text" name="turnstile_site_key">
+      </label>
+      <label>{{t .Lang "turnstile_secret"}}
+        <input type="password" name="turnstile_secret">
+      </label>
+      <button class="btn" type="submit">{{t .Lang "complete_setup"}}</button>
+    </form>
+  </article>
+</main>
+</body>
+</html>
+{{end}}

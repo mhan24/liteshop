@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,8 +47,9 @@ type ProductView struct {
 }
 
 type CategoryView struct {
-	Name     string
-	Products []ProductView
+	Name       string
+	DefaultKey string
+	Products   []ProductView
 }
 
 type SiteSettings struct {
@@ -82,42 +84,10 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		sessions: make(map[string]time.Time),
 	}
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(staticFS())))
-	mux.HandleFunc("GET /", s.handleIndex)
-	mux.HandleFunc("GET /p/{id}", s.handleProduct)
-	mux.HandleFunc("POST /orders", s.handleCreateOrder)
-	mux.HandleFunc("GET /privacy", s.handlePrivacy)
-	mux.HandleFunc("GET /terms", s.handleTerms)
-	mux.HandleFunc("GET /order", s.handleOrderLookup)
-	mux.HandleFunc("GET /order/{orderNo}", s.handleOrder)
 	mux.HandleFunc("POST /notify/bepusdt", s.handleBepusdtNotify)
-
-	mux.HandleFunc("GET /admin/login", s.handleAdminLogin)
-	mux.HandleFunc("POST /admin/login", s.handleAdminLogin)
-	mux.Handle("POST /admin/logout", s.requireAdmin(http.HandlerFunc(s.handleAdminLogout)))
-	mux.Handle("GET /admin", s.requireAdmin(http.HandlerFunc(s.handleAdminDashboard)))
-	mux.Handle("GET /admin/products", s.requireAdmin(http.HandlerFunc(s.handleAdminProducts)))
-	mux.Handle("GET /admin/products/new", s.requireAdmin(http.HandlerFunc(s.handleAdminProductNew)))
-	mux.Handle("POST /admin/products", s.requireAdmin(http.HandlerFunc(s.handleAdminProductCreate)))
-	mux.Handle("GET /admin/products/{id}/edit", s.requireAdmin(http.HandlerFunc(s.handleAdminProductEdit)))
-	mux.Handle("POST /admin/products/{id}/edit", s.requireAdmin(http.HandlerFunc(s.handleAdminProductUpdate)))
-	mux.Handle("GET /admin/products/{id}/cards", s.requireAdmin(http.HandlerFunc(s.handleAdminCards)))
-	mux.Handle("POST /admin/products/{id}/cards", s.requireAdmin(http.HandlerFunc(s.handleAdminCardsImport)))
-	mux.Handle("POST /admin/cards/{id}/delete", s.requireAdmin(http.HandlerFunc(s.handleAdminCardDelete)))
-	mux.Handle("GET /admin/account", s.requireAdmin(http.HandlerFunc(s.handleAdminAccount)))
-	mux.Handle("POST /admin/account", s.requireAdmin(http.HandlerFunc(s.handleAdminAccount)))
-	mux.Handle("GET /admin/site", s.requireAdmin(http.HandlerFunc(s.handleAdminSite)))
-	mux.Handle("POST /admin/site", s.requireAdmin(http.HandlerFunc(s.handleAdminSite)))
-	mux.Handle("GET /admin/settings", s.requireAdmin(http.HandlerFunc(s.handleAdminSettings)))
-	mux.Handle("POST /admin/settings", s.requireAdmin(http.HandlerFunc(s.handleAdminSettings)))
-	mux.Handle("GET /admin/notify", s.requireAdmin(http.HandlerFunc(s.handleAdminNotify)))
-	mux.Handle("POST /admin/notify", s.requireAdmin(http.HandlerFunc(s.handleAdminNotify)))
-	mux.Handle("POST /admin/notify/test-email", s.requireAdmin(http.HandlerFunc(s.handleAdminNotifyTestEmail)))
-	mux.Handle("POST /admin/notify/test-telegram", s.requireAdmin(http.HandlerFunc(s.handleAdminNotifyTestTelegram)))
-	mux.Handle("GET /admin/orders", s.requireAdmin(http.HandlerFunc(s.handleAdminOrders)))
-	mux.Handle("GET /admin/orders/{id}", s.requireAdmin(http.HandlerFunc(s.handleAdminOrder)))
-	mux.Handle("POST /admin/orders/{id}/expire", s.requireAdmin(http.HandlerFunc(s.handleAdminOrderExpire)))
-	mux.Handle("POST /admin/orders/{id}/resend", s.requireAdmin(http.HandlerFunc(s.handleAdminOrderResend)))
+	s.registerAPI(mux)
+	mux.Handle("GET /assets/", http.FileServer(spaAssetsFS()))
+	mux.HandleFunc("GET /{path...}", s.spaIndex)
 	s.mux = mux
 	return s, nil
 }
@@ -126,7 +96,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-func (s *Server) render(w http.ResponseWriter, status int, name string, data any) {
+func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, name string, data any) {
+	if m, ok := data.(map[string]any); ok {
+		if _, exists := m["Lang"]; !exists {
+			m["Lang"] = chooseLang(r)
+		}
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	if err := s.tpl.ExecuteTemplate(w, name, data); err != nil {
@@ -208,7 +183,7 @@ func (s *Server) payClient() *bepusdt.Client {
 
 func (s *Server) siteSettings() SiteSettings {
 	st := SiteSettings{
-		Title:          "自动发卡",
+		Title:          "LiteShop",
 		Subtitle:       "选择商品下单，使用加密货币完成支付，支付成功后自动发放卡密。",
 		Announcement:   "",
 		SEODescription: "",
@@ -252,8 +227,9 @@ func (s *Server) siteSettings() SiteSettings {
 		st.Terms = v
 	}
 	if st.Copyright == "" {
-		st.Copyright = fmt.Sprintf("© %d %s. All rights reserved.", time.Now().Year(), st.Title)
+		st.Copyright = "© {{year}} {{site_title}}. All rights reserved."
 	}
+	st.Copyright = renderSiteVars(st.Copyright, st.Title)
 	return st
 }
 
@@ -261,6 +237,7 @@ func (s *Server) publicData(r *http.Request, title string) map[string]any {
 	st := s.siteSettings()
 	return map[string]any{
 		"Title":          title,
+		"Lang":           chooseLang(r),
 		"SiteTitle":      st.Title,
 		"SiteSubtitle":   st.Subtitle,
 		"Announcement":   st.Announcement,
@@ -269,6 +246,7 @@ func (s *Server) publicData(r *http.Request, title string) map[string]any {
 		"SiteContact":    st.Contact,
 		"FriendLinks":    parseFriendLinks(st.FriendLinks),
 		"SiteCopyright":  st.Copyright,
+		"RepoURL":        "https://github.com/mhan24/liteshop",
 		"Canonical":      strings.TrimRight(s.paymentConfig().PublicBaseURL, "/") + r.URL.Path,
 		"Robots":         "index,follow",
 		"NoIndex":        false,
@@ -335,20 +313,41 @@ func parseFriendLinks(raw string) []FooterLink {
 	return out
 }
 
+func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
+	lang := strings.TrimSpace(r.URL.Query().Get("lang"))
+	if lang != "en" && lang != "zh" {
+		lang = "zh"
+	}
+	http.SetCookie(w, &http.Cookie{Name: "lang", Value: lang, Path: "/", MaxAge: 31536000, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	target := "/"
+	if ref := strings.TrimSpace(r.Referer()); ref != "" {
+		if u, err := url.Parse(ref); err == nil && u.Host == r.Host {
+			target = u.RequestURI()
+		}
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
 func (s *Server) handlePrivacy(w http.ResponseWriter, r *http.Request) {
 	st := s.siteSettings()
-	data := s.publicData(r, "隐私政策")
+	data := s.publicData(r, tr(chooseLang(r), "privacy"))
 	data["PageTitle"] = "隐私政策"
 	data["PageContent"] = st.Privacy
-	s.render(w, 200, "public_page", data)
+	s.render(w, r, 200, "public_page", data)
 }
 
 func (s *Server) handleTerms(w http.ResponseWriter, r *http.Request) {
 	st := s.siteSettings()
-	data := s.publicData(r, "服务条款")
+	data := s.publicData(r, tr(chooseLang(r), "terms"))
 	data["PageTitle"] = "服务条款"
 	data["PageContent"] = st.Terms
-	s.render(w, 200, "public_page", data)
+	s.render(w, r, 200, "public_page", data)
+}
+
+func renderSiteVars(text, siteTitle string) string {
+	text = strings.ReplaceAll(text, "{{site_title}}", siteTitle)
+	text = strings.ReplaceAll(text, "{{year}}", fmt.Sprintf("%d", time.Now().Year()))
+	return text
 }
 
 func truncateString(v string, n int) string {
@@ -363,7 +362,11 @@ func truncateString(v string, n int) string {
 func (s *Server) handleAdminSite(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		st := s.siteSettings()
-		s.render(w, 200, "admin_site", map[string]any{
+		rawCopyright, _ := db.GetSetting(s.db, "site_copyright")
+		if strings.TrimSpace(rawCopyright) == "" {
+			rawCopyright = "© {{year}} {{site_title}}. All rights reserved."
+		}
+		s.render(w, r, 200, "admin_site", map[string]any{
 			"Title":              "站点设置",
 			"SiteTitle":          st.Title,
 			"SiteSubtitle":       st.Subtitle,
@@ -372,7 +375,7 @@ func (s *Server) handleAdminSite(w http.ResponseWriter, r *http.Request) {
 			"SEOKeywords":        st.SEOKeywords,
 			"SiteContact":        st.Contact,
 			"FriendLinks":        st.FriendLinks,
-			"SiteCopyright":      st.Copyright,
+			"SiteCopyright":      rawCopyright,
 			"Privacy":            st.Privacy,
 			"Terms":              st.Terms,
 			"TurnstileSiteKey":   s.turnstileSiteKey(),
@@ -402,7 +405,7 @@ func (s *Server) handleAdminSite(w http.ResponseWriter, r *http.Request) {
 		values["turnstile_secret"] = v
 	}
 	if len([]rune(values["site_title"])) > 80 || len([]rune(values["site_subtitle"])) > 160 || len([]rune(values["seo_description"])) > 220 || len([]rune(values["seo_keywords"])) > 220 || len([]rune(values["site_announcement"])) > 4000 || len([]rune(values["site_contact"])) > 1000 || len([]rune(values["site_friend_links"])) > 3000 || len([]rune(values["site_copyright"])) > 200 || len([]rune(values["privacy_policy"])) > 12000 || len([]rune(values["terms_of_service"])) > 12000 || len([]rune(values["turnstile_site_key"])) > 128 || len([]rune(values["turnstile_secret"])) > 128 {
-		s.render(w, 400, "admin_site", map[string]any{"Title": "站点设置", "SiteTitle": values["site_title"], "SiteSubtitle": values["site_subtitle"], "Announcement": values["site_announcement"], "SEODescription": values["seo_description"], "SEOKeywords": values["seo_keywords"], "SiteContact": values["site_contact"], "FriendLinks": values["site_friend_links"], "SiteCopyright": values["site_copyright"], "Privacy": values["privacy_policy"], "Terms": values["terms_of_service"], "TurnstileSiteKey": values["turnstile_site_key"], "TurnstileSecretSet": values["turnstile_secret"] != "", "Error": "字段长度超出限制。"})
+		s.render(w, r, 400, "admin_site", map[string]any{"Title": "site", "SiteTitle": values["site_title"], "SiteSubtitle": values["site_subtitle"], "Announcement": values["site_announcement"], "SEODescription": values["seo_description"], "SEOKeywords": values["seo_keywords"], "SiteContact": values["site_contact"], "FriendLinks": values["site_friend_links"], "SiteCopyright": values["site_copyright"], "Privacy": values["privacy_policy"], "Terms": values["terms_of_service"], "TurnstileSiteKey": values["turnstile_site_key"], "TurnstileSecretSet": values["turnstile_secret"] != "", "Error": tr(chooseLang(r), "field_too_long")})
 		return
 	}
 	for key, value := range values {
@@ -431,7 +434,7 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodGet {
 		cfg := s.paymentConfig()
-		s.render(w, 200, "admin_settings", data(cfg, s.fiat(), strings.Join(s.tradeTypes(), ","), r.URL.Query().Get("saved") == "1", ""))
+		s.render(w, r, 200, "admin_settings", data(cfg, s.fiat(), strings.Join(s.tradeTypes(), ","), r.URL.Query().Get("saved") == "1", ""))
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -465,7 +468,7 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 		d["PublicBaseURL"] = r.FormValue("shop_public_base_url")
 		d["NotifyURL"] = r.FormValue("bepusdt_notify_url")
 		d["TimeoutSec"] = r.FormValue("bepusdt_timeout_sec")
-		s.render(w, 400, "admin_settings", d)
+		s.render(w, r, 400, "admin_settings", d)
 		return
 	}
 	set := func(key, value string) bool {
@@ -495,7 +498,7 @@ func (s *Server) handleAdminNotify(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		cfg := s.notifier.CurrentConfig()
 		mailSubject, mailBody, telegramBody := s.notifier.PaidTemplates()
-		s.render(w, 200, "admin_notify", map[string]any{
+		s.render(w, r, 200, "admin_notify", map[string]any{
 			"Title":            "通知设置",
 			"SMTPHost":         cfg.SMTPHost,
 			"SMTPPort":         cfg.SMTPPort,
@@ -626,18 +629,23 @@ func normalizeTradeTypes(v string) (string, error) {
 var turnstileHTTP = &http.Client{Timeout: 10 * time.Second}
 
 func (s *Server) verifyTurnstile(r *http.Request) error {
+	return s.verifyTurnstileToken(strings.TrimSpace(r.FormValue("cf-turnstile-response")), clientIP(r))
+}
+
+func (s *Server) verifyTurnstileToken(token, remoteIP string) error {
 	secret := s.turnstileSecret()
 	if secret == "" {
 		return errors.New("TURNSTILE_SECRET is not configured")
 	}
-	token := strings.TrimSpace(r.FormValue("cf-turnstile-response"))
 	if token == "" {
 		return errors.New("missing cf-turnstile-response")
 	}
 	form := url.Values{}
 	form.Set("secret", secret)
 	form.Set("response", token)
-	form.Set("remoteip", clientIP(r))
+	if remoteIP != "" {
+		form.Set("remoteip", remoteIP)
+	}
 	req, err := http.NewRequest(http.MethodPost, "https://challenges.cloudflare.com/turnstile/v0/siteverify", strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
@@ -729,7 +737,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	st := s.siteSettings()
 	data := s.publicData(r, st.Title)
 	data["Categories"] = groupIndexProducts(products)
-	s.render(w, 200, "public_index", data)
+	s.render(w, r, 200, "public_index", data)
 }
 
 func groupIndexProducts(products []ProductView) []CategoryView {
@@ -752,10 +760,11 @@ func groupIndexProducts(products []ProductView) []CategoryView {
 	}
 	var out []CategoryView
 	if len(pinned) > 0 {
-		out = append(out, CategoryView{Name: "置顶", Products: pinned})
+		out = append(out, CategoryView{Name: "置顶", DefaultKey: "pinned", Products: pinned})
 	}
 	for _, name := range categoryOrder {
 		var items []ProductView
+		isDefault := name == "默认分类"
 		for _, p := range products {
 			if p.Product.IsPinned {
 				continue
@@ -769,7 +778,11 @@ func groupIndexProducts(products []ProductView) []CategoryView {
 			}
 		}
 		if len(items) > 0 {
-			out = append(out, CategoryView{Name: name, Products: items})
+			key := ""
+			if isDefault {
+				key = "default_category"
+			}
+			out = append(out, CategoryView{Name: name, DefaultKey: key, Products: items})
 		}
 	}
 	return out
@@ -799,7 +812,7 @@ func (s *Server) renderProductFormError(w http.ResponseWriter, r *http.Request, 
 	if qty > 0 {
 		data["Qty"] = qty
 	}
-	s.render(w, status, "public_product", data)
+	s.render(w, r, status, "public_product", data)
 }
 
 func (s *Server) handleProduct(w http.ResponseWriter, r *http.Request) {
@@ -813,7 +826,7 @@ func (s *Server) handleProduct(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, 200, "public_product", s.productPageData(r, p, available))
+	s.render(w, r, 200, "public_product", s.productPageData(r, p, available))
 }
 
 func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
@@ -841,15 +854,15 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.verifyTurnstile(r); err != nil {
 		log.Printf("turnstile verify failed: %v", err)
-		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, "人机验证未通过，请完成验证后重试。", http.StatusForbidden)
+		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, tr(chooseLang(r), "turnstile_failed"), http.StatusForbidden)
 		return
 	}
 	if !s.tradeTypeAllowed(tradeType) {
-		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, "请选择有效的收款币种/网络。", 400)
+		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, tr(chooseLang(r), "invalid_trade_type"), 400)
 		return
 	}
 	if !validEmail(contact) || qty > available {
-		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, "请填写有效的邮箱地址（用于接收卡密），并确认购买数量不超过库存。", 400)
+		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, tr(chooseLang(r), "invalid_contact"), 400)
 		return
 	}
 	now := models.Now()
@@ -867,7 +880,7 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:    now,
 	}
 	if err := s.createPendingOrder(&order); err != nil {
-		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, "库存不足，请刷新后重试。", 400)
+		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, tr(chooseLang(r), "out_of_stock"), 400)
 		return
 	}
 	payCfg := s.paymentConfig()
@@ -884,7 +897,7 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		_ = s.failOrder(order.ID)
-		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, "创建支付订单失败："+err.Error(), 502)
+		s.renderProductFormError(w, r, p, available, tradeType, contact, qty, tr(chooseLang(r), "create_payment_failed")+err.Error(), 502)
 		return
 	}
 	_, _ = s.db.Exec(`UPDATE orders SET trade_id = ?, payment_url = ?, updated_at = ? WHERE id = ?`, tradeID, paymentURL, models.Now(), order.ID)
@@ -895,10 +908,10 @@ func (s *Server) handleOrderLookup(w http.ResponseWriter, r *http.Request) {
 	orderNo := strings.TrimSpace(r.URL.Query().Get("order_no"))
 	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
 	if orderNo == "" {
-		data := s.publicData(r, "订单查询")
+		data := s.publicData(r, tr(chooseLang(r), "order_query"))
 		data["Robots"] = "noindex,nofollow"
 		data["NoIndex"] = true
-		s.render(w, 200, "public_order_lookup", data)
+		s.render(w, r, 200, "public_order_lookup", data)
 		return
 	}
 	target := "/order/" + url.PathEscape(orderNo)
@@ -916,18 +929,18 @@ func (s *Server) handleOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
-	data := s.publicData(r, "订单查询")
+	data := s.publicData(r, tr(chooseLang(r), "order_query"))
 	data["Robots"] = "noindex,nofollow"
 	data["NoIndex"] = true
 	data["OrderNo"] = orderNo
 	if contact == "" {
 		data["NeedContact"] = true
-		s.render(w, 200, "public_order", data)
+		s.render(w, r, 200, "public_order", data)
 		return
 	}
 	if contact != order.BuyerContact {
-		data["Error"] = "联系方式与订单不匹配。"
-		s.render(w, 403, "public_order", data)
+		data["Error"] = tr(chooseLang(r), "contact_mismatch")
+		s.render(w, r, 403, "public_order", data)
 		return
 	}
 	data["Order"] = order
@@ -935,7 +948,7 @@ func (s *Server) handleOrder(w http.ResponseWriter, r *http.Request) {
 		cards, _ := s.getOrderCards(order.ID)
 		data["Cards"] = cards
 	}
-	s.render(w, 200, "public_order", data)
+	s.render(w, r, 200, "public_order", data)
 }
 
 func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
@@ -1159,8 +1172,12 @@ func (s *Server) expireOrder(orderID int64) error {
 }
 
 func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	if !db.HasAdmin(s.db) {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
 	if r.Method == http.MethodGet {
-		s.render(w, 200, "admin_login", map[string]any{"Title": "后台登录"})
+		s.render(w, r, 200, "admin_login", map[string]any{"Title": "后台登录"})
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -1172,7 +1189,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	var hash string
 	err := s.db.QueryRow(`SELECT password_hash FROM admins WHERE id = 1 AND username = ?`, username).Scan(&hash)
 	if err != nil || !models.CheckPassword(password, hash) {
-		s.render(w, 403, "admin_login", map[string]any{"Title": "后台登录", "Error": "用户名或密码错误。"})
+		s.render(w, r, 403, "admin_login", map[string]any{"Title": "admin_login", "Error": tr(chooseLang(r), "login_error")})
 		return
 	}
 	id := models.RandomToken(24)
@@ -1183,11 +1200,168 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
+func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
+	if db.HasAdmin(s.db) {
+		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+		return
+	}
+	if r.Method == http.MethodGet {
+		scheme := "https"
+		if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") == "" {
+			scheme = "http"
+		}
+		suggestedBase := scheme + "://" + r.Host
+		s.render(w, r, 200, "admin_setup", map[string]any{"Title": "初始化设置", "SiteTitle": "LiteShop", "SuggestedBaseURL": suggestedBase})
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", 400)
+		return
+	}
+	username := strings.TrimSpace(r.FormValue("admin_username"))
+	if username == "" {
+		username = "admin"
+	}
+	password := r.FormValue("admin_password")
+	confirm := r.FormValue("admin_confirm")
+	if len(password) < 8 {
+		s.render(w, r, 400, "admin_setup", map[string]any{"Title": "setup", "Error": tr(chooseLang(r), "password_too_short"), "SiteTitle": strings.TrimSpace(r.FormValue("site_title")), "AdminUsername": username})
+		return
+	}
+	if password != confirm {
+		s.render(w, r, 400, "admin_setup", map[string]any{"Title": "setup", "Error": tr(chooseLang(r), "password_mismatch"), "SiteTitle": strings.TrimSpace(r.FormValue("site_title")), "AdminUsername": username})
+		return
+	}
+	siteTitle := strings.TrimSpace(r.FormValue("site_title"))
+	if siteTitle == "" {
+		siteTitle = "LiteShop"
+	}
+	if err := db.SeedAdmin(s.db, username, password); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	settings := map[string]string{
+		"site_title":          siteTitle,
+		"site_copyright":      "© {{year}} {{site_title}}. All rights reserved.",
+		"bepusdt_fiat":        strings.TrimSpace(r.FormValue("bepusdt_fiat")),
+		"bepusdt_timeout_sec": "1200",
+	}
+	if v := strings.TrimSpace(r.FormValue("shop_public_base_url")); v != "" {
+		settings["shop_public_base_url"] = v
+	}
+	if v := strings.TrimSpace(r.FormValue("bepusdt_base_url")); v != "" {
+		settings["bepusdt_base_url"] = v
+	}
+	if v := strings.TrimSpace(r.FormValue("bepusdt_api_token")); v != "" {
+		settings["bepusdt_api_token"] = v
+	}
+	if v := strings.TrimSpace(r.FormValue("bepusdt_trade_types")); v != "" {
+		settings["bepusdt_trade_types"] = v
+	}
+	if v := strings.TrimSpace(r.FormValue("turnstile_site_key")); v != "" {
+		settings["turnstile_site_key"] = v
+	}
+	if v := strings.TrimSpace(r.FormValue("turnstile_secret")); v != "" {
+		settings["turnstile_secret"] = v
+	}
+	if settings["bepusdt_fiat"] == "" {
+		settings["bepusdt_fiat"] = "CNY"
+	}
+	for k, v := range settings {
+		if err := db.SetSetting(s.db, k, v); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+	}
+	http.Redirect(w, r, "/admin/login?setup=done", http.StatusSeeOther)
+}
+
+func (s *Server) handleAdminSystemBackup(w http.ResponseWriter, r *http.Request) {
+	settings, err := db.AllSettings(s.db)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	payload := struct {
+		App        string            `json:"app"`
+		ExportedAt int64             `json:"exported_at"`
+		Settings   map[string]string `json:"settings"`
+	}{App: "liteshop", ExportedAt: models.Now(), Settings: settings}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=liteshop-settings.json")
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func (s *Server) handleAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		http.Error(w, "bad upload", 400)
+		return
+	}
+	file, _, err := r.FormFile("backup_file")
+	if err != nil {
+		http.Redirect(w, r, "/admin/system?restore=0", http.StatusSeeOther)
+		return
+	}
+	defer file.Close()
+	var payload struct {
+		Settings map[string]string `json:"settings"`
+	}
+	if err := json.NewDecoder(io.LimitReader(file, 8<<20)).Decode(&payload); err != nil {
+		http.Redirect(w, r, "/admin/system?restore=0", http.StatusSeeOther)
+		return
+	}
+	if len(payload.Settings) == 0 {
+		http.Redirect(w, r, "/admin/system?restore=0", http.StatusSeeOther)
+		return
+	}
+	keyPattern := regexp.MustCompile(`^[a-z0-9_]+$`)
+	count := 0
+	for k, v := range payload.Settings {
+		if !keyPattern.MatchString(k) || len(k) > 80 || len(v) > 20000 {
+			continue
+		}
+		if err := db.SetSetting(s.db, k, v); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		count++
+	}
+	http.Redirect(w, r, fmt.Sprintf("/admin/system?restore=1&count=%d", count), http.StatusSeeOther)
+}
+
+func (s *Server) handleAdminSystem(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, 200, "admin_system", map[string]any{
+		"Title":        "系统",
+		"Restore":      r.URL.Query().Get("restore"),
+		"RestoreCount": r.URL.Query().Get("count"),
+	})
+}
+
+func (s *Server) handleAdminSystemReset(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", 400)
+		return
+	}
+	if strings.TrimSpace(r.FormValue("confirm")) != "DELETE" {
+		http.Redirect(w, r, "/admin/system?reset=0", http.StatusSeeOther)
+		return
+	}
+	if err := db.ResetAllTables(s.db); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	s.sessMu.Lock()
+	s.sessions = make(map[string]time.Time)
+	s.sessMu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: "", Path: "/", MaxAge: -1})
+	http.Redirect(w, r, "/setup", http.StatusSeeOther)
+}
+
 func (s *Server) handleAdminAccount(w http.ResponseWriter, r *http.Request) {
 	var currentUsername string
 	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = 1`).Scan(&currentUsername)
 	if r.Method == http.MethodGet {
-		s.render(w, 200, "admin_account", map[string]any{"Title": "账号设置", "Username": currentUsername, "Saved": r.URL.Query().Get("saved") == "1"})
+		s.render(w, r, 200, "admin_account", map[string]any{"Title": "账号设置", "Username": currentUsername, "Saved": r.URL.Query().Get("saved") == "1"})
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -1199,24 +1373,24 @@ func (s *Server) handleAdminAccount(w http.ResponseWriter, r *http.Request) {
 	newPassword := r.FormValue("new_password")
 	confirmPassword := r.FormValue("confirm_password")
 	renderErr := func(msg string) {
-		s.render(w, 400, "admin_account", map[string]any{"Title": "账号设置", "Username": username, "Error": msg})
+		s.render(w, r, 400, "admin_account", map[string]any{"Title": "account", "Username": username, "Error": msg})
 	}
 	var hash string
 	if err := s.db.QueryRow(`SELECT password_hash FROM admins WHERE id = 1`).Scan(&hash); err != nil || !models.CheckPassword(currentPassword, hash) {
-		renderErr("当前密码错误。")
+		renderErr(tr(chooseLang(r), "current_password_wrong"))
 		return
 	}
 	if username == "" {
-		renderErr("用户名不能为空。")
+		renderErr(tr(chooseLang(r), "username_empty"))
 		return
 	}
 	if newPassword != "" {
 		if len(newPassword) < 8 {
-			renderErr("新密码长度至少 8 位。")
+			renderErr(tr(chooseLang(r), "password_too_short"))
 			return
 		}
 		if newPassword != confirmPassword {
-			renderErr("两次输入的新密码不一致。")
+			renderErr(tr(chooseLang(r), "password_mismatch"))
 			return
 		}
 		hash = models.HashPassword(newPassword)
@@ -1246,6 +1420,25 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) requireAdminAPI(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.isAdmin(r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) startSession(w http.ResponseWriter) {
+	id := models.RandomToken(24)
+	s.sessMu.Lock()
+	s.sessions[id] = time.Now().Add(12 * time.Hour)
+	s.sessMu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
 }
 
 func (s *Server) sessionID(r *http.Request) (string, bool) {
@@ -1315,7 +1508,7 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'available'`).Scan(&availableCards)
 	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status = 'pending'`).Scan(&pendingOrders)
 	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status = 'paid'`).Scan(&paidOrders)
-	s.render(w, 200, "admin_dashboard", map[string]any{"Title": "后台首页", "Products": products, "AvailableCards": availableCards, "PendingOrders": pendingOrders, "PaidOrders": paidOrders})
+	s.render(w, r, 200, "admin_dashboard", map[string]any{"Title": "后台首页", "Products": products, "AvailableCards": availableCards, "PendingOrders": pendingOrders, "PaidOrders": paidOrders})
 }
 
 func (s *Server) handleAdminProducts(w http.ResponseWriter, r *http.Request) {
@@ -1324,17 +1517,17 @@ func (s *Server) handleAdminProducts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	s.render(w, 200, "admin_products", map[string]any{"Title": "商品管理", "Products": products})
+	s.render(w, r, 200, "admin_products", map[string]any{"Title": "商品管理", "Products": products})
 }
 
 func (s *Server) handleAdminProductNew(w http.ResponseWriter, r *http.Request) {
-	s.render(w, 200, "admin_product_form", map[string]any{"Title": "新建商品", "Product": models.Product{Status: "active"}})
+	s.render(w, r, 200, "admin_product_form", map[string]any{"Title": tr(chooseLang(r), "new_product"), "Product": models.Product{Status: "active"}})
 }
 
 func (s *Server) handleAdminProductCreate(w http.ResponseWriter, r *http.Request) {
 	p, err := s.productFromForm(r)
 	if err != nil {
-		s.render(w, 400, "admin_product_form", map[string]any{"Title": "新建商品", "Product": p, "Error": err.Error()})
+		s.render(w, r, 400, "admin_product_form", map[string]any{"Title": tr(chooseLang(r), "new_product"), "Product": p, "Error": err.Error()})
 		return
 	}
 	now := models.Now()
@@ -1357,7 +1550,7 @@ func (s *Server) handleAdminProductEdit(w http.ResponseWriter, r *http.Request) 
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, 200, "admin_product_form", map[string]any{"Title": "编辑商品", "Product": p})
+	s.render(w, r, 200, "admin_product_form", map[string]any{"Title": tr(chooseLang(r), "edit_product"), "Product": p})
 }
 
 func (s *Server) handleAdminProductUpdate(w http.ResponseWriter, r *http.Request) {
@@ -1369,7 +1562,7 @@ func (s *Server) handleAdminProductUpdate(w http.ResponseWriter, r *http.Request
 	p, err := s.productFromForm(r)
 	if err != nil {
 		p.ID = id
-		s.render(w, 400, "admin_product_form", map[string]any{"Title": "编辑商品", "Product": p, "Error": err.Error()})
+		s.render(w, r, 400, "admin_product_form", map[string]any{"Title": tr(chooseLang(r), "edit_product"), "Product": p, "Error": err.Error()})
 		return
 	}
 	_, err = s.db.Exec(`UPDATE products SET name = ?, description = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, updated_at = ? WHERE id = ?`, p.Name, p.Description, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, models.Now(), id)
@@ -1386,11 +1579,11 @@ func (s *Server) productFromForm(r *http.Request) (models.Product, error) {
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
 	if name == "" {
-		return models.Product{}, errors.New("商品名称不能为空")
+		return models.Product{}, errors.New(tr(chooseLang(r), "product_name_empty"))
 	}
 	price, err := models.CentsFromYuan(strings.TrimSpace(r.FormValue("price")))
 	if err != nil || price <= 0 {
-		return models.Product{}, errors.New("价格必须是大于 0 的数字")
+		return models.Product{}, errors.New(tr(chooseLang(r), "price_invalid"))
 	}
 	status := r.FormValue("status")
 	if status != "active" {
@@ -1431,7 +1624,7 @@ func (s *Server) handleAdminCards(w http.ResponseWriter, r *http.Request) {
 		}
 		cards = append(cards, c)
 	}
-	s.render(w, 200, "admin_cards", map[string]any{"Title": "卡密管理", "Product": p, "Available": available, "Cards": cards})
+	s.render(w, r, 200, "admin_cards", map[string]any{"Title": "卡密管理", "Product": p, "Available": available, "Cards": cards})
 }
 
 func (s *Server) handleAdminCardsImport(w http.ResponseWriter, r *http.Request) {
@@ -1506,7 +1699,7 @@ func (s *Server) handleAdminOrders(w http.ResponseWriter, r *http.Request) {
 		}
 		orders = append(orders, o)
 	}
-	s.render(w, 200, "admin_orders", map[string]any{"Title": "订单管理", "Orders": orders})
+	s.render(w, r, 200, "admin_orders", map[string]any{"Title": "订单管理", "Orders": orders})
 }
 
 func (s *Server) handleAdminOrder(w http.ResponseWriter, r *http.Request) {
@@ -1521,7 +1714,7 @@ func (s *Server) handleAdminOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cards, _ := s.getOrderCards(o.ID)
-	s.render(w, 200, "admin_order", map[string]any{"Title": "订单详情", "Order": o, "Cards": cards})
+	s.render(w, r, 200, "admin_order", map[string]any{"Title": "订单详情", "Order": o, "Cards": cards})
 }
 
 func (s *Server) handleAdminOrderExpire(w http.ResponseWriter, r *http.Request) {

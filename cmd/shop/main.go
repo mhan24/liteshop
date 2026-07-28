@@ -8,7 +8,6 @@ import (
 
 	"shop/internal/config"
 	"shop/internal/db"
-	"shop/internal/models"
 	"shop/internal/web"
 )
 
@@ -23,13 +22,12 @@ func main() {
 	}
 	defer database.Close()
 
-	adminPassword := cfg.AdminPassword
-	if adminPassword == "" && !db.HasAdmin(database) {
-		adminPassword = models.RandomToken(8)
-		log.Printf("generated one-time admin password (change it in backend): %s", adminPassword)
-	}
-	if err := db.SeedAdmin(database, cfg.AdminUsername, adminPassword); err != nil {
-		log.Fatal(err)
+	if cfg.AdminPassword != "" {
+		if err := db.SeedAdmin(database, cfg.AdminUsername, cfg.AdminPassword); err != nil {
+			log.Fatal(err)
+		}
+	} else if !db.HasAdmin(database) {
+		log.Printf("no admin configured; open /setup or /admin to initialize")
 	}
 
 	handler, err := web.NewHandler(cfg, database)

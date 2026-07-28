@@ -3,24 +3,23 @@
 {{template "admin_nav" .}}
 <main class="container narrow">
   <article class="card">
-    <h1>账号设置</h1>
-    <p class="muted">修改用户名或密码需要验证当前密码。新密码留空则只修改用户名。</p>
-    {{if .Saved}}<div class="ok">已保存。</div>{{end}}
+    <h1>{{t .Lang "account_settings"}}</h1>
+    {{if .Saved}}<div class="ok">{{t .Lang "save"}}</div>{{end}}
     {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
     <form method="post" action="/admin/account" class="form">
-      <label>用户名
+      <label>{{t .Lang "username"}}
         <input type="text" name="username" value="{{.Username}}" required>
       </label>
-      <label>当前密码
+      <label>{{t .Lang "current_password"}}
         <input type="password" name="current_password" required>
       </label>
-      <label>新密码（留空不修改）
+      <label>{{t .Lang "new_password"}}
         <input type="password" name="new_password" minlength="8">
       </label>
-      <label>确认新密码
+      <label>{{t .Lang "confirm_new_password"}}
         <input type="password" name="confirm_password" minlength="8">
       </label>
-      <button class="btn" type="submit">保存</button>
+      <button class="btn" type="submit">{{t .Lang "save"}}</button>
     </form>
   </article>
 </main>

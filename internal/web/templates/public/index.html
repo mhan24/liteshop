@@ -3,36 +3,35 @@
 {{template "public_nav" .}}
 <main class="container">
   <header class="hero">
-    <h1>{{if .SiteTitle}}{{.SiteTitle}}{{else}}自动发卡{{end}}</h1>
+    <h1>{{if .SiteTitle}}{{.SiteTitle}}{{else}}LiteShop{{end}}</h1>
     <p>{{if .SiteSubtitle}}{{.SiteSubtitle}}{{else}}选择商品下单，支付成功后自动发放卡密。{{end}}</p>
   </header>
   {{if .Announcement}}
   <section class="card" style="margin-top:16px">
-    <h2>公告</h2>
-    <p class="desc">{{.Announcement}}</p>
+    <h2>{{.Announcement}}</h2>
   </section>
   {{end}}
   {{range .Categories}}
-  <h2 class="category-title">{{.Name}}</h2>
+  <h2 class="category-title">{{if .DefaultKey}}{{t $.Lang .DefaultKey}}{{else}}{{.Name}}{{end}}</h2>
   <section class="grid">
     {{range .Products}}
     <article class="card">
       <h2>{{.Product.Name}}</h2>
       <p class="desc">{{.Product.Description}}</p>
       <p class="price">{{money .Product.PriceCents}} CNY</p>
-      <p class="stock">库存 {{.Available}}</p>
+      <p class="stock">{{t $.Lang "stock"}} {{.Available}}</p>
       {{if gt .Available 0}}
-      <a class="btn" href="/p/{{.Product.ID}}">立即购买</a>
+      <a class="btn" href="/p/{{.Product.ID}}">{{t $.Lang "buy_now"}}</a>
       {{else}}
-      <span class="btn disabled">已售罄</span>
+      <span class="btn disabled">{{t $.Lang "sold_out"}}</span>
       {{end}}
     </article>
     {{else}}
-    <p>暂无上架商品。</p>
+    <p>{{t $.Lang "no_products"}}</p>
     {{end}}
   </section>
   {{else}}
-  <p>暂无上架商品。</p>
+  <p>{{t $.Lang "no_products"}}</p>
   {{end}}
 </main>
 {{template "public_footer" .}}

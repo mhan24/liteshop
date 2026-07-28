@@ -6,14 +6,14 @@
     <h1>{{.Title}}</h1>
     {{if .Error}}<div class="alert">{{.Error}}</div>{{end}}
     <form method="post" action="{{if .Product.ID}}/admin/products/{{.Product.ID}}/edit{{else}}/admin/products{{end}}" class="form">
-      <label>商品名称<input type="text" name="name" value="{{.Product.Name}}" required></label>
-      <label>价格（CNY）<input type="number" step="0.01" min="0.01" name="price" value="{{money .Product.PriceCents}}" required></label>
-      <label>描述<textarea name="description" rows="4">{{.Product.Description}}</textarea></label>
-      <label>分类（留空归入默认分类）<input type="text" name="category" value="{{.Product.Category}}" maxlength="40"></label>
-      <label>排序值（越小越靠前）<input type="number" name="sort_order" value="{{.Product.SortOrder}}" min="0" max="999999"></label>
-      <label class="check"><input type="checkbox" name="is_pinned" value="1" {{if .Product.IsPinned}}checked{{end}}> 置顶显示</label>
-      <label class="check"><input type="checkbox" name="status" value="active" {{if eq .Product.Status "active"}}checked{{end}}> 上架销售</label>
-      <button class="btn" type="submit">保存</button>
+      <label>{{t .Lang "product_name"}}<input type="text" name="name" value="{{.Product.Name}}" required></label>
+      <label>{{t .Lang "price_cny"}}<input type="number" step="0.01" min="0.01" name="price" value="{{money .Product.PriceCents}}" required></label>
+      <label>{{t .Lang "description"}}<textarea name="description" rows="4">{{.Product.Description}}</textarea></label>
+      <label>{{t .Lang "category_optional"}}<input type="text" name="category" value="{{.Product.Category}}" maxlength="40"></label>
+      <label>{{t .Lang "sort_value"}}<input type="number" name="sort_order" value="{{.Product.SortOrder}}" min="0" max="999999"></label>
+      <label class="check"><input type="checkbox" name="is_pinned" value="1" {{if .Product.IsPinned}}checked{{end}}> {{t .Lang "pinned_display"}}</label>
+      <label class="check"><input type="checkbox" name="status" value="active" {{if eq .Product.Status "active"}}checked{{end}}> {{t .Lang "on_sale"}}</label>
+      <button class="btn" type="submit">{{t .Lang "save"}}</button>
     </form>
   </article>
 </main>

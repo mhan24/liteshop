@@ -126,6 +126,13 @@ func (n *Notifier) CurrentConfig() config.Config {
 	return cfg
 }
 
+func (n *Notifier) siteTitle() string {
+	if v, err := db.GetSetting(n.db, "site_title"); err == nil && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	return "LiteShop"
+}
+
 func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
 	cfg := n.CurrentConfig()
 	subjectTpl, mailBodyTpl, telegramBodyTpl := n.PaidTemplates()
@@ -148,6 +155,7 @@ func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
 		"paid_at":      models.FormatBeijing(paidAt),
 		"cards":        strings.Join(cardLines, "\n"),
 		"order_url":    strings.TrimRight(cfg.PublicBaseURL, "/") + "/order/" + order.OrderNo,
+		"site_title":   n.siteTitle(),
 	}
 	subject := renderTemplate(subjectTpl, data)
 	mailBody := renderTemplate(mailBodyTpl, data)
