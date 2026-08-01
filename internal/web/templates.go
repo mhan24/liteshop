@@ -12,19 +12,19 @@ import (
 	"shop/internal/models"
 )
 
-//go:embed templates static spa
+//go:embed templates static admin-ui
 var assets embed.FS
 
-func spaAssetsFS() http.FileSystem {
-	sub, err := fs.Sub(assets, "spa")
+func adminAssetsFS() http.FileSystem {
+	sub, err := fs.Sub(assets, "admin-ui")
 	if err != nil {
 		return http.FS(assets)
 	}
 	return http.FS(sub)
 }
 
-func (s *Server) spaIndex(w http.ResponseWriter, r *http.Request) {
-	data, err := assets.ReadFile("spa/index.html")
+func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
+	data, err := assets.ReadFile("admin-ui/index.html")
 	if err != nil {
 		http.NotFound(w, r)
 		return

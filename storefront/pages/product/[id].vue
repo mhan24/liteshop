@@ -1,0 +1,115 @@
+<template>
+  <div class="max-w-xl bg-white rounded-xl border p-6 shadow-sm">
+    <NuxtLink to="/" class="text-sm text-gray-500">← 返回商品列表</NuxtLink>
+    <div v-if="pending" class="py-10 text-gray-400">加载中...</div>
+    <div v-else-if="product">
+      <h1 class="text-2xl font-bold mt-3">{{ product.name }}</h1>
+      <p class="text-gray-500 mt-2 whitespace-pre-wrap">{{ product.description }}</p>
+      <p class="text-2xl font-bold mt-4">¥{{ money(product.price_cents) }}</p>
+      <p class="text-gray-500 text-sm">当前库存 {{ available }}</p>
+
+      <form class="mt-4 grid gap-3" @submit.prevent="submit">
+        <div v-if="tradeTypes.length > 1">
+          <label class="text-sm font-semibold">收款币种/网络</label>
+          <select v-model="form.trade_type" class="w-full border rounded px-3 py-2">
+            <option v-for="t in tradeTypes" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-sm font-semibold">购买数量</label>
+          <input type="number" v-model.number="form.qty" :min="1" :max="available" class="w-full border rounded px-3 py-2" />
+        </div>
+        <div>
+          <label class="text-sm font-semibold">邮箱（用于查询订单和接收卡密）</label>
+          <input type="email" v-model="form.contact" required class="w-full border rounded px-3 py-2" />
+        </div>
+        <div ref="turnstile" class="cf-turnstile"></div>
+        <button type="submit" :disabled="loading" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 font-semibold disabled:opacity-60">
+          {{ loading ? '处理中...' : '去支付' }}
+        </button>
+      </form>
+    </div>
+    <div v-else class="py-10 text-gray-500">商品不存在或已下架。</div>
+  </div>
+</template>
+
+<script setup lang="ts">
+const route = useRoute()
+const api = useApi()
+const { data, pending } = await useAsyncData(() => api.get('/products/' + route.params.id).catch(() => null))
+const product = computed(() => (data.value as any)?.product)
+const available = computed(() => (data.value as any)?.available || 0)
+const tradeTypes = computed(() => (data.value as any)?.trade_types || [])
+const turnstileSiteKey = computed(() => (data.value as any)?.turnstile_site_key || '')
+const form = reactive({ trade_type: '', qty: 1, contact: '' })
+const loading = ref(false)
+
+watchEffect(() => { if (!form.trade_type && tradeTypes.value.length) form.trade_type = tradeTypes.value[0] })
+
+function loadTurnstile() {
+  const sitekey = turnstileSiteKey.value
+  if (!sitekey) return
+  const id = 'turnstile-api'
+  if (!document.getElementById(id)) {
+    const s = document.createElement('script')
+    s.id = id
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
+    s.async = true
+    s.defer = true
+    document.head.appendChild(s)
+  }
+  nextTick(() => setTimeout(() => {
+    const el = document.querySelector('.cf-turnstile') as HTMLElement | null
+    if (window.turnstile && el) {
+      window.turnstile.render(el, { sitekey, action: 'turnstile-spin-v2' })
+    }
+  }, 300))
+}
+onMounted(loadTurnstile)
+
+function money(c?: number) {
+  return ((c || 0) / 100).toFixed(2)
+}
+async function submit() {
+  loading.value = true
+  try {
+    const tokenInput = document.querySelector('[name="cf-turnstile-response"]') as HTMLInputElement | null
+    const res: any = await api.post('/orders', {
+      product_id: Number(route.params.id),
+      qty: form.qty,
+      contact: form.contact,
+      trade_type: form.trade_type,
+      'cf-turnstile-response': tokenInput?.value || '',
+    })
+    if (res.payment_url) window.location.href = res.payment_url
+  } catch (e: any) {
+    alert(e?.data?.error || e?.message || '创建订单失败')
+  } finally {
+    loading.value = false
+  }
+}
+useHead(() => ({
+  title: product.value?.name || '商品',
+  meta: [{ name: 'description', content: (product.value?.description || '').slice(0, 160) }],
+  script: product.value
+    ? [
+        {
+          type: 'application/ld+json',
+          children: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'Product',
+            name: product.value.name,
+            description: product.value.description,
+            sku: String(product.value.id),
+            offers: {
+              '@type': 'Offer',
+              price: ((product.value.price_cents || 0) / 100).toFixed(2),
+              priceCurrency: 'CNY',
+              availability: available.value > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+            },
+          }),
+        },
+      ]
+    : [],
+}))
+</script>

@@ -36,14 +36,14 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/site", s.apiSite)
 	mux.HandleFunc("GET /api/v1/products", s.apiProducts)
 	mux.HandleFunc("GET /api/v1/products/{id}", s.apiProduct)
-	mux.HandleFunc("POST /api/v1/orders", s.apiCreateOrder)
+	mux.HandleFunc("POST /api/v1/orders", s.rateLimitMiddleware(s.apiCreateOrder, 20))
 	mux.HandleFunc("GET /api/v1/orders", s.apiOrdersByContact)
 	mux.HandleFunc("GET /api/v1/orders/{orderNo}", s.apiOrder)
 	mux.HandleFunc("GET /api/v1/pages/{slug}", s.apiPage)
 	mux.HandleFunc("POST /api/v1/lang", s.apiSetLang)
 
 	mux.HandleFunc("GET /api/v1/admin/session", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSession)).ServeHTTP)
-	mux.HandleFunc("POST /api/v1/admin/login", s.apiAdminLogin)
+	mux.HandleFunc("POST /api/v1/admin/login", s.rateLimitMiddleware(s.apiAdminLogin, 10))
 	mux.Handle("POST /api/v1/admin/logout", s.requireAdminAPI(http.HandlerFunc(s.apiAdminLogout)))
 	mux.Handle("GET /api/v1/admin/dashboard", s.requireAdminAPI(http.HandlerFunc(s.apiDashboard)))
 
@@ -54,6 +54,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/admin/products/{id}/cards", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCards)))
 	mux.Handle("POST /api/v1/admin/products/{id}/cards", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCardsImport)))
 	mux.Handle("POST /api/v1/admin/cards/{id}/delete", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCardDelete)))
+	mux.Handle("GET /api/v1/admin/orders/export", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrdersExport)))
 	mux.Handle("GET /api/v1/admin/orders", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrders)))
 	mux.Handle("GET /api/v1/admin/orders/{id}", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrder)))
 	mux.Handle("POST /api/v1/admin/orders/{id}/expire", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderExpire)))
@@ -583,6 +584,32 @@ func (s *Server) apiAdminCardDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _ = s.db.Exec(`DELETE FROM cards WHERE id = ? AND status = 'available'`, id)
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminOrdersExport(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders ORDER BY id DESC LIMIT 2000`)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
+	w.Write([]byte("\xEF\xBB\xBF"))
+	w.Write([]byte("ID,订单号,商品,数量,金额,法币,收款类型,联系方式,状态,创建时间,支付时间\n"))
+	for rows.Next() {
+		var o models.Order
+		if err := rows.Scan(&o.ID, &o.OrderNo, &o.ProductID, &o.ProductName, &o.Qty, &o.AmountCents, &o.Fiat, &o.TradeType, &o.BuyerContact, &o.Status, &o.TradeID, &o.PaymentURL, &o.BlockTransactionID, &o.CreatedAt, &o.UpdatedAt, &o.PaidAt); err != nil {
+			continue
+		}
+		fmt.Fprintf(w, "%d,%s,%s,%d,%s,%s,%s,%s,%s,%s,%s\n",
+			o.ID, o.OrderNo, o.ProductName, o.Qty,
+			fmt.Sprintf("%.2f", float64(o.AmountCents)/100), o.Fiat, o.TradeType,
+			o.BuyerContact, o.Status,
+			time.Unix(o.CreatedAt, 0).In(models.BeijingLocation).Format("2006-01-02 15:04:05"),
+			map[bool]string{true: time.Unix(o.PaidAt, 0).In(models.BeijingLocation).Format("2006-01-02 15:04:05"), false: "-"}[o.PaidAt > 0],
+		)
+	}
 }
 
 func (s *Server) apiAdminOrders(w http.ResponseWriter, r *http.Request) {

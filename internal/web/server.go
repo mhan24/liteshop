@@ -84,15 +84,24 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		sessions: make(map[string]time.Time),
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
 	mux.HandleFunc("POST /notify/bepusdt", s.handleBepusdtNotify)
 	s.registerAPI(mux)
-	mux.Handle("GET /assets/", http.FileServer(spaAssetsFS()))
-	mux.HandleFunc("GET /{path...}", s.spaIndex)
+	mux.Handle("GET /admin/assets/", http.StripPrefix("/admin", http.FileServer(adminAssetsFS())))
+	mux.HandleFunc("GET /admin", s.adminIndex)
+	mux.HandleFunc("GET /admin/{path...}", s.adminIndex)
 	s.mux = mux
 	return s, nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 	s.mux.ServeHTTP(w, r)
 }
 
