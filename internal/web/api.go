@@ -1,7 +1,9 @@
 package web
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,6 +33,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func (s *Server) registerAPI(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/v1/maintenance/unlock", s.apiMaintenanceUnlock)
 	mux.HandleFunc("GET /api/v1/setup", s.apiSetupStatus)
 	mux.HandleFunc("POST /api/v1/setup", s.apiSetup)
 	mux.HandleFunc("GET /api/v1/site", s.apiSite)
@@ -39,6 +42,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/orders", s.rateLimitMiddleware(s.apiCreateOrder, 20))
 	mux.HandleFunc("GET /api/v1/orders", s.apiOrdersByContact)
 	mux.HandleFunc("GET /api/v1/orders/{orderNo}", s.apiOrder)
+	mux.HandleFunc("POST /api/v1/orders/{orderNo}/cancel", s.apiCancelOrder)
 	mux.HandleFunc("GET /api/v1/pages/{slug}", s.apiPage)
 	mux.HandleFunc("POST /api/v1/lang", s.apiSetLang)
 
@@ -123,11 +127,26 @@ func cardJSON(c models.Card) map[string]any {
 	}
 }
 
+func parseSiteLinks(raw string) []map[string]string {
+	var arr []map[string]string
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		return []map[string]string{}
+	}
+	return arr
+}
+
 func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 	st := s.siteSettings()
 	rawCopyright, _ := db.GetSetting(s.db, "site_copyright")
 	if strings.TrimSpace(rawCopyright) == "" {
 		rawCopyright = "© {{year}} {{site_title}}. All rights reserved."
+	}
+	maintenanceEnabled, _ := db.GetSetting(s.db, "maintenance_enabled")
+	maintenanceMessage, _ := db.GetSetting(s.db, "maintenance_message")
+	maintenancePassword, _ := db.GetSetting(s.db, "maintenance_password")
+	enabled := strings.TrimSpace(maintenanceEnabled) == "1"
+	if enabled && maintenancePassword != "" && s.maintenanceUnlocked(r, maintenancePassword) {
+		enabled = false
 	}
 	writeJSON(w, 200, map[string]any{
 		"title":           st.Title,
@@ -135,11 +154,49 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"announcement":    st.Announcement,
 		"seo_description": st.SEODescription,
 		"seo_keywords":    st.SEOKeywords,
-		"contact":         st.Contact,
-		"friend_links":    parseFriendLinks(st.FriendLinks),
+		"links":           parseSiteLinks(mustGetSetting(s, "site_links")),
 		"copyright":       renderSiteVars(rawCopyright, st.Title),
 		"lang":            chooseLang(r),
+		"maintenance": map[string]any{
+			"enabled": enabled,
+			"message": maintenanceMessage,
+		},
 	})
+}
+
+func (s *Server) maintenanceUnlocked(r *http.Request, password string) bool {
+	c, err := r.Cookie("maint_unlock")
+	if err != nil {
+		return false
+	}
+	return c.Value == maintToken(password)
+}
+
+func maintToken(password string) string {
+	sum := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	maintenanceEnabled, _ := db.GetSetting(s.db, "maintenance_enabled")
+	if strings.TrimSpace(maintenanceEnabled) != "1" {
+		writeJSON(w, 200, map[string]any{"ok": true})
+		return
+	}
+	maintenancePassword, _ := db.GetSetting(s.db, "maintenance_password")
+	if maintenancePassword == "" || strings.TrimSpace(input.Password) != strings.TrimSpace(maintenancePassword) {
+		writeError(w, 403, "密码错误")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: "maint_unlock", Value: maintToken(maintenancePassword), Path: "/", MaxAge: 43200, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func (s *Server) apiProducts(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +362,30 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 		out = append(out, item)
 	}
 	writeJSON(w, 200, map[string]any{"orders": out})
+}
+
+func (s *Server) apiCancelOrder(w http.ResponseWriter, r *http.Request) {
+	orderNo := r.PathValue("orderNo")
+	o, err := s.getOrderByNo(orderNo)
+	if err != nil {
+		writeError(w, 404, "订单不存在")
+		return
+	}
+	if o.Status != "pending" {
+		writeError(w, 400, "当前状态不可取消")
+		return
+	}
+	// 同步取消 BEpusdt 交易（失败不阻塞本地取消）
+	if o.TradeID != "" {
+		go func(tradeID string) {
+			_ = s.payClient().CancelTransaction(tradeID)
+		}(o.TradeID)
+	}
+	if err := s.cancelOrder(o.ID); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
@@ -656,6 +737,11 @@ func (s *Server) apiAdminOrderExpire(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
+	if o, err := s.getOrderByID(id); err == nil && o.TradeID != "" {
+		go func(tradeID string) {
+			_ = s.payClient().CancelTransaction(tradeID)
+		}(o.TradeID)
+	}
 	_ = s.expireOrder(id)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -702,7 +788,7 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	setIfPresent("bepusdt_base_url", "bepusdt_base_url")
 	setIfPresent("fiat", "fiat")
-	setIfPresent("trade_types", "trade_types")
+	setIfPresent("bepusdt_trade_types", "trade_types")
 	setIfPresent("bepusdt_timeout_sec", "bepusdt_timeout_sec")
 	setIfPresent("shop_public_base_url", "shop_public_base_url")
 	setIfPresent("bepusdt_notify_url", "bepusdt_notify_url")
@@ -800,7 +886,17 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		"terms_of_service":     st.Terms,
 		"turnstile_site_key":   s.turnstileSiteKey(),
 		"turnstile_secret_set": s.turnstileSecret() != "",
+		"maintenance_enabled":  mustGetSetting(s, "maintenance_enabled"),
+		"maintenance_message":  mustGetSetting(s, "maintenance_message"),
+		"maintenance_password": mustGetSetting(s, "maintenance_password"),
+		"maintenance_pass_set": mustGetSetting(s, "maintenance_password") != "",
+		"site_links":           parseSiteLinks(mustGetSetting(s, "site_links")),
 	})
+}
+
+func mustGetSetting(s *Server, key string) string {
+	v, _ := db.GetSetting(s.db, key)
+	return v
 }
 
 func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
@@ -819,8 +915,38 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 		"seo_description": "seo_description", "seo_keywords": "seo_keywords", "site_contact": "site_contact",
 		"site_friend_links": "site_friend_links", "site_copyright": "site_copyright",
 		"privacy_policy": "privacy_policy", "terms_of_service": "terms_of_service", "turnstile_site_key": "turnstile_site_key",
+		"maintenance_message": "maintenance_message",
 	} {
 		setIfPresent(key, field)
+	}
+	if v, ok := input["site_links"]; ok {
+		if items, ok := v.([]any); ok {
+			clean := []map[string]string{}
+			for _, item := range items {
+				m, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				name := strings.TrimSpace(str(m["name"]))
+				if name == "" {
+					continue
+				}
+				category := "link"
+				if c := strings.TrimSpace(str(m["category"])); c == "contact" || c == "联系方式" {
+					category = "contact"
+				}
+				clean = append(clean, map[string]string{"name": name, "url": strings.TrimSpace(str(m["url"])), "category": category})
+			}
+			if raw, err := json.Marshal(clean); err == nil {
+				_ = db.SetSetting(s.db, "site_links", string(raw))
+			}
+		}
+	}
+	if _, exists := input["maintenance_enabled"]; exists {
+		_ = db.SetSetting(s.db, "maintenance_enabled", strings.TrimSpace(str(input["maintenance_enabled"])))
+	}
+	if v := strings.TrimSpace(str(input["maintenance_password"])); v != "" {
+		_ = db.SetSetting(s.db, "maintenance_password", v)
 	}
 	if v := strings.TrimSpace(str(input["turnstile_secret"])); v != "" {
 		_ = db.SetSetting(s.db, "turnstile_secret", v)

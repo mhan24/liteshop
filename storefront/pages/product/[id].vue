@@ -46,6 +46,8 @@ const loading = ref(false)
 
 watchEffect(() => { if (!form.trade_type && tradeTypes.value.length) form.trade_type = tradeTypes.value[0] })
 
+const turnstileWidget = ref<any>(null)
+
 function loadTurnstile() {
   const sitekey = turnstileSiteKey.value
   if (!sitekey) return
@@ -58,14 +60,31 @@ function loadTurnstile() {
     s.defer = true
     document.head.appendChild(s)
   }
-  nextTick(() => setTimeout(() => {
-    const el = document.querySelector('.cf-turnstile') as HTMLElement | null
-    if (window.turnstile && el) {
-      window.turnstile.render(el, { sitekey, action: 'turnstile-spin-v2' })
+  // 轮询等待 Turnstile API 就绪
+  const poll = () => {
+    if (window.turnstile && document.querySelector('.cf-turnstile')) {
+      if (turnstileWidget.value) {
+        window.turnstile.reset(turnstileWidget.value)
+        return
+      }
+      turnstileWidget.value = window.turnstile.render(document.querySelector('.cf-turnstile') as HTMLElement, {
+        sitekey,
+        action: 'turnstile-spin-v2',
+      })
+    } else {
+      setTimeout(poll, 200)
     }
-  }, 300))
+  }
+  poll()
 }
+
 onMounted(loadTurnstile)
+onBeforeUnmount(() => {
+  if (window.turnstile && turnstileWidget.value) {
+    window.turnstile.remove(turnstileWidget.value)
+    turnstileWidget.value = null
+  }
+})
 
 function money(c?: number) {
   return ((c || 0) / 100).toFixed(2)
@@ -81,7 +100,10 @@ async function submit() {
       trade_type: form.trade_type,
       'cf-turnstile-response': tokenInput?.value || '',
     })
-    if (res.payment_url) window.location.href = res.payment_url
+    if (res.payment_url) {
+      window.open(res.payment_url, '_blank', 'noopener')
+      window.location.href = '/order/' + res.order_no + '?contact=' + encodeURIComponent(form.contact)
+    }
   } catch (e: any) {
     alert(e?.data?.error || e?.message || '创建订单失败')
   } finally {

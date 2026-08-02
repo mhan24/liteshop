@@ -3,14 +3,19 @@
     <div class="max-w-6xl mx-auto px-4 py-8 grid grid-cols-1 md:grid-cols-4 gap-6 text-sm text-gray-600">
       <div>
         <h4 class="text-gray-900 font-semibold mb-2">联系方式</h4>
-        <p v-if="!site?.contact">请通过下单邮箱联系我们。</p>
-        <div v-else v-html="contactHtml"></div>
+        <template v-if="contactLinks.length">
+          <p v-for="l in contactLinks" :key="l.name + l.url">
+            <a v-if="l.url" :href="href(l.url)" target="_blank" rel="noopener" class="hover:text-brand">{{ l.name }}</a>
+            <span v-else>{{ l.name }}</span>
+          </p>
+        </template>
+        <p v-else>请通过下单邮箱联系我们。</p>
       </div>
       <div>
         <h4 class="text-gray-900 font-semibold mb-2">友情链接</h4>
         <ul>
-          <li v-for="l in site?.friend_links || []" :key="l.name + l.url">
-            <a v-if="l.url" :href="l.url" target="_blank" rel="noopener" class="hover:text-brand">{{ l.name }}</a>
+          <li v-for="l in friendLinks" :key="l.name + l.url">
+            <a v-if="l.url" :href="href(l.url)" target="_blank" rel="noopener" class="hover:text-brand">{{ l.name }}</a>
             <span v-else>{{ l.name }}</span>
           </li>
         </ul>
@@ -35,20 +40,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 const props = defineProps<{ site?: any }>()
-const contactHtml = computed(() => {
-  const text = props.site?.contact || ''
-  return text
-    .split('\n')
-    .map((line: string) => {
-      const v = line.trim()
-      if (!v) return ''
-      let href = ''
-      if (/^https?:\/\//i.test(v)) href = v
-      else if (/^www\./i.test(v)) href = 'https://' + v
-      else if (/^@/.test(v)) href = 'https://t.me/' + v.slice(1)
-      else if (v.includes('@')) href = 'mailto:' + v
-      return href ? `<p><a class="hover:text-brand" href="${href}" target="_blank" rel="noopener">${v}</a></p>` : `<p>${v}</p>`
-    })
-    .join('')
-})
+
+const allLinks = computed(() => (props.site?.links as any[]) || [])
+const contactLinks = computed(() => allLinks.value.filter((l) => l.category === 'contact'))
+const friendLinks = computed(() => allLinks.value.filter((l) => l.category !== 'contact'))
+
+function href(url: string) {
+  if (!url) return '#'
+  if (/^https?:\/\//i.test(url)) return url
+  if (/^www\./i.test(url)) return 'https://' + url
+  if (/^@/.test(url)) return 'https://t.me/' + url.slice(1)
+  if (url.includes('@')) return 'mailto:' + url
+  return url
+}
 </script>

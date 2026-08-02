@@ -51,10 +51,10 @@ onMounted(async () => {
   }
 })
 function statusText(status: string) {
-  return { paid: '已支付', pending: '待支付', expired: '已过期', failed: '创建失败' }[status] || status
+  return { paid: '已支付', pending: '待支付', expired: '已过期', failed: '创建失败', cancelled: '已取消' }[status] || status
 }
 function statusType(status: string): any {
-  return { paid: 'success', pending: 'warning', expired: 'danger', failed: 'info' }[status] || 'info'
+  return { paid: 'success', pending: 'warning', expired: 'danger', failed: 'info', cancelled: 'info' }[status] || 'info'
 }
 function money(c: number) {
   return ((c || 0) / 100).toFixed(2)

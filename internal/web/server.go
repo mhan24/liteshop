@@ -134,7 +134,7 @@ func (s *Server) tradeTypeAllowed(v string) bool {
 func (s *Server) tradeTypes() []string {
 	value, err := db.GetSetting(s.db, "bepusdt_trade_types")
 	if err == nil && strings.TrimSpace(value) != "" {
-		return config.ParseTradeTypes(value, s.cfg.BepusdtTradeType)
+		return config.ParseTradeTypes(value)
 	}
 	return s.cfg.BepusdtTradeTypes
 }
@@ -1162,10 +1162,23 @@ func (s *Server) markExpiredByOrderNo(orderNo string) error {
 	if err != nil {
 		return err
 	}
+	if o.TradeID != "" {
+		go func(tradeID string) {
+			_ = s.payClient().CancelTransaction(tradeID)
+		}(o.TradeID)
+	}
 	return s.expireOrder(o.ID)
 }
 
 func (s *Server) expireOrder(orderID int64) error {
+	return s.setOrderStatus(orderID, "expired")
+}
+
+func (s *Server) cancelOrder(orderID int64) error {
+	return s.setOrderStatus(orderID, "cancelled")
+}
+
+func (s *Server) setOrderStatus(orderID int64, status string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -1174,7 +1187,7 @@ func (s *Server) expireOrder(orderID int64) error {
 	if _, err := tx.Exec(`UPDATE cards SET status = 'available', order_id = 0, updated_at = ? WHERE order_id = ? AND status = 'reserved'`, models.Now(), orderID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE orders SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'pending'`, models.Now(), orderID); err != nil {
+	if _, err := tx.Exec(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = 'pending'`, status, models.Now(), orderID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1731,6 +1744,11 @@ func (s *Server) handleAdminOrderExpire(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		http.NotFound(w, r)
 		return
+	}
+	if o, err := s.getOrderByID(id); err == nil && o.TradeID != "" {
+		go func(tradeID string) {
+			_ = s.payClient().CancelTransaction(tradeID)
+		}(o.TradeID)
 	}
 	_ = s.expireOrder(id)
 	http.Redirect(w, r, fmt.Sprintf("/admin/orders/%d", id), http.StatusSeeOther)

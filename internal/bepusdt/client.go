@@ -98,6 +98,44 @@ func (c *Client) CreateTransaction(in CreateInput) (string, string, error) {
 	return out.Data.PaymentURL, out.Data.TradeID, nil
 }
 
+func (c *Client) CancelTransaction(tradeID string) error {
+	if c.Token == "" {
+		return fmt.Errorf("BEPUSDT_API_TOKEN is empty")
+	}
+	if tradeID == "" {
+		return fmt.Errorf("trade_id is empty")
+	}
+	params := map[string]string{"trade_id": tradeID}
+	params["signature"] = Sign(params, c.Token)
+	body := map[string]any{
+		"trade_id":  tradeID,
+		"signature": params["signature"],
+	}
+	raw, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, c.BaseURL+"/api/v1/order/cancel-transaction", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out struct {
+		StatusCode int    `json:"status_code"`
+		Message    string `json:"message"`
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return fmt.Errorf("decode bepusdt cancel response: %w; body=%s", err, string(respBody))
+	}
+	if out.StatusCode != http.StatusOK {
+		return fmt.Errorf("bepusdt cancel transaction failed: status=%d message=%s body=%s", out.StatusCode, out.Message, string(respBody))
+	}
+	return nil
+}
+
 func Sign(params map[string]string, token string) string {
 	keys := make([]string, 0, len(params))
 	for k := range params {
