@@ -40,7 +40,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 
 const { t } = useI18n()
-const DEFAULT_IMAGE = 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
+const DEFAULT_IMAGE = ref('https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png')
 const products = ref<any[]>([])
 const loading = ref(false)
 const currentPage = ref(1)
@@ -48,6 +48,12 @@ const pageSize = ref(20)
 const pagedProducts = computed(() => products.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
 
 onMounted(async () => {
+  try {
+    const site = await api.get('/admin/site')
+    if (site.default_product_image) DEFAULT_IMAGE.value = site.default_product_image
+  } catch {
+    // ignore
+  }
   loading.value = true
   try {
     products.value = (await api.get('/admin/products')).products || []

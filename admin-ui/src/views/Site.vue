@@ -5,6 +5,12 @@
       <el-form-item :label="t('site.siteTitle')"><el-input v-model="form.site_title" /></el-form-item>
       <el-form-item :label="t('site.subtitle')"><el-input v-model="form.site_subtitle" /></el-form-item>
       <el-form-item :label="t('site.announcement')"><el-input v-model="form.site_announcement" type="textarea" :rows="4" /></el-form-item>
+      <el-form-item :label="t('site.defaultProductImage')">
+        <el-input v-model="form.default_product_image" :placeholder="t('site.defaultProductImagePlaceholder')" />
+        <el-image :src="form.default_product_image" fit="contain" style="width:120px;height:120px;margin-top:8px;border:1px solid #eee;border-radius:8px">
+          <template #error>.</template>
+        </el-image>
+      </el-form-item>
       <el-form-item :label="t('site.seoDescription')"><el-input v-model="form.seo_description" type="textarea" :rows="3" /></el-form-item>
       <el-form-item :label="t('site.seoKeywords')"><el-input v-model="form.seo_keywords" /></el-form-item>
 

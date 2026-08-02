@@ -45,10 +45,16 @@ const pinned = ref(false)
 const active = ref(true)
 const form = reactive({ name: '', price: 0.01, description: '', image_url: '', category: '', sort_order: 0 })
 
-const DEFAULT_IMAGE = 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
-const previewImg = computed(() => form.image_url.trim() || DEFAULT_IMAGE)
+const DEFAULT_IMAGE = ref('https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png')
+const previewImg = computed(() => form.image_url.trim() || DEFAULT_IMAGE.value)
 
 onMounted(async () => {
+  try {
+    const site = await api.get('/admin/site')
+    if (site.default_product_image) DEFAULT_IMAGE.value = site.default_product_image
+  } catch {
+    // ignore
+  }
   if (!isEdit.value) return
   loading.value = true
   try {

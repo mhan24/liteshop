@@ -93,7 +93,7 @@ function money(c?: number) {
   return ((c || 0) / 100).toFixed(2)
 }
 function imgSrc(url: string) {
-  return url || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
+  return url || (data.value as any)?.default_product_image || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
 }
 async function submit() {
   loading.value = true

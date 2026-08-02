@@ -150,19 +150,30 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		enabled = false
 	}
 	writeJSON(w, 200, map[string]any{
-		"title":           st.Title,
-		"subtitle":        st.Subtitle,
-		"announcement":    st.Announcement,
-		"seo_description": st.SEODescription,
-		"seo_keywords":    st.SEOKeywords,
-		"links":           parseSiteLinks(mustGetSetting(s, "site_links")),
-		"copyright":       renderSiteVars(rawCopyright, st.Title),
-		"lang":            chooseLang(r),
+		"title":                 st.Title,
+		"subtitle":              st.Subtitle,
+		"announcement":          st.Announcement,
+		"seo_description":       st.SEODescription,
+		"seo_keywords":          st.SEOKeywords,
+		"links":                 parseSiteLinks(mustGetSetting(s, "site_links")),
+		"copyright":             renderSiteVars(rawCopyright, st.Title),
+		"lang":                  chooseLang(r),
+		"default_product_image": s.defaultProductImage(),
 		"maintenance": map[string]any{
 			"enabled": enabled,
 			"message": maintenanceMessage,
 		},
 	})
+}
+
+// DefaultProductImage 是内置默认占位图。
+const DefaultProductImage = "https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png"
+
+func (s *Server) defaultProductImage() string {
+	if v := strings.TrimSpace(mustGetSetting(s, "default_product_image")); v != "" {
+		return v
+	}
+	return DefaultProductImage
 }
 
 func (s *Server) maintenanceUnlocked(r *http.Request, password string) bool {
@@ -230,10 +241,11 @@ func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"product":            productJSON(p),
-		"available":          available,
-		"trade_types":        s.tradeTypes(),
-		"turnstile_site_key": s.turnstileSiteKey(),
+		"product":               productJSON(p),
+		"available":             available,
+		"trade_types":           s.tradeTypes(),
+		"turnstile_site_key":    s.turnstileSiteKey(),
+		"default_product_image": s.defaultProductImage(),
 	})
 }
 
@@ -906,23 +918,24 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		rawCopyright = "© {{year}} {{site_title}}. All rights reserved."
 	}
 	writeJSON(w, 200, map[string]any{
-		"site_title":           st.Title,
-		"site_subtitle":        st.Subtitle,
-		"site_announcement":    st.Announcement,
-		"seo_description":      st.SEODescription,
-		"seo_keywords":         st.SEOKeywords,
-		"site_contact":         st.Contact,
-		"site_friend_links":    st.FriendLinks,
-		"site_copyright":       rawCopyright,
-		"privacy_policy":       st.Privacy,
-		"terms_of_service":     st.Terms,
-		"turnstile_site_key":   s.turnstileSiteKey(),
-		"turnstile_secret_set": s.turnstileSecret() != "",
-		"maintenance_enabled":  mustGetSetting(s, "maintenance_enabled"),
-		"maintenance_message":  mustGetSetting(s, "maintenance_message"),
-		"maintenance_password": mustGetSetting(s, "maintenance_password"),
-		"maintenance_pass_set": mustGetSetting(s, "maintenance_password") != "",
-		"site_links":           parseSiteLinks(mustGetSetting(s, "site_links")),
+		"site_title":            st.Title,
+		"site_subtitle":         st.Subtitle,
+		"site_announcement":     st.Announcement,
+		"seo_description":       st.SEODescription,
+		"seo_keywords":          st.SEOKeywords,
+		"site_contact":          st.Contact,
+		"site_friend_links":     st.FriendLinks,
+		"site_copyright":        rawCopyright,
+		"privacy_policy":        st.Privacy,
+		"terms_of_service":      st.Terms,
+		"turnstile_site_key":    s.turnstileSiteKey(),
+		"turnstile_secret_set":  s.turnstileSecret() != "",
+		"maintenance_enabled":   mustGetSetting(s, "maintenance_enabled"),
+		"maintenance_message":   mustGetSetting(s, "maintenance_message"),
+		"maintenance_password":  mustGetSetting(s, "maintenance_password"),
+		"maintenance_pass_set":  mustGetSetting(s, "maintenance_password") != "",
+		"site_links":            parseSiteLinks(mustGetSetting(s, "site_links")),
+		"default_product_image": s.defaultProductImage(),
 	})
 }
 
@@ -947,7 +960,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 		"seo_description": "seo_description", "seo_keywords": "seo_keywords", "site_contact": "site_contact",
 		"site_friend_links": "site_friend_links", "site_copyright": "site_copyright",
 		"privacy_policy": "privacy_policy", "terms_of_service": "terms_of_service", "turnstile_site_key": "turnstile_site_key",
-		"maintenance_message": "maintenance_message",
+		"maintenance_message": "maintenance_message", "default_product_image": "default_product_image",
 	} {
 		setIfPresent(key, field)
 	}

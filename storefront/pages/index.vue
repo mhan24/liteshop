@@ -38,7 +38,7 @@ const { data: site } = await useAsyncData('site', () => api.get('/site'))
 const { data, pending } = await useAsyncData('products', () => api.get('/products'))
 const categories = computed(() => (data.value as any)?.categories || [])
 function imgSrc(url: string) {
-  return url || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
+  return url || site.value?.default_product_image || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
 }
 function catTitle(cat: any) {
   return cat.default_key === 'pinned' ? t('pinned') : cat.default_key === 'default_category' ? t('defaultCategory') : cat.name
