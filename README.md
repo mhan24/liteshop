@@ -148,6 +148,31 @@ go build -o shop ./cmd/shop
 - 部署脚本：`/usr/local/bin/deploy-storefront.sh`（自动复制 public 静态资源）
 - 源码：`/opt/liteshop-src`
 
+## 测试与 CI
+
+- Go 单元测试：`go test ./...`（覆盖 BEpusdt 签名/回调验签、价格换算、订单号、密码哈希）
+- CI（`.github/workflows/ci.yml`）：push/PR 到 main 自动跑
+  - Go `vet` / `build` / `test`，并产出 linux-arm64 二进制 artifact
+  - 后台 `npm ci && npm run build`
+  - 前台 `npm ci && npm run build`
+
+## 缓存与 SEO
+
+Caddy 缓存头策略：
+
+| 路径 | Cache-Control |
+| --- | --- |
+| `/_nuxt/*`、`/assets/*`、`/admin/assets/*` | `public, max-age=31536000, immutable` |
+| `/robots.txt`、`/sitemap.xml` | `public, max-age=3600` |
+| `/favicon.svg` | `public, max-age=86400` |
+| `/api/*`、`/admin/*`、`/order*`、`/setup`、`/health` | `no-store` + `X-Robots-Tag: noindex` |
+
+- HTML 页面默认不缓存（SSR 动态内容），由 Nuxt 输出 canonical / OG / JSON-LD。
+- `robots.txt` 会输出 `Sitemap:` 指向 `sitemap.xml`；`sitemap.xml` 动态包含商品 URL。
+- 安全头统一由 Caddy 输出：`X-Content-Type-Options` / `X-Frame-Options` / `Referrer-Policy` / `Permissions-Policy`。
+
+> **Cloudflare 提示**：若你开启了 Cloudflare 的 "Managed robots.txt"，它会在代理层合并/覆盖 `robots.txt` 并可能剥离 origin 的缓存头。如需完全由本服务输出，请在 Cloudflare 面板 → Bots / Scrape Shield 中关闭该功能，并确保 CDN 不缓存 `/admin`、`/api`、`/order*`、`/setup`。
+
 ## BEpusdt 对接
 
 - 在 BEpusdt 后台获取 API Token
