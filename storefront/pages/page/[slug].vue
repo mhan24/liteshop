@@ -7,9 +7,10 @@
 
 <script setup lang="ts">
 const route = useRoute()
+const { t } = useI18n()
 const api = useApi()
 const slug = computed(() => (route.params.slug === 'privacy' ? 'privacy' : 'terms'))
-const title = computed(() => (slug.value === 'privacy' ? '隐私政策' : '服务条款'))
+const title = computed(() => (slug.value === 'privacy' ? t('privacy') : t('terms')))
 const { data } = await useAsyncData(() => api.get('/pages/' + slug.value))
 const content = computed(() => (data.value as any)?.content || '')
 useHead({ title: title.value })

@@ -1,21 +1,21 @@
 <template>
-  <el-card>
-    <template #header><h2>{{ isEdit ? '编辑商品' : '新建商品' }}</h2></template>
-    <el-form ref="formRef" :model="form" label-position="top" style="max-width:560px" v-loading="loading">
-      <el-form-item label="商品名称" prop="name" :rules="[{ required: true, message: '请输入商品名称' }]">
+  <el-card v-loading="loading">
+    <template #header><h2>{{ isEdit ? t('products.edit') : t('products.new') }}</h2></template>
+    <el-form ref="formRef" :model="form" label-position="top" style="max-width:560px">
+      <el-form-item :label="t('products.name')" prop="name" :rules="[{ required: true, message: t('products.nameRequired') }]">
         <el-input v-model="form.name" />
       </el-form-item>
-      <el-form-item label="价格（CNY）" prop="price" :rules="[{ required: true, message: '请输入价格' }]">
+      <el-form-item :label="t('products.priceCny')" prop="price" :rules="[{ required: true, message: t('products.priceRequired') }]">
         <el-input-number v-model="form.price" :min="0.01" :precision="2" />
       </el-form-item>
-      <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="4" /></el-form-item>
-      <el-form-item label="分类（留空归入默认分类）"><el-input v-model="form.category" /></el-form-item>
-      <el-form-item label="排序值（越小越靠前）"><el-input-number v-model="form.sort_order" :min="0" /></el-form-item>
-      <el-checkbox v-model="pinned">置顶显示</el-checkbox>
-      <el-checkbox v-model="active">上架销售</el-checkbox>
+      <el-form-item :label="t('products.description')"><el-input v-model="form.description" type="textarea" :rows="4" /></el-form-item>
+      <el-form-item :label="t('products.categoryPlaceholder')"><el-input v-model="form.category" /></el-form-item>
+      <el-form-item :label="t('products.sort')"><el-input-number v-model="form.sort_order" :min="0" /></el-form-item>
+      <el-checkbox v-model="pinned">{{ t('products.pinned') }}</el-checkbox>
+      <el-checkbox v-model="active">{{ t('products.onSale') }}</el-checkbox>
       <div style="margin-top:16px">
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
-        <el-button @click="$router.back()">返回</el-button>
+        <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
+        <el-button @click="$router.back()">{{ t('common.back') }}</el-button>
       </div>
     </el-form>
   </el-card>
@@ -24,11 +24,13 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, FormInstance } from 'element-plus'
 import { api } from '@/api'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
@@ -60,7 +62,7 @@ async function save() {
       const payload = { ...form, is_pinned: pinned.value, status: active.value ? 'active' : 'disabled' }
       if (isEdit.value) await api.post('/admin/products/' + route.params.id + '/edit', payload)
       else await api.post('/admin/products', payload)
-      ElMessage.success('已保存')
+      ElMessage.success(t('products.saveSuccess'))
       router.push('/products')
     } catch (e: any) {
       ElMessage.error(e.message)

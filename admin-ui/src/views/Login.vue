@@ -1,15 +1,15 @@
 <template>
   <div class="login-wrap">
     <el-card class="login-card">
-      <template #header><h2>后台登录</h2></template>
+      <template #header><h2>{{ t('login.title') }}</h2></template>
       <el-form ref="formRef" :model="form" label-position="top">
-        <el-form-item label="用户名" prop="username" :rules="[{ required: true, message: '请输入用户名' }]">
+        <el-form-item :label="t('login.username')" prop="username" :rules="[{ required: true, message: t('login.usernameRequired') }]">
           <el-input v-model="form.username" @keyup.enter="submit" />
         </el-form-item>
-        <el-form-item label="密码" prop="password" :rules="[{ required: true, message: '请输入密码' }]">
+        <el-form-item :label="t('login.password')" prop="password" :rules="[{ required: true, message: t('login.passwordRequired') }]">
           <el-input v-model="form.password" type="password" show-password @keyup.enter="submit" />
         </el-form-item>
-        <el-button type="primary" :loading="loading" @click="submit" style="width:100%">登录</el-button>
+        <el-button type="primary" :loading="loading" @click="submit" style="width:100%">{{ t('login.login') }}</el-button>
       </el-form>
     </el-card>
   </div>
@@ -18,10 +18,12 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api'
 
 const router = useRouter()
+const { t } = useI18n()
 const loading = ref(false)
 const formRef = ref()
 const form = reactive({ username: '', password: '' })

@@ -1,25 +1,27 @@
 <template>
   <el-card v-loading="loading">
-    <template #header><h2>账号设置</h2></template>
+    <template #header><h2>{{ t('account.title') }}</h2></template>
     <el-form ref="formRef" :model="form" label-position="top" style="max-width:480px">
-      <el-form-item label="用户名" prop="username" :rules="[{ required: true, message: '请输入用户名' }]">
+      <el-form-item :label="t('account.username')" prop="username" :rules="[{ required: true, message: t('account.username') }]">
         <el-input v-model="form.username" />
       </el-form-item>
-      <el-form-item label="当前密码" prop="current_password" :rules="[{ required: true, message: '请输入当前密码' }]">
+      <el-form-item :label="t('account.currentPassword')" prop="current_password" :rules="[{ required: true, message: t('account.currentPasswordRequired') }]">
         <el-input v-model="form.current_password" type="password" show-password />
       </el-form-item>
-      <el-form-item label="新密码（留空不修改）"><el-input v-model="form.new_password" type="password" show-password /></el-form-item>
-      <el-form-item label="确认新密码"><el-input v-model="form.confirm_password" type="password" show-password /></el-form-item>
-      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+      <el-form-item :label="t('account.newPassword')"><el-input v-model="form.new_password" type="password" show-password /></el-form-item>
+      <el-form-item :label="t('account.confirmPassword')"><el-input v-model="form.confirm_password" type="password" show-password /></el-form-item>
+      <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>
   </el-card>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, FormInstance } from 'element-plus'
 import { api } from '@/api'
 
+const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
@@ -42,7 +44,7 @@ async function save() {
     saving.value = true
     try {
       await api.post('/admin/account', form)
-      ElMessage.success('已保存')
+      ElMessage.success(t('account.saved'))
       form.current_password = ''
       form.new_password = ''
       form.confirm_password = ''

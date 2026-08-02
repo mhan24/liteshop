@@ -1,28 +1,28 @@
 <template>
   <div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2>订单管理</h2>
-      <el-button @click="exportCSV">导出 CSV</el-button>
+      <h2>{{ t('orders.title') }}</h2>
+      <el-button @click="exportCSV">{{ t('common.exportCsv') }}</el-button>
     </div>
     <el-table :data="pagedOrders" v-loading="loading" size="large">
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="order_no" label="订单号" />
-      <el-table-column prop="product_name" label="商品" />
-      <el-table-column label="金额">
+      <el-table-column prop="id" :label="t('common.id')" width="70" />
+      <el-table-column prop="order_no" :label="t('orders.orderNo')" />
+      <el-table-column prop="product_name" :label="t('orders.product')" />
+      <el-table-column :label="t('orders.amount')">
         <template #default="{ row }">{{ money(row.amount_cents) }} {{ row.fiat }}</template>
       </el-table-column>
-      <el-table-column prop="buyer_contact" label="联系方式" />
-      <el-table-column label="状态">
+      <el-table-column prop="buyer_contact" :label="t('orders.contact')" />
+      <el-table-column :label="t('common.status')">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="创建时间" width="170">
+      <el-table-column :label="t('orders.createdAt')" width="170">
         <template #default="{ row }">{{ date(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="100">
+      <el-table-column :label="t('common.actions')" width="100">
         <template #default="{ row }">
-          <el-button size="small" @click="$router.push('/orders/' + row.id)">详情</el-button>
+          <el-button size="small" @click="$router.push('/orders/' + row.id)">{{ t('common.detail') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -34,8 +34,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 
+const { t } = useI18n()
 const orders = ref<any[]>([])
 const loading = ref(false)
 const currentPage = ref(1)
@@ -51,7 +53,7 @@ onMounted(async () => {
   }
 })
 function statusText(status: string) {
-  return { paid: '已支付', pending: '待支付', expired: '已过期', failed: '创建失败', cancelled: '已取消' }[status] || status
+  return (t(`orders.status.${status}`) as string) || status
 }
 function statusType(status: string): any {
   return { paid: 'success', pending: 'warning', expired: 'danger', failed: 'info', cancelled: 'info' }[status] || 'info'

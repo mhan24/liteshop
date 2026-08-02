@@ -1,23 +1,23 @@
 <template>
   <div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2>商品管理</h2>
-      <el-button type="primary" @click="$router.push('/products/new')">新建商品</el-button>
+      <h2>{{ t('products.title') }}</h2>
+      <el-button type="primary" @click="$router.push('/products/new')">{{ t('products.new') }}</el-button>
     </div>
     <el-table :data="pagedProducts" v-loading="loading" size="large">
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="name" label="名称" />
-      <el-table-column label="分类">
-        <template #default="{ row }">{{ row.category || '默认分类' }}</template>
+      <el-table-column prop="id" :label="t('common.id')" width="70" />
+      <el-table-column prop="name" :label="t('common.name')" />
+      <el-table-column :label="t('products.category')">
+        <template #default="{ row }">{{ row.category || t('products.defaultCategory') }}</template>
       </el-table-column>
-      <el-table-column label="价格">
+      <el-table-column :label="t('common.price')">
         <template #default="{ row }">{{ (row.price_cents / 100).toFixed(2) }}</template>
       </el-table-column>
-      <el-table-column prop="available" label="库存" width="80" />
-      <el-table-column label="操作" width="180">
+      <el-table-column prop="available" :label="t('products.stock')" width="80" />
+      <el-table-column :label="t('common.actions')" width="180">
         <template #default="{ row }">
-          <el-button size="small" @click="$router.push('/products/' + row.id + '/edit')">编辑</el-button>
-          <el-button size="small" @click="$router.push('/products/' + row.id + '/cards')">卡密</el-button>
+          <el-button size="small" @click="$router.push('/products/' + row.id + '/edit')">{{ t('common.edit') }}</el-button>
+          <el-button size="small" @click="$router.push('/products/' + row.id + '/cards')">{{ t('cards.title') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -29,8 +29,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 
+const { t } = useI18n()
 const products = ref<any[]>([])
 const loading = ref(false)
 const currentPage = ref(1)

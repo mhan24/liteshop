@@ -6,34 +6,34 @@
       </div>
       <el-menu :collapse="collapsed" :default-active="activeMenu" background-color="#1f2329" text-color="#cfd3dc" active-text-color="#ffffff">
         <el-menu-item index="/" @click="router.push('/')">
-          <el-icon><HomeFilled /></el-icon><template #title>后台首页</template>
+          <el-icon><HomeFilled /></el-icon><template #title>{{ t('nav.home') }}</template>
         </el-menu-item>
         <el-menu-item index="/products" @click="router.push('/products')">
-          <el-icon><Goods /></el-icon><template #title>商品管理</template>
+          <el-icon><Goods /></el-icon><template #title>{{ t('nav.products') }}</template>
         </el-menu-item>
         <el-menu-item index="/orders" @click="router.push('/orders')">
-          <el-icon><List /></el-icon><template #title>订单管理</template>
+          <el-icon><List /></el-icon><template #title>{{ t('nav.orders') }}</template>
         </el-menu-item>
         <el-menu-item index="/settings" @click="router.push('/settings')">
-          <el-icon><Wallet /></el-icon><template #title>支付设置</template>
+          <el-icon><Wallet /></el-icon><template #title>{{ t('nav.payment') }}</template>
         </el-menu-item>
         <el-menu-item index="/notify" @click="router.push('/notify')">
-          <el-icon><Bell /></el-icon><template #title>通知设置</template>
+          <el-icon><Bell /></el-icon><template #title>{{ t('nav.notify') }}</template>
         </el-menu-item>
         <el-menu-item index="/site" @click="router.push('/site')">
-          <el-icon><Setting /></el-icon><template #title>站点设置</template>
+          <el-icon><Setting /></el-icon><template #title>{{ t('nav.site') }}</template>
         </el-menu-item>
         <el-menu-item index="/account" @click="router.push('/account')">
-          <el-icon><User /></el-icon><template #title>账号</template>
+          <el-icon><User /></el-icon><template #title>{{ t('nav.account') }}</template>
         </el-menu-item>
         <el-menu-item index="/system" @click="router.push('/system')">
-          <el-icon><Tools /></el-icon><template #title>系统</template>
+          <el-icon><Tools /></el-icon><template #title>{{ t('nav.system') }}</template>
         </el-menu-item>
         <el-menu-item index="site-link">
-          <el-icon><Link /></el-icon><template #title><a href="/" target="_blank" class="site-link">前台</a></template>
+          <el-icon><Link /></el-icon><template #title><a href="/" target="_blank" class="site-link">{{ t('nav.front') }}</a></template>
         </el-menu-item>
         <el-menu-item index="logout" @click="logout">
-          <el-icon><SwitchButton /></el-icon><template #title>退出登录</template>
+          <el-icon><SwitchButton /></el-icon><template #title>{{ t('nav.logout') }}</template>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -42,6 +42,11 @@
         <el-button text @click="collapsed = !collapsed">
           <el-icon><Expand v-if="collapsed" /><Fold v-else /></el-icon>
         </el-button>
+        <div style="flex:1"></div>
+        <el-radio-group v-model="locale" size="small">
+          <el-radio-button label="zh">中文</el-radio-button>
+          <el-radio-button label="en">EN</el-radio-button>
+        </el-radio-group>
       </el-header>
       <el-main class="content">
         <router-view v-slot="{ Component }">
@@ -57,6 +62,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import { HomeFilled, Goods, List, Wallet, Bell, Setting, User, Tools, Link, SwitchButton, Expand, Fold } from '@element-plus/icons-vue'
 import { useSessionStore } from '@/stores/session'
@@ -64,6 +70,7 @@ import { useSessionStore } from '@/stores/session'
 const route = useRoute()
 const router = useRouter()
 const store = useSessionStore()
+const { t, locale } = useI18n()
 const collapsed = ref(false)
 const activeMenu = computed(() => {
   if (route.path.startsWith('/products')) return '/products'
@@ -76,7 +83,7 @@ onMounted(() => {
 })
 
 async function logout() {
-  await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning' })
+  await ElMessageBox.confirm(t('nav.logoutConfirm'), t('common.prompt'), { type: 'warning' })
   await store.logout()
   router.push('/login')
 }

@@ -1,22 +1,29 @@
 <template>
   <div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2>卡密管理</h2>
-      <el-button @click="$router.push('/products')">返回商品</el-button>
+      <h2>{{ t('cards.title') }}</h2>
+      <el-button @click="$router.push('/products')">{{ t('cards.back') }}</el-button>
     </div>
-    <el-card header="导入卡密">
+    <el-card :header="t('cards.import')">
       <el-input v-model="cardsText" type="textarea" :rows="6" placeholder="CARD-001&#10;CARD-002" />
-      <el-button type="primary" style="margin-top:12px" :loading="importing" @click="importCards">导入</el-button>
+      <el-button type="primary" style="margin-top:12px" :loading="importing" @click="importCards">{{ t('cards.importBtn') }}</el-button>
     </el-card>
     <el-table :data="cards" style="margin-top:16px" v-loading="loading" size="large">
-      <el-table-column prop="id" label="ID" width="80" />
-      <el-table-column prop="content" label="内容" />
-      <el-table-column label="状态">
+      <el-table-column prop="id" :label="t('common.id')" width="80" />
+      <el-table-column prop="content" :label="t('cards.content')" />
+      <el-table-column :label="t('common.status')">
         <template #default="{ row }">{{ statusText(row.status) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="100">
+      <el-table-column :label="t('cards.orderId')" prop="order_id" />
+      <el-table-column :label="t('cards.createdAt')">
+        <template #default="{ row }">{{ date(row.created_at) }}</template>
+      </el-table-column>
+      <el-table-column :label="t('cards.soldAt')">
+        <template #default="{ row }">{{ date(row.sold_at) }}</template>
+      </el-table-column>
+      <el-table-column :label="t('common.actions')" width="100">
         <template #default="{ row }">
-          <el-button v-if="row.status === 'available'" size="small" type="danger" @click="remove(row.id)">删除</el-button>
+          <el-button v-if="row.status === 'available'" size="small" type="danger" @click="remove(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -26,10 +33,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
 
 const route = useRoute()
+const { t } = useI18n()
 const loading = ref(false)
 const importing = ref(false)
 const cards = ref<any[]>([])
@@ -47,7 +56,7 @@ async function importCards() {
   importing.value = true
   try {
     await api.post('/admin/products/' + route.params.id + '/cards', { cards: cardsText.value })
-    ElMessage.success('已导入')
+    ElMessage.success(t('cards.imported'))
     cardsText.value = ''
     await load()
   } catch (e: any) {
@@ -57,12 +66,16 @@ async function importCards() {
   }
 }
 async function remove(id: number) {
-  await ElMessageBox.confirm('确定删除该可用卡密吗？', '提示', { type: 'warning' })
+  await ElMessageBox.confirm(t('cards.deleteConfirm'), t('common.prompt'), { type: 'warning' })
   await api.post('/admin/cards/' + id + '/delete', {})
   await load()
 }
 function statusText(status: string) {
-  return { available: '可用', reserved: '已锁定', sold: '已售出' }[status] || status
+  return (t(`cards.status.${status}`) as string) || status
+}
+function date(ts: number) {
+  if (!ts) return '-'
+  return new Date(ts * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
 }
 onMounted(load)
 </script>
