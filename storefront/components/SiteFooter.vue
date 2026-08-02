@@ -9,7 +9,6 @@
             <span v-else>{{ l.name }}</span>
           </p>
         </template>
-        <p v-else>contact@shop.com</p>
       </div>
       <div>
         <h4 class="text-gray-900 font-semibold mb-2">{{ t('friendLinks') }}</h4>

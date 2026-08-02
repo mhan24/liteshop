@@ -1,8 +1,9 @@
 <template>
   <div>
-    <h1 class="text-2xl font-bold mb-4">{{ site?.title || 'LiteShop' }}</h1>
-    <div v-if="site?.announcement" class="bg-blue-50 border border-blue-100 text-blue-700 rounded p-3 mb-4">
-      {{ site.announcement }}
+    <h1 class="text-2xl font-bold mb-1">{{ site?.title || 'LiteShop' }}</h1>
+    <p v-if="site?.subtitle" class="text-gray-500 mb-4">{{ site.subtitle }}</p>
+    <div v-if="site?.announcement" class="bg-blue-50 border border-blue-100 text-blue-700 rounded p-3 mb-4 md-body">
+      <span v-html="renderMarkdown(site.announcement)"></span>
     </div>
     <div v-for="cat in categories" :key="cat.name || cat.default_key" class="mt-6">
       <h2 class="text-xl font-bold mb-3">{{ catTitle(cat) }}</h2>
@@ -49,7 +50,7 @@ function productUrl(p: any) {
 function catTitle(cat: any) {
   return cat.default_key === 'pinned' ? t('pinned') : cat.default_key === 'default_category' ? t('defaultCategory') : cat.name
 }
-const siteDesc = computed(() => (site.value?.seo_description || site.value?.subtitle || '').slice(0, 160))
+const siteDesc = computed(() => (site.value?.subtitle || site.value?.seo_description || '').slice(0, 160))
 const siteImage = computed(() => site.value?.default_product_image || '')
 
 useHead(() => ({

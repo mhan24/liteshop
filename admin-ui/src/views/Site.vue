@@ -3,15 +3,18 @@
     <template #header><h2>{{ t('site.title') }}</h2></template>
     <el-form label-position="top" :model="form" style="max-width:680px">
       <el-form-item :label="t('site.siteTitle')"><el-input v-model="form.site_title" /></el-form-item>
-      <el-form-item :label="t('site.subtitle')"><el-input v-model="form.site_subtitle" /></el-form-item>
-      <el-form-item :label="t('site.announcement')"><el-input v-model="form.site_announcement" type="textarea" :rows="4" /></el-form-item>
+      <el-form-item :label="t('site.announcement')">
+        <MdEditor v-model="form.site_announcement" :language="editorLang" style="height:300px;width:100%" />
+      </el-form-item>
       <el-form-item :label="t('site.defaultProductImage')">
         <el-input v-model="form.default_product_image" :placeholder="t('site.defaultProductImagePlaceholder')" />
         <el-image :src="form.default_product_image" fit="contain" style="width:120px;height:120px;margin-top:8px;border:1px solid #eee;border-radius:8px">
           <template #error>.</template>
         </el-image>
       </el-form-item>
-      <el-form-item :label="t('site.seoDescription')"><el-input v-model="form.seo_description" type="textarea" :rows="3" /></el-form-item>
+      <el-form-item :label="t('site.subtitleNote')">
+        <el-input v-model="form.site_subtitle" type="textarea" :rows="3" />
+      </el-form-item>
 
       <el-divider content-position="left">{{ t('site.linksTitle') }}</el-divider>
       <el-form-item :label="t('site.links')">
@@ -30,8 +33,12 @@
       </el-form-item>
 
       <el-form-item :label="t('site.copyright')"><el-input v-model="form.site_copyright" /></el-form-item>
-      <el-form-item :label="t('site.privacy')"><el-input v-model="form.privacy_policy" type="textarea" :rows="6" /></el-form-item>
-      <el-form-item :label="t('site.terms')"><el-input v-model="form.terms_of_service" type="textarea" :rows="6" /></el-form-item>
+      <el-form-item :label="t('site.privacy')">
+        <MdEditor v-model="form.privacy_policy" :language="editorLang" style="height:300px;width:100%" />
+      </el-form-item>
+      <el-form-item :label="t('site.terms')">
+        <MdEditor v-model="form.terms_of_service" :language="editorLang" style="height:300px;width:100%" />
+      </el-form-item>
       <el-form-item :label="t('site.turnstileSiteKey')"><el-input v-model="form.turnstile_site_key" /></el-form-item>
       <el-form-item :label="t('site.turnstileSecret')"><el-input v-model="form.turnstile_secret" type="password" :placeholder="t('site.turnstileSecretPlaceholder')" show-password /></el-form-item>
 
@@ -52,12 +59,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
+import { MdEditor } from 'md-editor-v3'
+import 'md-editor-v3/lib/style.css'
 import { api } from '@/api'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const editorLang = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'))
 const loading = ref(false)
 const saving = ref(false)
 const form = ref<any>({})

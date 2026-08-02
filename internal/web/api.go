@@ -154,7 +154,7 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"title":                 st.Title,
 		"subtitle":              st.Subtitle,
 		"announcement":          st.Announcement,
-		"seo_description":       st.SEODescription,
+		"seo_description":       firstNonEmpty(st.SEODescription, st.Subtitle),
 		"seo_keywords":          st.SEOKeywords,
 		"links":                 parseSiteLinks(mustGetSetting(s, "site_links")),
 		"copyright":             renderSiteVars(rawCopyright, st.Title),
@@ -165,6 +165,15 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 			"message": maintenanceMessage,
 		},
 	})
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // DefaultProductImage 是内置默认占位图。

@@ -1,7 +1,7 @@
 <template>
   <div class="max-w-2xl bg-white rounded-xl border p-6 shadow-sm">
     <h1 class="text-xl font-bold mb-2">{{ title }}</h1>
-    <p class="whitespace-pre-wrap text-gray-700">{{ content }}</p>
+    <div class="md-body text-gray-700" v-html="html"></div>
   </div>
 </template>
 
@@ -14,9 +14,10 @@ const slug = computed(() => (route.params.slug === 'privacy' ? 'privacy' : 'term
 const title = computed(() => (slug.value === 'privacy' ? t('privacy') : t('terms')))
 const { data } = await useAsyncData(() => api.get('/pages/' + slug.value))
 const content = computed(() => (data.value as any)?.content || '')
+const html = computed(() => renderMarkdown(content.value))
 useHead({
   title: title.value,
-  meta: [{ name: 'description', content: content.value.slice(0, 160) }],
+  meta: [{ name: 'description', content: markdownText(content.value).slice(0, 160) }],
   link: [{ rel: 'canonical', href: req.origin + route.path }],
 })
 </script>
