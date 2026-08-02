@@ -12,7 +12,6 @@
         </el-image>
       </el-form-item>
       <el-form-item :label="t('site.seoDescription')"><el-input v-model="form.seo_description" type="textarea" :rows="3" /></el-form-item>
-      <el-form-item :label="t('site.seoKeywords')"><el-input v-model="form.seo_keywords" /></el-form-item>
 
       <el-divider content-position="left">{{ t('site.linksTitle') }}</el-divider>
       <el-form-item :label="t('site.links')">

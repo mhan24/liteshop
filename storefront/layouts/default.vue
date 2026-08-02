@@ -53,19 +53,26 @@ async function unlock() {
 useHead(() => {
   const st = site.value || {}
   const title = st.title || 'LiteShop'
-  const desc = st.seo_description || st.subtitle || ''
+  const desc = (st.seo_description || st.subtitle || '').slice(0, 160)
+  const ogImage = st.default_product_image || ''
   const mt = t('maintenance')
   return {
     title: maintenance.value ? mt : (st.title || 'LiteShop'),
     titleTemplate: (tt?: string) => (tt && tt !== title ? `${tt} - ${title}` : title),
+    htmlAttrs: { lang: st.lang || 'zh-CN' },
     meta: [
       { name: 'description', content: maintenance.value ? maintenanceMessage.value : desc },
-      { name: 'keywords', content: st.seo_keywords || '' },
+      ...(maintenance.value ? [{ name: 'robots', content: 'noindex,nofollow' }] : []),
       { property: 'og:type', content: 'website' },
-      { property: 'og:title', content: title },
+      { property: 'og:site_name', content: title },
+      { property: 'og:title', content: maintenance.value ? mt : title },
       { property: 'og:description', content: desc },
       { property: 'og:url', content: req.origin + route.path },
-      ...(maintenance.value ? [{ name: 'robots', content: 'noindex,nofollow' }] : []),
+      { property: 'og:image', content: ogImage },
+      { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:title', content: maintenance.value ? mt : title },
+      { name: 'twitter:description', content: desc },
+      { name: 'twitter:image', content: ogImage },
     ],
     link: [{ rel: 'canonical', href: req.origin + route.path }],
   }

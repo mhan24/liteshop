@@ -246,6 +246,7 @@ func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
 		"trade_types":           s.tradeTypes(),
 		"turnstile_site_key":    s.turnstileSiteKey(),
 		"default_product_image": s.defaultProductImage(),
+		"site_title":            s.siteSettings().Title,
 	})
 }
 

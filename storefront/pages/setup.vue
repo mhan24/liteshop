@@ -79,5 +79,5 @@ async function submit() {
     loading.value = false
   }
 }
-useHead({ title: t('setupTitle') })
+useHead({ title: t('setupTitle'), meta: [{ name: 'robots', content: 'noindex,nofollow' }] })
 </script>

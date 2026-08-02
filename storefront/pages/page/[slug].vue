@@ -9,9 +9,14 @@
 const route = useRoute()
 const { t } = useI18n()
 const api = useApi()
+const req = useRequestURL()
 const slug = computed(() => (route.params.slug === 'privacy' ? 'privacy' : 'terms'))
 const title = computed(() => (slug.value === 'privacy' ? t('privacy') : t('terms')))
 const { data } = await useAsyncData(() => api.get('/pages/' + slug.value))
 const content = computed(() => (data.value as any)?.content || '')
-useHead({ title: title.value })
+useHead({
+  title: title.value,
+  meta: [{ name: 'description', content: content.value.slice(0, 160) }],
+  link: [{ rel: 'canonical', href: req.origin + route.path }],
+})
 </script>

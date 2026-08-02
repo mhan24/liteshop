@@ -34,6 +34,8 @@
 <script setup lang="ts">
 const { t } = useI18n()
 const api = useApi()
+const req = useRequestURL()
+const siteUrl = computed(() => req.origin + '/')
 const { data: site } = await useAsyncData('site', () => api.get('/site'))
 const { data, pending } = await useAsyncData('products', () => api.get('/products'))
 const categories = computed(() => (data.value as any)?.categories || [])
@@ -43,8 +45,40 @@ function imgSrc(url: string) {
 function catTitle(cat: any) {
   return cat.default_key === 'pinned' ? t('pinned') : cat.default_key === 'default_category' ? t('defaultCategory') : cat.name
 }
-useHead({
-  title: () => site.value?.title || 'LiteShop',
-  meta: [{ name: 'description', content: () => site.value?.seo_description || site.value?.subtitle || '' }],
-})
+const siteDesc = computed(() => (site.value?.seo_description || site.value?.subtitle || '').slice(0, 160))
+const siteImage = computed(() => site.value?.default_product_image || '')
+
+useHead(() => ({
+  title: site.value?.title || 'LiteShop',
+  titleTemplate: undefined,
+  meta: [
+    { name: 'description', content: siteDesc.value },
+    { property: 'og:type', content: 'website' },
+    { property: 'og:title', content: site.value?.title || 'LiteShop' },
+    { property: 'og:description', content: siteDesc.value },
+    { property: 'og:url', content: siteUrl.value },
+    { property: 'og:image', content: siteImage.value },
+  ],
+  script: [
+    {
+      type: 'application/ld+json',
+      children: JSON.stringify([
+        {
+          '@context': 'https://schema.org',
+          '@type': 'WebSite',
+          name: site.value?.title || 'LiteShop',
+          url: siteUrl.value,
+          description: siteDesc.value,
+        },
+        {
+          '@context': 'https://schema.org',
+          '@type': 'Organization',
+          name: site.value?.title || 'LiteShop',
+          url: siteUrl.value,
+          ...(siteImage.value ? { logo: siteImage.value } : {}),
+        },
+      ]),
+    },
+  ],
+}))
 </script>

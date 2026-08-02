@@ -40,6 +40,8 @@
 const route = useRoute()
 const { t } = useI18n()
 const api = useApi()
+const req = useRequestURL()
+const pageUrl = computed(() => req.origin + route.path)
 const { data, pending } = await useAsyncData(() => api.get('/products/' + route.params.id).catch(() => null))
 const product = computed(() => (data.value as any)?.product)
 const available = computed(() => (data.value as any)?.available || 0)
@@ -116,28 +118,48 @@ async function submit() {
     loading.value = false
   }
 }
-useHead(() => ({
-  title: product.value?.name || t('product'),
-  meta: [{ name: 'description', content: (product.value?.description || '').slice(0, 160) }],
-  script: product.value
-    ? [
-        {
-          type: 'application/ld+json',
-          children: JSON.stringify({
-            '@context': 'https://schema.org',
-            '@type': 'Product',
-            name: product.value.name,
-            description: product.value.description,
-            sku: String(product.value.id),
-            offers: {
-              '@type': 'Offer',
-              price: ((product.value.price_cents || 0) / 100).toFixed(2),
-              priceCurrency: 'CNY',
-              availability: available.value > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
-            },
-          }),
-        },
-      ]
-    : [],
-}))
+useHead(() => {
+  const p = product.value
+  const siteName = (data.value as any)?.site_title || ''
+  const desc = (p?.description || '').slice(0, 160)
+  const img = imgSrc(p?.image_url)
+  const url = pageUrl.value
+  return {
+    title: p?.name || t('product'),
+    meta: [
+      { name: 'description', content: desc },
+      { property: 'og:type', content: 'product' },
+      { property: 'og:title', content: p?.name || t('product') },
+      { property: 'og:description', content: desc },
+      { property: 'og:url', content: url },
+      { property: 'og:image', content: img },
+      { name: 'twitter:card', content: 'summary_large_image' },
+    ],
+    link: [{ rel: 'canonical', href: url }],
+    script: p
+      ? [
+          {
+            type: 'application/ld+json',
+            children: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'Product',
+              name: p.name,
+              description: p.description,
+              sku: String(p.id),
+              image: img,
+              url,
+              ...(siteName ? { brand: { '@type': 'Brand', name: siteName } } : {}),
+              offers: {
+                '@type': 'Offer',
+                url,
+                priceCurrency: 'CNY',
+                price: ((p.price_cents || 0) / 100).toFixed(2),
+                availability: available.value > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+              },
+            }),
+          },
+        ]
+      : [],
+  }
+})
 </script>
