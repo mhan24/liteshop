@@ -26,13 +26,22 @@
           <label class="text-sm font-semibold">{{ t('email') }}</label>
           <input type="email" v-model="form.contact" required class="w-full border rounded px-3 py-2" />
         </div>
-        <div ref="turnstile" class="cf-turnstile"></div>
         <button type="submit" :disabled="loading" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 font-semibold disabled:opacity-60">
           {{ loading ? t('processing') : t('payNow') }}
         </button>
       </form>
     </div>
     <div v-else class="py-10 text-gray-500">{{ t('productNotFound') }}</div>
+
+    <div v-if="turnstileOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm text-center">
+        <h2 class="text-lg font-bold">{{ t('verifyTitle') }}</h2>
+        <p class="text-sm text-gray-500 mt-1">{{ t('verifyHint') }}</p>
+        <div ref="turnstileContainer" class="cf-turnstile mt-4 flex justify-center"></div>
+        <p v-if="turnstileError" class="text-red-600 text-sm mt-2">{{ t('verifyRetry') }}</p>
+        <button type="button" class="mt-4 text-sm text-gray-500 hover:text-gray-800" @click="closeTurnstile">{{ t('verifyCancel') }}</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -60,8 +69,12 @@ const loading = ref(false)
 watchEffect(() => { if (!form.trade_type && tradeTypes.value.length) form.trade_type = tradeTypes.value[0] })
 
 const turnstileWidget = ref<any>(null)
+const turnstileOpen = ref(false)
+const turnstileError = ref(false)
+const turnstileContainer = ref<HTMLElement | null>(null)
+let turnstilePending = false
 
-function loadTurnstile() {
+function ensureTurnstileScript() {
   const sitekey = turnstileSiteKey.value
   if (!sitekey) return
   const id = 'turnstile-api'
@@ -73,15 +86,28 @@ function loadTurnstile() {
     s.defer = true
     document.head.appendChild(s)
   }
+}
+
+function renderTurnstile() {
+  const sitekey = turnstileSiteKey.value
+  if (!sitekey) return
   const poll = () => {
-    if (window.turnstile && document.querySelector('.cf-turnstile')) {
+    if (window.turnstile && turnstileContainer.value) {
       if (turnstileWidget.value) {
         window.turnstile.reset(turnstileWidget.value)
         return
       }
-      turnstileWidget.value = window.turnstile.render(document.querySelector('.cf-turnstile') as HTMLElement, {
+      turnstileWidget.value = window.turnstile.render(turnstileContainer.value, {
         sitekey,
         action: 'turnstile-spin-v2',
+        callback: (token: string) => {
+          turnstileError.value = false
+          closeTurnstile()
+          if (turnstilePending) {
+            turnstilePending = false
+            createOrder(token)
+          }
+        },
       })
     } else {
       setTimeout(poll, 200)
@@ -90,7 +116,22 @@ function loadTurnstile() {
   poll()
 }
 
-onMounted(loadTurnstile)
+function openTurnstile() {
+  turnstileError.value = false
+  turnstileOpen.value = true
+  turnstilePending = true
+  ensureTurnstileScript()
+  nextTick(renderTurnstile)
+}
+
+function closeTurnstile() {
+  turnstileOpen.value = false
+  if (window.turnstile && turnstileWidget.value) {
+    window.turnstile.remove(turnstileWidget.value)
+    turnstileWidget.value = null
+  }
+}
+
 onBeforeUnmount(() => {
   if (window.turnstile && turnstileWidget.value) {
     window.turnstile.remove(turnstileWidget.value)
@@ -105,22 +146,31 @@ function imgSrc(url: string) {
   return url || (data.value as any)?.default_product_image || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
 }
 async function submit() {
+  if (loading.value) return
+  openTurnstile()
+}
+
+async function createOrder(token: string) {
   loading.value = true
   try {
-    const tokenInput = document.querySelector('[name="cf-turnstile-response"]') as HTMLInputElement | null
     const res: any = await api.post('/orders', {
       product_id: Number(productId.value),
       qty: form.qty,
       contact: form.contact,
       trade_type: form.trade_type,
-      'cf-turnstile-response': tokenInput?.value || '',
+      'cf-turnstile-response': token,
     })
     if (res.payment_url) {
       window.open(res.payment_url, '_blank', 'noopener')
       window.location.href = '/order/' + res.order_no + '?contact=' + encodeURIComponent(form.contact)
     }
   } catch (e: any) {
-    alert(e?.data?.error || e?.message || t('createOrderFail'))
+    const msg = e?.data?.error || e?.message || ''
+    if (msg.includes('turnstile') || msg.includes('captcha')) {
+      openTurnstile()
+    } else {
+      alert(msg || t('createOrderFail'))
+    }
   } finally {
     loading.value = false
   }
