@@ -4,7 +4,7 @@
     <el-form label-position="top" :model="form" style="max-width:680px">
       <el-form-item :label="t('site.siteTitle')"><el-input v-model="form.site_title" /></el-form-item>
       <el-form-item :label="t('site.announcement')">
-        <MdEditor v-model="form.site_announcement" :language="editorLang" style="height:300px;width:100%" />
+        <MdEditor v-model="form.site_announcement" :language="editorLang" :preview="false" style="height:300px;width:100%" />
       </el-form-item>
       <el-form-item :label="t('site.defaultProductImage')">
         <el-input v-model="form.default_product_image" :placeholder="t('site.defaultProductImagePlaceholder')" />
@@ -34,10 +34,10 @@
 
       <el-form-item :label="t('site.copyright')"><el-input v-model="form.site_copyright" /></el-form-item>
       <el-form-item :label="t('site.privacy')">
-        <MdEditor v-model="form.privacy_policy" :language="editorLang" style="height:300px;width:100%" />
+        <MdEditor v-model="form.privacy_policy" :language="editorLang" :preview="false" style="height:300px;width:100%" />
       </el-form-item>
       <el-form-item :label="t('site.terms')">
-        <MdEditor v-model="form.terms_of_service" :language="editorLang" style="height:300px;width:100%" />
+        <MdEditor v-model="form.terms_of_service" :language="editorLang" :preview="false" style="height:300px;width:100%" />
       </el-form-item>
       <el-form-item :label="t('site.turnstileSiteKey')"><el-input v-model="form.turnstile_site_key" /></el-form-item>
       <el-form-item :label="t('site.turnstileSecret')"><el-input v-model="form.turnstile_secret" type="password" :placeholder="t('site.turnstileSecretPlaceholder')" show-password /></el-form-item>

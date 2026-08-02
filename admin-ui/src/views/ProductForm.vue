@@ -9,7 +9,7 @@
         <el-input-number v-model="form.price" :min="0.01" :precision="2" />
       </el-form-item>
       <el-form-item :label="t('products.description')">
-        <MdEditor v-model="form.description" :language="editorLang" style="height:420px;width:100%" />
+        <MdEditor v-model="form.description" :language="editorLang" :preview="false" style="height:420px;width:100%" />
       </el-form-item>
       <el-form-item :label="t('products.imageUrl')">
         <el-input v-model="form.image_url" :placeholder="t('products.imageUrlPlaceholder')" />
