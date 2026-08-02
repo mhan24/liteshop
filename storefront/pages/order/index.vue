@@ -76,5 +76,5 @@ function badgeClass(status: string) {
     failed: 'bg-gray-100 text-gray-600',
   }[status] || 'bg-gray-100 text-gray-600'
 }
-useHead({ title: t('orderQuery'), meta: [{ name: 'robots', content: 'noindex,nofollow' }] })
+useHead({ title: t('orderQuery'), meta: [{ name: 'description', content: t('orderQueryDesc') }, { name: 'robots', content: 'noindex,nofollow' }] })
 </script>

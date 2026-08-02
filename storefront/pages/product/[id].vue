@@ -41,8 +41,15 @@ const route = useRoute()
 const { t } = useI18n()
 const api = useApi()
 const req = useRequestURL()
+
+// URL 形如 /product/123-slug，解析出纯数字 id；也兼容旧格式 /product/123
+const productId = computed(() => {
+  const raw = String(route.params.id || '')
+  const m = raw.match(/^(\d+)/)
+  return m ? m[1] : raw
+})
 const pageUrl = computed(() => req.origin + route.path)
-const { data, pending } = await useAsyncData(() => api.get('/products/' + route.params.id).catch(() => null))
+const { data, pending } = await useAsyncData(() => api.get('/products/' + productId.value).catch(() => null))
 const product = computed(() => (data.value as any)?.product)
 const available = computed(() => (data.value as any)?.available || 0)
 const tradeTypes = computed(() => (data.value as any)?.trade_types || [])
@@ -102,7 +109,7 @@ async function submit() {
   try {
     const tokenInput = document.querySelector('[name="cf-turnstile-response"]') as HTMLInputElement | null
     const res: any = await api.post('/orders', {
-      product_id: Number(route.params.id),
+      product_id: Number(productId.value),
       qty: form.qty,
       contact: form.contact,
       trade_type: form.trade_type,
@@ -123,6 +130,8 @@ useHead(() => {
   const siteName = (data.value as any)?.site_title || ''
   const desc = (p?.description || '').slice(0, 160)
   const img = imgSrc(p?.image_url)
+  const slug = p?.slug ? '-' + encodeURIComponent(p.slug) : ''
+  const canonical = req.origin + '/product/' + (p?.id ?? productId.value) + slug
   const url = pageUrl.value
   return {
     title: p?.name || t('product'),
@@ -131,11 +140,11 @@ useHead(() => {
       { property: 'og:type', content: 'product' },
       { property: 'og:title', content: p?.name || t('product') },
       { property: 'og:description', content: desc },
-      { property: 'og:url', content: url },
+      { property: 'og:url', content: canonical },
       { property: 'og:image', content: img },
       { name: 'twitter:card', content: 'summary_large_image' },
     ],
-    link: [{ rel: 'canonical', href: url }],
+    link: [{ rel: 'canonical', href: canonical }],
     script: p
       ? [
           {
@@ -147,7 +156,7 @@ useHead(() => {
               description: p.description,
               sku: String(p.id),
               image: img,
-              url,
+              url: canonical,
               ...(siteName ? { brand: { '@type': 'Brand', name: siteName } } : {}),
               offers: {
                 '@type': 'Offer',

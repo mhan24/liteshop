@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"hash"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 )
 
 type Product struct {
@@ -56,6 +58,29 @@ type Order struct {
 }
 
 func Now() int64 { return time.Now().Unix() }
+
+// Slugify 将商品名转为 URL 友好的 slug：小写、保留字母/数字/中文字符，
+// 其余字符（空格、符号等）折叠为单个连字符，并去除首尾连字符。
+func Slugify(s string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToLower(r))
+			prevDash = false
+		} else {
+			if !prevDash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			prevDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "p"
+	}
+	return out
+}
 
 var BeijingLocation = time.FixedZone("Asia/Shanghai", 8*3600)
 

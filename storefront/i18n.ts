@@ -1,6 +1,7 @@
 export const zhDict: Record<string, string> = {
   products: '商品',
   orderQuery: '订单查询',
+  orderQueryDesc: '输入下单邮箱查询订单状态、卡密与支付进度，支持仅凭邮箱找回最近订单。',
   buyNow: '立即购买',
   soldOut: '已售罄',
   stock: '库存',
@@ -82,6 +83,7 @@ export const zhDict: Record<string, string> = {
 export const enDict: Record<string, string> = {
   products: 'Products',
   orderQuery: 'Order lookup',
+  orderQueryDesc: 'Check order status, cards and payment progress by email, or recover recent orders with just your checkout email.',
   buyNow: 'Buy now',
   soldOut: 'Sold out',
   stock: 'Stock',

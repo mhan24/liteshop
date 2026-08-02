@@ -82,6 +82,7 @@ func productJSON(p models.Product) map[string]any {
 	return map[string]any{
 		"id":          p.ID,
 		"name":        p.Name,
+		"slug":        models.Slugify(p.Name),
 		"description": p.Description,
 		"image_url":   p.ImageURL,
 		"price_cents": p.PriceCents,

@@ -1,5 +1,6 @@
 <template>
   <div>
+    <h1 class="text-2xl font-bold mb-4">{{ site?.title || 'LiteShop' }}</h1>
     <div v-if="site?.announcement" class="bg-blue-50 border border-blue-100 text-blue-700 rounded p-3 mb-4">
       {{ site.announcement }}
     </div>
@@ -7,7 +8,7 @@
       <h2 class="text-xl font-bold mb-3">{{ catTitle(cat) }}</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div v-for="p in cat.products" :key="p.product.id" class="bg-white rounded-xl border p-4 shadow-sm">
-          <NuxtLink :to="`/product/${p.product.id}`" class="block">
+          <NuxtLink :to="productUrl(p.product)" class="block">
             <div class="aspect-square w-full overflow-hidden rounded-lg bg-gray-100">
               <img
                 :src="imgSrc(p.product.image_url)"
@@ -17,11 +18,11 @@
               />
             </div>
           </NuxtLink>
-          <h3 class="font-semibold text-lg mt-2">{{ p.product.name }}</h3>
+          <h3 class="font-semibold text-lg mt-2"><NuxtLink :to="productUrl(p.product)" class="hover:text-brand">{{ p.product.name }}</NuxtLink></h3>
           <p class="text-gray-500 text-sm mt-1 whitespace-pre-wrap line-clamp-2">{{ p.product.description }}</p>
           <p class="text-2xl font-bold mt-3">¥{{ (p.product.price_cents / 100).toFixed(2) }}</p>
           <p class="text-gray-500 text-sm">{{ t('stock') }} {{ p.available }}</p>
-          <NuxtLink v-if="p.available > 0" :to="`/product/${p.product.id}`" class="inline-block mt-3 bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2">{{ t('buyNow') }}</NuxtLink>
+          <NuxtLink v-if="p.available > 0" :to="productUrl(p.product)" class="inline-block mt-3 bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2">{{ t('buyNow') }}</NuxtLink>
           <span v-else class="inline-block mt-3 bg-gray-300 text-white rounded-full px-4 py-2">{{ t('soldOut') }}</span>
         </div>
       </div>
@@ -41,6 +42,9 @@ const { data, pending } = await useAsyncData('products', () => api.get('/product
 const categories = computed(() => (data.value as any)?.categories || [])
 function imgSrc(url: string) {
   return url || site.value?.default_product_image || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
+}
+function productUrl(p: any) {
+  return `/product/${p.product?.id || p.id}${p.product?.slug || p.slug ? `-${encodeURIComponent(p.product?.slug || p.slug)}` : ''}`
 }
 function catTitle(cat: any) {
   return cat.default_key === 'pinned' ? t('pinned') : cat.default_key === 'default_category' ? t('defaultCategory') : cat.name
