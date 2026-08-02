@@ -9,6 +9,12 @@
         <el-input-number v-model="form.price" :min="0.01" :precision="2" />
       </el-form-item>
       <el-form-item :label="t('products.description')"><el-input v-model="form.description" type="textarea" :rows="4" /></el-form-item>
+      <el-form-item :label="t('products.imageUrl')">
+        <el-input v-model="form.image_url" :placeholder="t('products.imageUrlPlaceholder')" />
+        <el-image :src="previewImg" fit="contain" style="width:120px;height:120px;margin-top:8px;border:1px solid #eee;border-radius:8px">
+          <template #error>.</template>
+        </el-image>
+      </el-form-item>
       <el-form-item :label="t('products.categoryPlaceholder')"><el-input v-model="form.category" /></el-form-item>
       <el-form-item :label="t('products.sort')"><el-input-number v-model="form.sort_order" :min="0" /></el-form-item>
       <el-checkbox v-model="pinned">{{ t('products.pinned') }}</el-checkbox>
@@ -37,7 +43,10 @@ const formRef = ref<FormInstance>()
 const isEdit = computed(() => !!route.params.id)
 const pinned = ref(false)
 const active = ref(true)
-const form = reactive({ name: '', price: 0.01, description: '', category: '', sort_order: 0 })
+const form = reactive({ name: '', price: 0.01, description: '', image_url: '', category: '', sort_order: 0 })
+
+const DEFAULT_IMAGE = 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
+const previewImg = computed(() => form.image_url.trim() || DEFAULT_IMAGE)
 
 onMounted(async () => {
   if (!isEdit.value) return

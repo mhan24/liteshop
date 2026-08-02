@@ -1000,7 +1000,7 @@ func (s *Server) listProductViews(activeOnly bool) ([]ProductView, error) {
 	if activeOnly {
 		where = "WHERE p.status = 'active'"
 	}
-	rows, err := s.db.Query(`SELECT p.id, p.name, p.description, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.created_at, p.updated_at,
+	rows, err := s.db.Query(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.created_at, p.updated_at,
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available'),
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'reserved'),
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'sold')
@@ -1012,7 +1012,7 @@ func (s *Server) listProductViews(activeOnly bool) ([]ProductView, error) {
 	var out []ProductView
 	for rows.Next() {
 		var v ProductView
-		if err := rows.Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available, &v.Reserved, &v.Sold); err != nil {
+		if err := rows.Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.ImageURL, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available, &v.Reserved, &v.Sold); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -1023,9 +1023,9 @@ func (s *Server) listProductViews(activeOnly bool) ([]ProductView, error) {
 func (s *Server) getProductView(id int64) (models.Product, int, error) {
 	var p models.Product
 	var available int
-	err := s.db.QueryRow(`SELECT p.id, p.name, p.description, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.created_at, p.updated_at,
+	err := s.db.QueryRow(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.created_at, p.updated_at,
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available')
-		FROM products p WHERE p.id = ?`, id).Scan(&p.ID, &p.Name, &p.Description, &p.PriceCents, &p.Status, &p.Category, &p.SortOrder, &p.IsPinned, &p.CreatedAt, &p.UpdatedAt, &available)
+		FROM products p WHERE p.id = ?`, id).Scan(&p.ID, &p.Name, &p.Description, &p.ImageURL, &p.PriceCents, &p.Status, &p.Category, &p.SortOrder, &p.IsPinned, &p.CreatedAt, &p.UpdatedAt, &available)
 	return p, available, err
 }
 

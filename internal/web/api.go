@@ -83,6 +83,7 @@ func productJSON(p models.Product) map[string]any {
 		"id":          p.ID,
 		"name":        p.Name,
 		"description": p.Description,
+		"image_url":   p.ImageURL,
 		"price_cents": p.PriceCents,
 		"status":      p.Status,
 		"category":    p.Category,
@@ -531,6 +532,7 @@ func productFromJSON(input map[string]any) (models.Product, error) {
 	return models.Product{
 		Name:        name,
 		Description: strings.TrimSpace(str(input["description"])),
+		ImageURL:    strings.TrimSpace(str(input["image_url"])),
 		PriceCents:  price,
 		Status:      status,
 		Category:    strings.TrimSpace(str(input["category"])),
@@ -569,7 +571,7 @@ func (s *Server) apiAdminProductCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := models.Now()
-	if _, err := s.db.Exec(`INSERT INTO products(name, description, price_cents, status, category, sort_order, is_pinned, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.Description, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, now, now); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO products(name, description, image_url, price_cents, status, category, sort_order, is_pinned, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, now, now); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
@@ -592,7 +594,7 @@ func (s *Server) apiAdminProductUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	if _, err := s.db.Exec(`UPDATE products SET name = ?, description = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, updated_at = ? WHERE id = ?`, p.Name, p.Description, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, models.Now(), id); err != nil {
+	if _, err := s.db.Exec(`UPDATE products SET name = ?, description = ?, image_url = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, updated_at = ? WHERE id = ?`, p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, models.Now(), id); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
@@ -667,8 +669,36 @@ func (s *Server) apiAdminCardDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+func orderFilterArgs(r *http.Request) (string, []any) {
+	where := []string{"1=1"}
+	args := []any{}
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		where = append(where, "(order_no LIKE ? OR product_name LIKE ? OR buyer_contact LIKE ?)")
+		like := "%" + q + "%"
+		args = append(args, like, like, like)
+	}
+	if status := strings.TrimSpace(r.URL.Query().Get("status")); status != "" {
+		where = append(where, "status = ?")
+		args = append(args, status)
+	}
+	if start := strings.TrimSpace(r.URL.Query().Get("start")); start != "" {
+		if ts, err := strconv.ParseInt(start, 10, 64); err == nil {
+			where = append(where, "created_at >= ?")
+			args = append(args, ts)
+		}
+	}
+	if end := strings.TrimSpace(r.URL.Query().Get("end")); end != "" {
+		if ts, err := strconv.ParseInt(end, 10, 64); err == nil {
+			where = append(where, "created_at <= ?")
+			args = append(args, ts)
+		}
+	}
+	return strings.Join(where, " AND "), args
+}
+
 func (s *Server) apiAdminOrdersExport(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders ORDER BY id DESC LIMIT 2000`)
+	where, args := orderFilterArgs(r)
+	rows, err := s.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE `+where+` ORDER BY id DESC LIMIT 5000`, args...)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -694,7 +724,9 @@ func (s *Server) apiAdminOrdersExport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiAdminOrders(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders ORDER BY id DESC LIMIT 200`)
+	where, args := orderFilterArgs(r)
+	query := `SELECT id, order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE ` + where + ` ORDER BY id DESC LIMIT 500`
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return

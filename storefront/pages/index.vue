@@ -7,8 +7,18 @@
       <h2 class="text-xl font-bold mb-3">{{ catTitle(cat) }}</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div v-for="p in cat.products" :key="p.product.id" class="bg-white rounded-xl border p-4 shadow-sm">
-          <h3 class="font-semibold text-lg">{{ p.product.name }}</h3>
-          <p class="text-gray-500 text-sm mt-1 whitespace-pre-wrap">{{ p.product.description }}</p>
+          <NuxtLink :to="`/product/${p.product.id}`" class="block">
+            <div class="aspect-square w-full overflow-hidden rounded-lg bg-gray-100">
+              <img
+                :src="imgSrc(p.product.image_url)"
+                :alt="p.product.name"
+                loading="lazy"
+                class="w-full h-full object-cover"
+              />
+            </div>
+          </NuxtLink>
+          <h3 class="font-semibold text-lg mt-2">{{ p.product.name }}</h3>
+          <p class="text-gray-500 text-sm mt-1 whitespace-pre-wrap line-clamp-2">{{ p.product.description }}</p>
           <p class="text-2xl font-bold mt-3">¥{{ (p.product.price_cents / 100).toFixed(2) }}</p>
           <p class="text-gray-500 text-sm">{{ t('stock') }} {{ p.available }}</p>
           <NuxtLink v-if="p.available > 0" :to="`/product/${p.product.id}`" class="inline-block mt-3 bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2">{{ t('buyNow') }}</NuxtLink>
@@ -27,6 +37,9 @@ const api = useApi()
 const { data: site } = await useAsyncData('site', () => api.get('/site'))
 const { data, pending } = await useAsyncData('products', () => api.get('/products'))
 const categories = computed(() => (data.value as any)?.categories || [])
+function imgSrc(url: string) {
+  return url || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
+}
 function catTitle(cat: any) {
   return cat.default_key === 'pinned' ? t('pinned') : cat.default_key === 'default_category' ? t('defaultCategory') : cat.name
 }

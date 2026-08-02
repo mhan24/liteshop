@@ -37,6 +37,7 @@ func migrate(db *sql.DB) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
+			image_url TEXT NOT NULL DEFAULT '',
 			price_cents INTEGER NOT NULL,
 			status TEXT NOT NULL DEFAULT 'active',
 			category TEXT NOT NULL DEFAULT '',
@@ -123,6 +124,7 @@ func ensureProductColumns(db *sql.DB) error {
 		{"category", "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT ''"},
 		{"sort_order", "ALTER TABLE products ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"},
 		{"is_pinned", "ALTER TABLE products ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0"},
+		{"image_url", "ALTER TABLE products ADD COLUMN image_url TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, a := range additions {
 		exists, err := columnExists(db, "products", a.column)

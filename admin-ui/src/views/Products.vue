@@ -6,6 +6,13 @@
     </div>
     <el-table :data="pagedProducts" v-loading="loading" size="large">
       <el-table-column prop="id" :label="t('common.id')" width="70" />
+      <el-table-column label="" width="70">
+        <template #default="{ row }">
+          <el-image :src="row.image_url || DEFAULT_IMAGE" fit="cover" style="width:48px;height:48px;border-radius:6px">
+            <template #error>.</template>
+          </el-image>
+        </template>
+      </el-table-column>
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column :label="t('products.category')">
         <template #default="{ row }">{{ row.category || t('products.defaultCategory') }}</template>
@@ -33,6 +40,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 
 const { t } = useI18n()
+const DEFAULT_IMAGE = 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
 const products = ref<any[]>([])
 const loading = ref(false)
 const currentPage = ref(1)

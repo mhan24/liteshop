@@ -15,6 +15,7 @@ type Product struct {
 	ID          int64
 	Name        string
 	Description string
+	ImageURL    string
 	PriceCents  int64
 	Status      string
 	Category    string

@@ -4,6 +4,31 @@
       <h2>{{ t('orders.title') }}</h2>
       <el-button @click="exportCSV">{{ t('common.exportCsv') }}</el-button>
     </div>
+    <el-card style="margin-bottom:12px">
+      <el-form :inline="true" @submit.prevent="search">
+        <el-form-item>
+          <el-input v-model="filters.q" :placeholder="t('orders.searchPlaceholder')" clearable style="width:220px" @keyup.enter="search" />
+        </el-form-item>
+        <el-form-item>
+          <el-select v-model="filters.status" clearable :placeholder="t('orders.allStatus')" style="width:140px">
+            <el-option v-for="(label, key) in statusOptions" :key="key" :label="label" :value="key" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-date-picker
+            v-model="filters.range"
+            type="datetimerange"
+            :start-placeholder="t('orders.startDate')"
+            :end-placeholder="t('orders.endDate')"
+            style="width:360px"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" native-type="submit">{{ t('orders.search') }}</el-button>
+          <el-button @click="reset">{{ t('orders.reset') }}</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
     <el-table :data="pagedOrders" v-loading="loading" size="large">
       <el-table-column prop="id" :label="t('common.id')" width="70" />
       <el-table-column prop="order_no" :label="t('orders.orderNo')" />
@@ -33,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 
@@ -42,16 +67,43 @@ const orders = ref<any[]>([])
 const loading = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(20)
+const filters = reactive({ q: '', status: '', range: null as [Date, Date] | null })
 const pagedOrders = computed(() => orders.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
 
-onMounted(async () => {
+const statusOptions = computed(() => ({
+  paid: t('orders.status.paid'),
+  pending: t('orders.status.pending'),
+  expired: t('orders.status.expired'),
+  failed: t('orders.status.failed'),
+  cancelled: t('orders.status.cancelled'),
+}))
+
+async function load() {
   loading.value = true
+  currentPage.value = 1
   try {
-    orders.value = (await api.get('/admin/orders')).orders || []
+    const params: any = {}
+    if (filters.q) params.q = filters.q
+    if (filters.status) params.status = filters.status
+    if (filters.range && filters.range[0] && filters.range[1]) {
+      params.start = Math.floor(filters.range[0].getTime() / 1000)
+      params.end = Math.floor(filters.range[1].getTime() / 1000)
+    }
+    orders.value = (await api.get('/admin/orders', params)).orders || []
   } finally {
     loading.value = false
   }
-})
+}
+function search() {
+  load()
+}
+function reset() {
+  filters.q = ''
+  filters.status = ''
+  filters.range = null
+  load()
+}
+onMounted(load)
 function statusText(status: string) {
   return (t(`orders.status.${status}`) as string) || status
 }
@@ -66,6 +118,14 @@ function date(ts: number) {
   return new Date(ts * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
 }
 function exportCSV() {
-  window.location.href = '/api/v1/admin/orders/export'
+  const params: any = {}
+  if (filters.q) params.q = filters.q
+  if (filters.status) params.status = filters.status
+  if (filters.range && filters.range[0] && filters.range[1]) {
+    params.start = Math.floor(filters.range[0].getTime() / 1000)
+    params.end = Math.floor(filters.range[1].getTime() / 1000)
+  }
+  const qs = new URLSearchParams(params).toString()
+  window.location.href = '/api/v1/admin/orders/export' + (qs ? '?' + qs : '')
 }
 </script>

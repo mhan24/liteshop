@@ -3,6 +3,9 @@
     <NuxtLink to="/" class="text-sm text-gray-500">{{ t('backProducts') }}</NuxtLink>
     <div v-if="pending" class="py-10 text-gray-400">{{ t('loading') }}</div>
     <div v-else-if="product">
+      <div class="aspect-square w-full overflow-hidden rounded-xl bg-gray-100">
+        <img :src="imgSrc(product.image_url)" :alt="product.name" class="w-full h-full object-cover" />
+      </div>
       <h1 class="text-2xl font-bold mt-3">{{ product.name }}</h1>
       <p class="text-gray-500 mt-2 whitespace-pre-wrap">{{ product.description }}</p>
       <p class="text-2xl font-bold mt-4">¥{{ money(product.price_cents) }}</p>
@@ -88,6 +91,9 @@ onBeforeUnmount(() => {
 
 function money(c?: number) {
   return ((c || 0) / 100).toFixed(2)
+}
+function imgSrc(url: string) {
+  return url || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
 }
 async function submit() {
   loading.value = true
