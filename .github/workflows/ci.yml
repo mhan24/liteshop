@@ -7,11 +7,43 @@ on:
     branches: [main]
 
 jobs:
+  admin-ui:
+    name: Admin UI build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: admin-ui/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Upload admin bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-ui-dist
+          path: internal/web/admin-ui
+          retention-days: 1
+
   go:
     name: Go (vet / build / test)
+    needs: admin-ui
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download admin bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: admin-ui-dist
+          path: internal/web/admin-ui
 
       - uses: actions/setup-go@v5
         with:
@@ -41,24 +73,6 @@ jobs:
           name: shop-linux-arm64
           path: shop-linux-arm64
 
-  admin-ui:
-    name: Admin UI build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: admin-ui
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: admin-ui/package-lock.json
-
-      - run: npm ci
-      - run: npm run build
-
   storefront:
     name: Storefront build
     runs-on: ubuntu-latest
@@ -71,8 +85,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: storefront/package-lock.json
 
-      - run: npm ci
-      - run: npm run build
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+      - name: Build
+        run: npm run build
