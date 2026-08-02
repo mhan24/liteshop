@@ -7,7 +7,7 @@
         <img :src="imgSrc(product.image_url)" :alt="product.name" class="w-full h-full object-cover" />
       </div>
       <h1 class="text-2xl font-bold mt-3">{{ product.name }}</h1>
-      <p class="text-gray-500 mt-2 whitespace-pre-wrap">{{ product.description }}</p>
+      <div class="md-body text-gray-600 mt-2" v-html="renderMarkdown(product.description)"></div>
       <p class="text-2xl font-bold mt-4">¥{{ money(product.price_cents) }}</p>
       <p class="text-gray-500 text-sm">{{ t('currentStock') }} {{ available }}</p>
 
@@ -128,7 +128,7 @@ async function submit() {
 useHead(() => {
   const p = product.value
   const siteName = (data.value as any)?.site_title || ''
-  const desc = (p?.description || '').slice(0, 160)
+  const desc = markdownText(p?.description).slice(0, 160)
   const img = imgSrc(p?.image_url)
   const slug = p?.slug ? '-' + encodeURIComponent(p.slug) : ''
   const canonical = req.origin + '/product/' + (p?.id ?? productId.value) + slug

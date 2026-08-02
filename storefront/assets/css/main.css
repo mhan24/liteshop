@@ -4,3 +4,49 @@
 
 html { background: #f6f7f9; }
 body { @apply text-gray-800; }
+
+.md-body {
+  line-height: 1.7;
+  word-wrap: break-word;
+}
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  font-weight: 700;
+  margin: 1.2em 0 0.5em;
+  color: #1f2329;
+}
+.md-body h1 { font-size: 1.5em; }
+.md-body h2 { font-size: 1.3em; }
+.md-body h3 { font-size: 1.15em; }
+.md-body p { margin: 0.5em 0; }
+.md-body ul, .md-body ol { margin: 0.5em 0; padding-left: 1.4em; }
+.md-body ul { list-style: disc; }
+.md-body ol { list-style: decimal; }
+.md-body li { margin: 0.2em 0; }
+.md-body a { color: #4f46e5; text-decoration: underline; }
+.md-body blockquote {
+  border-left: 3px solid #d1d5db;
+  padding-left: 1em;
+  color: #6b7280;
+  margin: 0.8em 0;
+}
+.md-body code {
+  background: #f3f4f6;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: ui-monospace, monospace;
+}
+.md-body pre {
+  background: #1f2329;
+  color: #d1d5db;
+  padding: 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+.md-body pre code { background: transparent; padding: 0; color: inherit; }
+.md-body img { max-width: 100%; border-radius: 8px; margin: 0.8em 0; }
+.md-body table { border-collapse: collapse; margin: 0.8em 0; width: 100%; }
+.md-body th, .md-body td { border: 1px solid #e5e7eb; padding: 0.5em 0.8em; text-align: left; }
+.md-body th { background: #f9fafb; }
+.md-body hr { border: none; border-top: 1px solid #e5e7eb; margin: 1em 0; }

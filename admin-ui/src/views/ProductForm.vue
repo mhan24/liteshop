@@ -8,7 +8,9 @@
       <el-form-item :label="t('products.priceCny')" prop="price" :rules="[{ required: true, message: t('products.priceRequired') }]">
         <el-input-number v-model="form.price" :min="0.01" :precision="2" />
       </el-form-item>
-      <el-form-item :label="t('products.description')"><el-input v-model="form.description" type="textarea" :rows="4" /></el-form-item>
+      <el-form-item :label="t('products.description')">
+        <MdEditor v-model="form.description" :language="editorLang" style="height:420px;width:100%" />
+      </el-form-item>
       <el-form-item :label="t('products.imageUrl')">
         <el-input v-model="form.image_url" :placeholder="t('products.imageUrlPlaceholder')" />
         <el-image :src="previewImg" fit="contain" style="width:120px;height:120px;margin-top:8px;border:1px solid #eee;border-radius:8px">
@@ -32,11 +34,14 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, FormInstance } from 'element-plus'
+import { MdEditor } from 'md-editor-v3'
+import 'md-editor-v3/lib/style.css'
 import { api } from '@/api'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const editorLang = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'))
 const loading = ref(false)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
