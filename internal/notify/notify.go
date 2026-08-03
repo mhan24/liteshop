@@ -160,15 +160,33 @@ func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
 	subject := renderTemplate(subjectTpl, data)
 	mailBody := renderTemplate(mailBodyTpl, data)
 	telegramBody := renderTemplate(telegramBodyTpl, data)
+	mailSent := false
+	telegramSent := false
 	if cfg.SMTPHost != "" && strings.Contains(order.BuyerContact, "@") {
 		if err := n.sendMailWithConfig(cfg, order.BuyerContact, subject, mailBody); err != nil {
 			log.Printf("send paid mail failed: order=%s to=%s err=%v", order.OrderNo, order.BuyerContact, err)
+			_ = db.AddOrderLog(n.db, order.ID, "notify_failed", "邮件通知发送失败: "+err.Error(), order.Status, order.Status, 0, "smtp")
+		} else {
+			mailSent = true
 		}
 	}
 	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
 		if err := n.sendTelegramWithConfig(cfg, telegramBody); err != nil {
 			log.Printf("send paid telegram failed: order=%s err=%v", order.OrderNo, err)
+			_ = db.AddOrderLog(n.db, order.ID, "notify_failed", "Telegram 通知发送失败: "+err.Error(), order.Status, order.Status, 0, "telegram")
+		} else {
+			telegramSent = true
 		}
+	}
+	if mailSent || telegramSent {
+		channels := []string{}
+		if mailSent {
+			channels = append(channels, "邮件")
+		}
+		if telegramSent {
+			channels = append(channels, "Telegram")
+		}
+		_ = db.AddOrderLog(n.db, order.ID, "notify_sent", "通知已发送 ("+strings.Join(channels, "+")+")", order.Status, order.Status, 0, "")
 	}
 }
 

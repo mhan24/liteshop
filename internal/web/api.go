@@ -63,6 +63,8 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/admin/orders", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrders)))
 	mux.Handle("GET /api/v1/admin/orders/{id}", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrder)))
 	mux.Handle("POST /api/v1/admin/orders/{id}/expire", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderExpire)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/cancel", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderCancel)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/status", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderSetStatus)))
 	mux.Handle("POST /api/v1/admin/orders/{id}/resend", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderResend)))
 	mux.Handle("POST /api/v1/admin/orders/{id}/redeliver", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderRedeliver)))
 	mux.Handle("GET /api/v1/admin/settings", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSettings)))
@@ -906,6 +908,71 @@ func (s *Server) apiAdminOrderExpire(w http.ResponseWriter, r *http.Request) {
 		}(o.TradeID)
 	}
 	_ = s.expireOrder(id)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// apiAdminOrderCancel 管理员取消订单（释放预留卡密并同步取消 BEpusdt 交易）。
+func (s *Server) apiAdminOrderCancel(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	o, err := s.getOrderByID(id)
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	if o.TradeID != "" {
+		go func(tradeID string) {
+			_ = s.payClient().CancelTransaction(tradeID)
+		}(o.TradeID)
+	}
+	if err := s.cancelOrder(id); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// apiAdminOrderSetStatus 管理员手动修改订单状态（必须在状态机合法迁移内）。
+func (s *Server) apiAdminOrderSetStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	var input struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	input.Status = strings.TrimSpace(input.Status)
+	if input.Status == "" {
+		writeError(w, 400, "status required")
+		return
+	}
+	o, err := s.getOrderByID(id)
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	if o.Status == input.Status {
+		writeJSON(w, 200, map[string]any{"ok": true, "noop": true})
+		return
+	}
+	// 支付后状态（paid 及之后）不可回退，防止误操作
+	if o.PaidAt > 0 && (input.Status == models.OrderCreated || input.Status == models.OrderWaitingPayment) {
+		writeError(w, 400, "已支付订单不可回退到未支付状态")
+		return
+	}
+	if err := s.setOrderStatusWithLog(id, input.Status, "status_changed", firstNonEmpty(input.Message, "管理员手动修改状态"), 1); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
