@@ -2,6 +2,7 @@ data/
 *.db
 *.db-*
 *.log
+.env
 /shop
 /shop-linux-arm64
 /liteshop

@@ -1,53 +1,77 @@
-services:
-  bepusdt:
-    image: v03413/bepusdt:latest
-    container_name: bepusdt
-    restart: unless-stopped
-    ports:
-      - "${BEPUSDT_PORT:-8081}:8080"
-    environment:
-      LISTEN: 0.0.0.0:8080
-      SQLITE: /var/lib/bepusdt/sqlite.db
-    volumes:
-      - bepusdt_data:/var/lib/bepusdt
+# LiteShop Docker 部署
+#
+# 快速开始:
+#   1. cp .env.example .env && 按需修改 (DOMAIN 必填)
+#   2. docker compose up -d --build
+#   3. 打开 https://<DOMAIN>/setup 完成初始化
+#
+# 服务:
+#   liteshop     - Go API + 内嵌后台 (8080)
+#   storefront   - Nuxt SSR 前台 (3000)
+#   caddy        - 反向代理 + 自动 HTTPS (80/443)
+#   sqlite       - 数据存于命名卷 liteshop_data
 
-  shop:
+services:
+  liteshop:
     build:
       context: .
+      dockerfile: docker/Dockerfile
+      target: shop
       args:
-        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
-    container_name: card-shop
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    image: liteshop/shop:${TAG:-latest}
+    container_name: liteshop
     restart: unless-stopped
-    depends_on:
-      - bepusdt
-    ports:
-      - "${SHOP_PORT:-8080}:8080"
     environment:
       SHOP_LISTEN_ADDR: ":8080"
       SHOP_DATABASE_PATH: /app/data/shop.db
-      SHOP_PUBLIC_BASE_URL: ${SHOP_PUBLIC_BASE_URL:-http://localhost:8080}
-      BEPUSDT_NOTIFY_URL: ${BEPUSDT_NOTIFY_URL:-http://shop:8080/notify/bepusdt}
-      BEPUSDT_BASE_URL: ${BEPUSDT_BASE_URL:-http://bepusdt:8080}
-      BEPUSDT_API_TOKEN: ${BEPUSDT_API_TOKEN:-change-me-bepusdt-api-token}
-      BEPUSDT_FIAT: ${BEPUSDT_FIAT:-CNY}
-      BEPUSDT_TRADE_TYPE: ${BEPUSDT_TRADE_TYPE:-usdt.trc20}
-      BEPUSDT_TRADE_TYPES: ${BEPUSDT_TRADE_TYPES:-}
-      BEPUSDT_TIMEOUT_SEC: ${BEPUSDT_TIMEOUT_SEC:-1200}
-      SHOP_ADMIN_USERNAME: ${SHOP_ADMIN_USERNAME:-admin}
-      SHOP_ADMIN_PASSWORD: ${SHOP_ADMIN_PASSWORD:-change-me-admin-password}
-      SHOP_SESSION_SECRET: ${SHOP_SESSION_SECRET:-change-me-session-secret}
-      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
-      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-0x4AAAAAAD-83GuuhsY2-KeZ}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-465}
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      SHOP_PUBLIC_BASE_URL: ${SHOP_PUBLIC_BASE_URL:-https://${DOMAIN:-localhost}}
+      BEPUSDT_NOTIFY_URL: ${BEPUSDT_NOTIFY_URL:-https://${DOMAIN:-localhost}/notify/bepusdt}
     volumes:
-      - shop_data:/app/data
+      - liteshop_data:/app/data
+    networks:
+      - liteshop-net
+
+  storefront:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: storefront
+    image: liteshop/storefront:${TAG:-latest}
+    container_name: liteshop-storefront
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    depends_on:
+      - liteshop
+    networks:
+      - liteshop-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: liteshop-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - liteshop
+      - storefront
+    networks:
+      - liteshop-net
+
+networks:
+  liteshop-net:
+    name: liteshop-net
 
 volumes:
-  bepusdt_data:
-  shop_data:
+  liteshop_data:
+  caddy_data:
+  caddy_config:

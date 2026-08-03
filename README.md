@@ -142,6 +142,26 @@ go build -o shop ./cmd/shop
 
 ## 部署（服务器）
 
+### Docker 部署（群晖 / 宝塔 / Coolify / 1Panel）
+
+适合 NAS 与面板环境，一条命令起全套（liteshop + storefront + caddy + sqlite）：
+
+```bash
+cp .env.example .env     # 设置 DOMAIN
+docker compose up -d --build
+```
+
+| 服务 | 说明 | 端口 |
+| --- | --- | --- |
+| `liteshop` | Go API + 内嵌后台 | 内部 8080 |
+| `storefront` | Nuxt SSR 前台 | 内部 3000 |
+| `caddy` | 反向代理 + 自动 HTTPS | 80 / 443 |
+| `sqlite` | 数据存命名卷 `liteshop_data` | — |
+
+- 数据卷：`liteshop_data`（SQLite）、`caddy_data`/`caddy_config`（证书）
+- 首次打开 `https://<DOMAIN>/setup` 完成初始化
+- BEpusdt 走公网回调：`https://<DOMAIN>/notify/bepusdt`
+
 ### 一键安装（10 分钟）
 
 在全新 Ubuntu / Debian / CentOS / Rocky / Alma 服务器上，将域名 A 记录指向服务器后执行：
