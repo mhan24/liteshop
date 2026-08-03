@@ -83,7 +83,22 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/system/reset", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSystemReset)))
 }
 
+func faqJSON(faq []models.FAQItem) string {
+	if len(faq) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(faq)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
 func productJSON(p models.Product) map[string]any {
+	faq := []map[string]string{}
+	for _, f := range p.FAQ {
+		faq = append(faq, map[string]string{"q": f.Q, "a": f.A})
+	}
 	return map[string]any{
 		"id":          p.ID,
 		"name":        p.Name,
@@ -95,6 +110,7 @@ func productJSON(p models.Product) map[string]any {
 		"category":    p.Category,
 		"sort_order":  p.SortOrder,
 		"is_pinned":   p.IsPinned,
+		"faq":         faq,
 		"created_at":  p.CreatedAt,
 		"updated_at":  p.UpdatedAt,
 	}
@@ -246,12 +262,18 @@ func (s *Server) apiProducts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		writeError(w, 404, "not found")
-		return
+	param := r.PathValue("id")
+	var (
+		p         models.Product
+		available int
+		err       error
+	)
+	// 支持 /products/{id} 或 /products/{slug}
+	if id, perr := strconv.ParseInt(param, 10, 64); perr == nil {
+		p, available, err = s.getProductView(id)
+	} else {
+		p, available, err = s.getProductViewBySlug(param)
 	}
-	p, available, err := s.getProductView(id)
 	if err != nil || p.Status != "active" {
 		writeError(w, 404, "not found")
 		return
@@ -656,6 +678,18 @@ func productFromJSON(input map[string]any) (models.Product, error) {
 	if sortOrder < 0 {
 		sortOrder = 0
 	}
+	faq := []models.FAQItem{}
+	if items, ok := input["faq"].([]any); ok {
+		for _, it := range items {
+			if m, ok := it.(map[string]any); ok {
+				q := strings.TrimSpace(str(m["q"]))
+				a := strings.TrimSpace(str(m["a"]))
+				if q != "" && a != "" {
+					faq = append(faq, models.FAQItem{Q: q, A: a})
+				}
+			}
+		}
+	}
 	return models.Product{
 		Name:        name,
 		Description: strings.TrimSpace(str(input["description"])),
@@ -665,6 +699,7 @@ func productFromJSON(input map[string]any) (models.Product, error) {
 		Category:    strings.TrimSpace(str(input["category"])),
 		SortOrder:   sortOrder,
 		IsPinned:    input["is_pinned"] == true,
+		FAQ:         faq,
 	}, nil
 }
 
@@ -698,7 +733,7 @@ func (s *Server) apiAdminProductCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := models.Now()
-	if _, err := s.db.Exec(`INSERT INTO products(name, description, image_url, price_cents, status, category, sort_order, is_pinned, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, now, now); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO products(name, description, image_url, price_cents, status, category, sort_order, is_pinned, faq, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), now, now); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
@@ -721,7 +756,7 @@ func (s *Server) apiAdminProductUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	if _, err := s.db.Exec(`UPDATE products SET name = ?, description = ?, image_url = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, updated_at = ? WHERE id = ?`, p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, models.Now(), id); err != nil {
+	if _, err := s.db.Exec(`UPDATE products SET name = ?, description = ?, image_url = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, faq = ?, updated_at = ? WHERE id = ?`, p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), models.Now(), id); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}

@@ -11,6 +11,16 @@
       <el-form-item :label="t('products.description')">
         <MdEditor v-model="form.description" :language="editorLang" :preview="false" style="height:420px;width:100%" />
       </el-form-item>
+      <el-form-item :label="t('products.faq')">
+        <div class="faq-list" style="width:100%">
+          <div v-for="(item, idx) in form.faq" :key="idx" class="faq-row">
+            <el-input v-model="item.q" :placeholder="t('products.faqQ')" />
+            <el-input v-model="item.a" type="textarea" :rows="2" :placeholder="t('products.faqA')" />
+            <el-button type="danger" text @click="removeFaq(idx)">{{ t('site.delete') }}</el-button>
+          </div>
+          <el-button type="primary" plain @click="addFaq">{{ t('products.addFaq') }}</el-button>
+        </div>
+      </el-form-item>
       <el-form-item :label="t('products.imageUrl')">
         <el-input v-model="form.image_url" :placeholder="t('products.imageUrlPlaceholder')" />
         <el-image :src="previewImg" fit="contain" style="width:120px;height:120px;margin-top:8px;border:1px solid #eee;border-radius:8px">
@@ -48,10 +58,16 @@ const formRef = ref<FormInstance>()
 const isEdit = computed(() => !!route.params.id)
 const pinned = ref(false)
 const active = ref(true)
-const form = reactive({ name: '', price: 0.01, description: '', image_url: '', category: '', sort_order: 0 })
+const form = reactive({ name: '', price: 0.01, description: '', image_url: '', category: '', sort_order: 0, faq: [] as { q: string; a: string }[] })
 
 const DEFAULT_IMAGE = ref('https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png')
 const previewImg = computed(() => form.image_url.trim() || DEFAULT_IMAGE.value)
+function addFaq() {
+  form.faq.push({ q: '', a: '' })
+}
+function removeFaq(idx: number) {
+  form.faq.splice(idx, 1)
+}
 
 onMounted(async () => {
   try {

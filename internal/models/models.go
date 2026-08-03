@@ -23,8 +23,15 @@ type Product struct {
 	Category    string
 	SortOrder   int
 	IsPinned    bool
+	FAQ         []FAQItem
 	CreatedAt   int64
 	UpdatedAt   int64
+}
+
+// FAQItem 商品常见问题条目。
+type FAQItem struct {
+	Q string `json:"q"`
+	A string `json:"a"`
 }
 
 // 卡密状态值。

@@ -30,6 +30,16 @@
           {{ loading ? t('processing') : t('payNow') }}
         </button>
       </form>
+
+      <div v-if="faqItems.length" class="mt-8">
+        <h2 class="text-lg font-bold mb-3">{{ t('faqTitle') }}</h2>
+        <div class="divide-y border rounded-lg">
+          <details v-for="(item, idx) in faqItems" :key="idx" class="px-4 py-3">
+            <summary class="font-semibold cursor-pointer select-none">{{ item.q }}</summary>
+            <div class="md-body text-gray-600 mt-2 text-sm" v-html="renderMarkdown(item.a)"></div>
+          </details>
+        </div>
+      </div>
     </div>
     <div v-else class="py-10 text-gray-500">{{ t('productNotFound') }}</div>
 
@@ -51,15 +61,12 @@ const { t } = useI18n()
 const api = useApi()
 const req = useRequestURL()
 
-// URL 形如 /product/123-slug，解析出纯数字 id；也兼容旧格式 /product/123
-const productId = computed(() => {
-  const raw = String(route.params.id || '')
-  const m = raw.match(/^(\d+)/)
-  return m ? m[1] : raw
-})
+// URL 形如 /product/{slug} 或 /product/{id}，直接传给 API 由后端按 slug/id 查找
+const productKey = computed(() => String(route.params.id || ''))
 const pageUrl = computed(() => req.origin + route.path)
-const { data, pending } = await useAsyncData(() => api.get('/products/' + productId.value).catch(() => null))
+const { data, pending } = await useAsyncData(() => api.get('/products/' + productKey.value).catch(() => null))
 const product = computed(() => (data.value as any)?.product)
+const faqItems = computed(() => (product.value?.faq || []) as any[])
 const available = computed(() => (data.value as any)?.available || 0)
 const tradeTypes = computed(() => (data.value as any)?.trade_types || [])
 const turnstileSiteKey = computed(() => (data.value as any)?.turnstile_site_key || '')
@@ -154,7 +161,7 @@ async function createOrder(token: string) {
   loading.value = true
   try {
     const res: any = await api.post('/orders', {
-      product_id: Number(productId.value),
+      product_id: Number(product.value?.id),
       qty: form.qty,
       contact: form.contact,
       trade_type: form.trade_type,
@@ -180,8 +187,8 @@ useHead(() => {
   const siteName = (data.value as any)?.site_title || ''
   const desc = markdownText(p?.description).slice(0, 160)
   const img = imgSrc(p?.image_url)
-  const slug = p?.slug ? '-' + encodeURIComponent(p.slug) : ''
-  const canonical = req.origin + '/product/' + (p?.id ?? productId.value) + slug
+  const canonicalSlug = p?.slug && p.slug !== 'p' ? encodeURIComponent(p.slug) : (p?.id ?? '')
+  const canonical = req.origin + '/product/' + canonicalSlug
   const url = pageUrl.value
   return {
     title: p?.name || t('product'),
@@ -217,6 +224,22 @@ useHead(() => {
               },
             }),
           },
+          ...(faqItems.value.length
+            ? [
+                {
+                  type: 'application/ld+json',
+                  children: JSON.stringify({
+                    '@context': 'https://schema.org',
+                    '@type': 'FAQPage',
+                    mainEntity: faqItems.value.map((f: any) => ({
+                      '@type': 'Question',
+                      name: f.q,
+                      acceptedAnswer: { '@type': 'Answer', text: markdownText(f.a) },
+                    })),
+                  }),
+                },
+              ]
+            : []),
         ]
       : [],
   }

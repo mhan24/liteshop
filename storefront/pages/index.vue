@@ -45,7 +45,10 @@ function imgSrc(url: string) {
   return url || site.value?.default_product_image || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
 }
 function productUrl(p: any) {
-  return `/product/${p.product?.id || p.id}${p.product?.slug || p.slug ? `-${encodeURIComponent(p.product?.slug || p.slug)}` : ''}`
+  const id = p.product?.id || p.id
+  const slug = p.product?.slug || p.slug
+  if (slug && slug !== 'p') return `/product/${encodeURIComponent(slug)}`
+  return `/product/${id}`
 }
 function catTitle(cat: any) {
   return cat.default_key === 'pinned' ? t('pinned') : cat.default_key === 'default_category' ? t('defaultCategory') : cat.name

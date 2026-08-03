@@ -43,6 +43,7 @@ func migrate(db *sql.DB) error {
 			category TEXT NOT NULL DEFAULT '',
 			sort_order INTEGER NOT NULL DEFAULT 0,
 			is_pinned INTEGER NOT NULL DEFAULT 0,
+			faq TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		);`,
@@ -206,6 +207,7 @@ func ensureProductColumns(db *sql.DB) error {
 		{"sort_order", "ALTER TABLE products ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"},
 		{"is_pinned", "ALTER TABLE products ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0"},
 		{"image_url", "ALTER TABLE products ADD COLUMN image_url TEXT NOT NULL DEFAULT ''"},
+		{"faq", "ALTER TABLE products ADD COLUMN faq TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, a := range additions {
 		exists, err := columnExists(db, "products", a.column)

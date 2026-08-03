@@ -1022,7 +1022,7 @@ func (s *Server) listProductViews(activeOnly bool) ([]ProductView, error) {
 	if activeOnly {
 		where = "WHERE p.status = 'active'"
 	}
-	rows, err := s.db.Query(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.created_at, p.updated_at,
+	rows, err := s.db.Query(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.faq, p.created_at, p.updated_at,
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available'),
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'locked'),
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'sold')
@@ -1034,9 +1034,11 @@ func (s *Server) listProductViews(activeOnly bool) ([]ProductView, error) {
 	var out []ProductView
 	for rows.Next() {
 		var v ProductView
-		if err := rows.Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.ImageURL, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available, &v.Reserved, &v.Sold); err != nil {
+		var faqRaw string
+		if err := rows.Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.ImageURL, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &faqRaw, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available, &v.Reserved, &v.Sold); err != nil {
 			return nil, err
 		}
+		v.Product.FAQ = parseFAQ(faqRaw)
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -1045,10 +1047,57 @@ func (s *Server) listProductViews(activeOnly bool) ([]ProductView, error) {
 func (s *Server) getProductView(id int64) (models.Product, int, error) {
 	var p models.Product
 	var available int
-	err := s.db.QueryRow(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.created_at, p.updated_at,
+	var faqRaw string
+	err := s.db.QueryRow(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.faq, p.created_at, p.updated_at,
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available')
-		FROM products p WHERE p.id = ?`, id).Scan(&p.ID, &p.Name, &p.Description, &p.ImageURL, &p.PriceCents, &p.Status, &p.Category, &p.SortOrder, &p.IsPinned, &p.CreatedAt, &p.UpdatedAt, &available)
-	return p, available, err
+		FROM products p WHERE p.id = ?`, id).Scan(&p.ID, &p.Name, &p.Description, &p.ImageURL, &p.PriceCents, &p.Status, &p.Category, &p.SortOrder, &p.IsPinned, &faqRaw, &p.CreatedAt, &p.UpdatedAt, &available)
+	if err != nil {
+		return p, 0, err
+	}
+	p.FAQ = parseFAQ(faqRaw)
+	return p, available, nil
+}
+
+func parseFAQ(raw string) []models.FAQItem {
+	var out []models.FAQItem
+	if strings.TrimSpace(raw) == "" {
+		return out
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// getProductViewBySlug 按 slug 查找商品。
+func (s *Server) getProductViewBySlug(slug string) (models.Product, int, error) {
+	var p models.Product
+	var available int
+	rows, err := s.db.Query(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.faq, p.created_at, p.updated_at,
+		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available')
+		FROM products p WHERE p.status = 'active'`)
+	if err != nil {
+		return p, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t models.Product
+		var av int
+		var faqRaw string
+		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.ImageURL, &t.PriceCents, &t.Status, &t.Category, &t.SortOrder, &t.IsPinned, &faqRaw, &t.CreatedAt, &t.UpdatedAt, &av); err != nil {
+			return p, 0, err
+		}
+		if models.Slugify(t.Name) == slug {
+			t.FAQ = parseFAQ(faqRaw)
+			p = t
+			available = av
+			break
+		}
+	}
+	if p.ID == 0 {
+		return p, 0, sql.ErrNoRows
+	}
+	return p, available, nil
 }
 
 func (s *Server) createPendingOrder(order *models.Order) error {

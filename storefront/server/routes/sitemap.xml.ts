@@ -5,8 +5,8 @@ export default defineEventHandler(async (event) => {
     const data: any = await $fetch(origin + '/api/v1/products')
     for (const cat of data.categories || []) {
       for (const p of cat.products || []) {
-        const slug = p.product.slug ? '-' + encodeURIComponent(p.product.slug) : ''
-        urls.push(`/product/${p.product.id}${slug}`)
+        const slug = p.product.slug && p.product.slug !== 'p' ? encodeURIComponent(p.product.slug) : p.product.id
+        urls.push(`/product/${slug}`)
       }
     }
   } catch {}
