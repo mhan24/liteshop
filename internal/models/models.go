@@ -57,6 +57,79 @@ type Order struct {
 	PaidAt             int64
 }
 
+// 订单状态机状态值。
+const (
+	OrderCreated        = "created"         // 订单记录已创建
+	OrderWaitingPayment = "waiting_payment" // 已创建 BEpusdt 交易，等待支付
+	OrderPaid           = "paid"            // 支付成功，开始发卡
+	OrderProcessing     = "processing"      // 发卡处理中
+	OrderDelivered      = "delivered"       // 卡密已发放
+	OrderCompleted      = "completed"       // 已完成（终态）
+	OrderPaymentFailed  = "payment_failed"  // 支付异常（如创建交易失败）
+	OrderDeliveryFailed = "delivery_failed" // 发卡失败，待后台处理
+	OrderCancelled      = "cancelled"       // 用户取消
+	OrderExpired        = "expired"         // 支付超时过期
+)
+
+// validOrderTransitions 定义状态机的合法迁移。
+var validOrderTransitions = map[string]map[string]bool{
+	OrderCreated: {
+		OrderWaitingPayment: true,
+		OrderPaymentFailed:  true,
+		OrderCancelled:      true,
+		OrderExpired:        true,
+	},
+	OrderWaitingPayment: {
+		OrderPaid:      true,
+		OrderExpired:   true,
+		OrderCancelled: true,
+	},
+	OrderPaid: {
+		OrderProcessing:     true,
+		OrderDeliveryFailed: true,
+		OrderCompleted:      true,
+	},
+	OrderProcessing: {
+		OrderDelivered:      true,
+		OrderDeliveryFailed: true,
+		OrderCompleted:      true,
+	},
+	OrderDelivered: {
+		OrderCompleted: true,
+	},
+}
+
+// IsValidOrderTransition 判断状态迁移是否合法。
+func IsValidOrderTransition(from, to string) bool {
+	next, ok := validOrderTransitions[from]
+	if !ok {
+		return false
+	}
+	return next[to]
+}
+
+// IsOrderFinal 判断是否为终态。
+func IsOrderFinal(status string) bool {
+	switch status {
+	case OrderCompleted, OrderPaymentFailed, OrderDeliveryFailed, OrderCancelled, OrderExpired:
+		return true
+	}
+	return false
+}
+
+// OrderEvent 为订单事件日志。
+type OrderEvent struct {
+	ID        int64
+	OrderID   int64
+	Event     string
+	Message   string
+	From      string
+	To        string
+	AdminID   int64
+	Metadata  string
+	CreatedAt int64
+}
+
 func Now() int64 { return time.Now().Unix() }
 
 // Slugify 将商品名转为 URL 友好的 slug：小写、保留字母/数字/中文字符，

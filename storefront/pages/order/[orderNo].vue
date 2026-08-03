@@ -9,7 +9,7 @@
       <dt class="text-gray-500">{{ t('status') }}</dt><dd class="col-span-2">
         <span class="inline-flex items-center gap-1">
           {{ statusText(order.status) }}
-          <span v-if="order.status === 'pending'" class="text-xs text-gray-400">{{ t('autoRefresh') }}</span>
+          <span v-if="order.status === 'waiting_payment'" class="text-xs text-gray-400">{{ t('autoRefresh') }}</span>
         </span>
       </dd>
       <dt class="text-gray-500">{{ t('createdAt') }}</dt><dd class="col-span-2">{{ date(order.created_at) }}</dd>
@@ -17,7 +17,7 @@
         <dt class="text-gray-500">{{ t('paidAt') }}</dt><dd class="col-span-2">{{ date(order.paid_at) }}</dd>
       </template>
     </dl>
-    <div v-if="order.status === 'pending' && order.payment_url" class="mt-4 flex gap-2">
+    <div v-if="order.status === 'waiting_payment' && order.payment_url" class="mt-4 flex gap-2">
       <a :href="order.payment_url" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 font-semibold">{{ t('continuePay') }}</a>
       <button @click="cancel" class="border border-red-500 text-red-500 rounded-full px-4 py-2 font-semibold hover:bg-red-50">
         {{ t('cancelOrder') }}
@@ -65,12 +65,12 @@ async function refresh() {
   } catch {
     // 忽略轮询错误，稍后重试
   }
-  if (data.value?.order?.status === 'pending') {
+  if (data.value?.order?.status === 'waiting_payment') {
     timer = setTimeout(refresh, 3000)
   }
 }
 onMounted(() => {
-  if (order.value.status === 'pending') {
+  if (order.value.status === 'waiting_payment') {
     timer = setTimeout(refresh, 3000)
   }
 })

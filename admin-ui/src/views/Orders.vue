@@ -71,11 +71,16 @@ const filters = reactive({ q: '', status: '', range: null as [Date, Date] | null
 const pagedOrders = computed(() => orders.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
 
 const statusOptions = computed(() => ({
+  created: t('orders.status.created'),
+  waiting_payment: t('orders.status.waiting_payment'),
   paid: t('orders.status.paid'),
-  pending: t('orders.status.pending'),
-  expired: t('orders.status.expired'),
-  failed: t('orders.status.failed'),
+  processing: t('orders.status.processing'),
+  delivered: t('orders.status.delivered'),
+  completed: t('orders.status.completed'),
+  payment_failed: t('orders.status.payment_failed'),
+  delivery_failed: t('orders.status.delivery_failed'),
   cancelled: t('orders.status.cancelled'),
+  expired: t('orders.status.expired'),
 }))
 
 async function load() {
@@ -108,7 +113,12 @@ function statusText(status: string) {
   return (t(`orders.status.${status}`) as string) || status
 }
 function statusType(status: string): any {
-  return { paid: 'success', pending: 'warning', expired: 'danger', failed: 'info', cancelled: 'info' }[status] || 'info'
+  const m: any = {
+    paid: 'success', processing: 'success', delivered: 'success', completed: 'success',
+    waiting_payment: 'warning', created: 'info',
+    expired: 'danger', payment_failed: 'danger', delivery_failed: 'danger', cancelled: 'info',
+  }
+  return m[status] || 'info'
 }
 function money(c: number) {
   return ((c || 0) / 100).toFixed(2)

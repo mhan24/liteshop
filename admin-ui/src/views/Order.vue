@@ -18,9 +18,24 @@
       <li v-for="c in cards" :key="c.id"><code>{{ c.content }}</code></li>
     </ul>
     <div style="margin-top:16px">
-      <el-button v-if="order.status === 'pending'" @click="expire">{{ t('orders.markExpired') }}</el-button>
-      <el-button v-if="order.status === 'paid'" @click="resend">{{ t('orders.resend') }}</el-button>
+      <el-button v-if="order.status === 'waiting_payment' || order.status === 'created'" @click="expire">{{ t('orders.markExpired') }}</el-button>
+      <el-button v-if="['paid','processing','delivered','completed','delivery_failed'].includes(order.status) && cards.length" @click="resend">{{ t('orders.resend') }}</el-button>
+      <el-button v-if="order.status === 'delivery_failed' || order.status === 'payment_failed'" type="warning" @click="redeliver">{{ t('orders.redeliver') }}</el-button>
     </div>
+    <h3 style="margin-top:20px">{{ t('orders.logs') }}</h3>
+    <el-timeline v-if="logs.length">
+      <el-timeline-item
+        v-for="log in logs"
+        :key="log.id"
+        :timestamp="date(log.created_at)"
+        placement="top"
+        :type="logType(log)"
+      >
+        <b>{{ eventText(log) }}</b>
+        <div class="log-message">{{ log.message }}</div>
+      </el-timeline-item>
+    </el-timeline>
+    <p v-else class="muted">{{ t('orders.noLogs') }}</p>
   </el-card>
 </template>
 
@@ -36,6 +51,7 @@ const { t } = useI18n()
 const loading = ref(false)
 const order = ref<any>({})
 const cards = ref<any[]>([])
+const logs = ref<any[]>([])
 
 async function load() {
   loading.value = true
@@ -43,6 +59,7 @@ async function load() {
     const data = await api.get('/admin/orders/' + route.params.id)
     order.value = data.order || {}
     cards.value = data.cards || []
+    logs.value = data.logs || []
   } finally {
     loading.value = false
   }
@@ -54,12 +71,35 @@ async function expire() {
 async function resend() {
   await api.post('/admin/orders/' + route.params.id + '/resend', {})
   ElMessage.success(t('orders.resendSent'))
+  await load()
+}
+async function redeliver() {
+  try {
+    await api.post('/admin/orders/' + route.params.id + '/redeliver', {})
+    ElMessage.success(t('orders.redeliverSent'))
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
 }
 function statusText(status: string) {
   return (t(`orders.status.${status}`) as string) || status
 }
 function statusType(status: string): any {
-  return { paid: 'success', pending: 'warning', expired: 'danger', failed: 'info', cancelled: 'info' }[status] || 'info'
+  const m: any = {
+    paid: 'success', processing: 'success', delivered: 'success', completed: 'success',
+    waiting_payment: 'warning', created: 'info',
+    expired: 'danger', payment_failed: 'danger', delivery_failed: 'danger', cancelled: 'info',
+  }
+  return m[status] || 'info'
+}
+function eventText(log: any) {
+  return (t(`orders.events.${log.event}`) as string) || log.event
+}
+function logType(log: any): any {
+  if (log.event === 'payment_success' || log.event === 'delivered') return 'success'
+  if (log.event.includes('failed')) return 'danger'
+  return 'primary'
 }
 function money(c: number) {
   return ((c || 0) / 100).toFixed(2)
@@ -83,5 +123,14 @@ onMounted(load)
 }
 .card-list li {
   padding: 2px 0;
+}
+.log-message {
+  color: #666;
+  font-size: 13px;
+  margin-top: 2px;
+}
+.muted {
+  color: #999;
+  font-size: 13px;
 }
 </style>

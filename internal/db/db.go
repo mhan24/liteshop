@@ -78,6 +78,18 @@ func migrate(db *sql.DB) error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);`,
 		`CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);`,
+		`CREATE TABLE IF NOT EXISTS order_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			order_id INTEGER NOT NULL REFERENCES orders(id),
+			event TEXT NOT NULL,
+			message TEXT NOT NULL DEFAULT '',
+			from_status TEXT NOT NULL DEFAULT '',
+			to_status TEXT NOT NULL DEFAULT '',
+			admin_id INTEGER NOT NULL DEFAULT 0,
+			metadata TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_order_logs_order ON order_logs(order_id, id);`,
 		`CREATE TABLE IF NOT EXISTS settings (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL DEFAULT '',
@@ -91,6 +103,23 @@ func migrate(db *sql.DB) error {
 	}
 	if err := ensureProductColumns(db); err != nil {
 		return err
+	}
+	if err := backfillOrderStatuses(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+// backfillOrderStatuses 将存量订单的旧状态值映射到新状态机值。
+func backfillOrderStatuses(db *sql.DB) error {
+	migrations := []struct{ from, to string }{
+		{"pending", models.OrderWaitingPayment},
+		{"failed", models.OrderPaymentFailed},
+	}
+	for _, m := range migrations {
+		if _, err := db.Exec(`UPDATE orders SET status = ?, updated_at = ? WHERE status = ?`, m.to, models.Now(), m.from); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -147,7 +176,7 @@ func ResetAllTables(db *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
-	tables := []string{"cards", "orders", "products", "settings", "admins"}
+	tables := []string{"order_logs", "cards", "orders", "products", "settings", "admins"}
 	for _, t := range tables {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", t)); err != nil {
 			return err
@@ -205,4 +234,29 @@ func SetSetting(db *sql.DB, key, value string) error {
 	_, err := db.Exec(`INSERT INTO settings(key, value, updated_at) VALUES(?, ?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, key, value, models.Now())
 	return err
+}
+
+// AddOrderLog 追加一条订单事件日志。
+func AddOrderLog(db *sql.DB, orderID int64, event, message, fromStatus, toStatus string, adminID int64, metadata string) error {
+	_, err := db.Exec(`INSERT INTO order_logs(order_id, event, message, from_status, to_status, admin_id, metadata, created_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, orderID, event, message, fromStatus, toStatus, adminID, metadata, models.Now())
+	return err
+}
+
+// OrderLogs 返回某订单的事件日志（按时间正序）。
+func OrderLogs(db *sql.DB, orderID int64) ([]models.OrderEvent, error) {
+	rows, err := db.Query(`SELECT id, order_id, event, message, from_status, to_status, admin_id, metadata, created_at FROM order_logs WHERE order_id = ? ORDER BY id ASC`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.OrderEvent{}
+	for rows.Next() {
+		var e models.OrderEvent
+		if err := rows.Scan(&e.ID, &e.OrderID, &e.Event, &e.Message, &e.From, &e.To, &e.AdminID, &e.Metadata, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }

@@ -112,3 +112,44 @@ func TestSlugify(t *testing.T) {
 		}
 	}
 }
+
+func TestOrderTransitions(t *testing.T) {
+	valid := []struct{ from, to string }{
+		{OrderCreated, OrderWaitingPayment},
+		{OrderCreated, OrderPaymentFailed},
+		{OrderCreated, OrderCancelled},
+		{OrderWaitingPayment, OrderPaid},
+		{OrderWaitingPayment, OrderExpired},
+		{OrderWaitingPayment, OrderCancelled},
+		{OrderPaid, OrderProcessing},
+		{OrderPaid, OrderDeliveryFailed},
+		{OrderPaid, OrderCompleted},
+		{OrderProcessing, OrderDelivered},
+		{OrderProcessing, OrderDeliveryFailed},
+		{OrderDelivered, OrderCompleted},
+	}
+	for _, c := range valid {
+		if !IsValidOrderTransition(c.from, c.to) {
+			t.Errorf("transition %s -> %s should be valid", c.from, c.to)
+		}
+	}
+	invalid := []struct{ from, to string }{
+		{OrderWaitingPayment, OrderProcessing},
+		{OrderPaid, OrderWaitingPayment},
+		{OrderExpired, OrderPaid},
+		{OrderCompleted, OrderDelivered},
+		{OrderCreated, OrderDelivered},
+		{"", OrderPaid},
+	}
+	for _, c := range invalid {
+		if IsValidOrderTransition(c.from, c.to) {
+			t.Errorf("transition %s -> %s should be invalid", c.from, c.to)
+		}
+	}
+	if !IsOrderFinal(OrderCompleted) || !IsOrderFinal(OrderExpired) || !IsOrderFinal(OrderDeliveryFailed) {
+		t.Errorf("final states not recognized")
+	}
+	if IsOrderFinal(OrderPaid) || IsOrderFinal(OrderWaitingPayment) {
+		t.Errorf("non-final states marked final")
+	}
+}

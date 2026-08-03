@@ -69,12 +69,14 @@ function statusText(status: string) {
   return (t(`orderStatus.${status}`) as string) || status
 }
 function badgeClass(status: string) {
-  return {
-    paid: 'bg-green-100 text-green-700',
-    pending: 'bg-yellow-100 text-yellow-700',
-    expired: 'bg-red-100 text-red-700',
-    failed: 'bg-gray-100 text-gray-600',
-  }[status] || 'bg-gray-100 text-gray-600'
+  const m: any = {
+    paid: 'bg-green-100 text-green-700', processing: 'bg-green-100 text-green-700',
+    delivered: 'bg-green-100 text-green-700', completed: 'bg-green-100 text-green-700',
+    waiting_payment: 'bg-yellow-100 text-yellow-700', created: 'bg-gray-100 text-gray-600',
+    expired: 'bg-red-100 text-red-700', payment_failed: 'bg-red-100 text-red-700',
+    delivery_failed: 'bg-red-100 text-red-700', cancelled: 'bg-gray-100 text-gray-600',
+  }
+  return m[status] || 'bg-gray-100 text-gray-600'
 }
 useHead({ title: t('orderQuery'), meta: [{ name: 'description', content: t('orderQueryDesc') }, { name: 'robots', content: 'noindex,nofollow' }] })
 </script>

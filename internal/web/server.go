@@ -979,12 +979,18 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	switch params["status"] {
 	case "2":
-		order, cards, changed, err := s.markPaid(params)
+		order, changed, err := s.markPaid(params)
 		if err != nil {
 			log.Printf("mark paid %s: %v", params["order_id"], err)
 		}
 		if changed {
-			go s.notifier.SendPaid(order, cards)
+			cards, delivered, derr := s.deliverOrder(order)
+			if derr != nil {
+				log.Printf("deliver order %s: %v", order.OrderNo, derr)
+			}
+			if delivered {
+				go s.notifier.SendPaid(order, cards)
+			}
 		}
 	case "3":
 		if err := s.markExpiredByOrderNo(params["order_id"]); err != nil {
@@ -1036,7 +1042,7 @@ func (s *Server) createPendingOrder(order *models.Order) error {
 	}
 	defer tx.Rollback()
 	res, err := tx.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`, order.OrderNo, order.ProductID, order.ProductName, order.Qty, order.AmountCents, order.Fiat, order.TradeType, order.BuyerContact, order.CreatedAt, order.UpdatedAt)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?)`, order.OrderNo, order.ProductID, order.ProductName, order.Qty, order.AmountCents, order.Fiat, order.TradeType, order.BuyerContact, order.CreatedAt, order.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -1112,49 +1118,72 @@ func (s *Server) getOrderCards(orderID int64) ([]models.Card, error) {
 	return out, rows.Err()
 }
 
-func (s *Server) markPaid(params map[string]string) (models.Order, []models.Card, bool, error) {
+// markPaid 处理支付回调：waiting_payment -> paid，并记录事件日志。
+func (s *Server) markPaid(params map[string]string) (models.Order, bool, error) {
 	orderNo := params["order_id"]
 	tx, err := s.db.Begin()
 	if err != nil {
-		return models.Order{}, nil, false, err
+		return models.Order{}, false, err
 	}
 	defer tx.Rollback()
 	var o models.Order
 	err = tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE order_no = ?`, orderNo).Scan(&o.ID, &o.OrderNo, &o.ProductID, &o.ProductName, &o.Qty, &o.AmountCents, &o.Fiat, &o.TradeType, &o.BuyerContact, &o.Status, &o.TradeID, &o.PaymentURL, &o.BlockTransactionID, &o.CreatedAt, &o.UpdatedAt, &o.PaidAt)
 	if err != nil {
-		return models.Order{}, nil, false, err
+		return models.Order{}, false, err
 	}
-	if o.Status == "paid" {
+	if o.Status == models.OrderPaid || o.Status == models.OrderProcessing || o.Status == models.OrderDelivered || o.Status == models.OrderCompleted {
 		if err := tx.Commit(); err != nil {
-			return models.Order{}, nil, false, err
+			return models.Order{}, false, err
 		}
-		cards, _ := s.getOrderCards(o.ID)
-		return o, cards, false, nil
+		return o, false, nil
 	}
-	if o.Status != "pending" {
-		return o, nil, false, tx.Commit()
+	if o.Status != models.OrderWaitingPayment {
+		return o, false, tx.Commit()
 	}
 	now := models.Now()
-	res, err := tx.Exec(`UPDATE orders SET status = 'paid', trade_id = ?, block_transaction_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`, params["trade_id"], params["block_transaction_id"], now, now, o.ID)
+	res, err := tx.Exec(`UPDATE orders SET status = ?, trade_id = ?, block_transaction_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = ?`, models.OrderPaid, params["trade_id"], params["block_transaction_id"], now, now, o.ID, models.OrderWaitingPayment)
 	if err != nil {
-		return models.Order{}, nil, false, err
+		return models.Order{}, false, err
 	}
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
-		return o, nil, false, tx.Commit()
-	}
-	if _, err := tx.Exec(`UPDATE cards SET status = 'sold', sold_at = ?, updated_at = ? WHERE order_id = ? AND status = 'reserved'`, now, now, o.ID); err != nil {
-		return models.Order{}, nil, false, err
+		return o, false, tx.Commit()
 	}
 	if err := tx.Commit(); err != nil {
-		return models.Order{}, nil, false, err
+		return models.Order{}, false, err
 	}
-	o.Status = "paid"
+	o.Status = models.OrderPaid
 	o.TradeID = params["trade_id"]
 	o.BlockTransactionID = params["block_transaction_id"]
 	o.PaidAt = now
-	cards, _ := s.getOrderCards(o.ID)
-	return o, cards, true, nil
+	_ = db.AddOrderLog(s.db, o.ID, "payment_success", "支付成功", models.OrderWaitingPayment, models.OrderPaid, 0, "")
+	return o, true, nil
+}
+
+// deliverOrder 执行发卡（释放卡密为 sold），并在成功后推进到 delivered。
+// 返回卡密与是否发生变更。
+func (s *Server) deliverOrder(order models.Order) ([]models.Card, bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE cards SET status = 'sold', sold_at = ?, updated_at = ? WHERE order_id = ? AND status = 'reserved'`, models.Now(), models.Now(), order.ID); err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	cards, _ := s.getOrderCards(order.ID)
+	if len(cards) == 0 {
+		// 没有预留卡密，视为发卡失败
+		_ = s.setOrderStatusWithLog(order.ID, models.OrderDeliveryFailed, "delivery_failed", "发卡失败：无可用卡密", 0)
+		return nil, false, nil
+	}
+	if err := s.setOrderStatusWithLog(order.ID, models.OrderDelivered, "delivered", "卡密已发放", 0); err != nil {
+		return nil, false, err
+	}
+	return cards, true, nil
 }
 
 func (s *Server) markExpiredByOrderNo(orderNo string) error {
@@ -1171,14 +1200,26 @@ func (s *Server) markExpiredByOrderNo(orderNo string) error {
 }
 
 func (s *Server) expireOrder(orderID int64) error {
-	return s.setOrderStatus(orderID, "expired")
+	var from string
+	_ = s.db.QueryRow(`SELECT status FROM orders WHERE id = ?`, orderID).Scan(&from)
+	// 仅等待支付或 created 状态可过期
+	if from != models.OrderWaitingPayment && from != models.OrderCreated {
+		return nil
+	}
+	return s.cancelOrExpire(orderID, from, models.OrderExpired, "expired", "订单已过期")
 }
 
 func (s *Server) cancelOrder(orderID int64) error {
-	return s.setOrderStatus(orderID, "cancelled")
+	var from string
+	_ = s.db.QueryRow(`SELECT status FROM orders WHERE id = ?`, orderID).Scan(&from)
+	if from != models.OrderWaitingPayment && from != models.OrderCreated {
+		return nil
+	}
+	return s.cancelOrExpire(orderID, from, models.OrderCancelled, "cancelled", "订单已取消")
 }
 
-func (s *Server) setOrderStatus(orderID int64, status string) error {
+// cancelOrExpire 释放预留卡密并将订单置为取消/过期，记录日志。
+func (s *Server) cancelOrExpire(orderID int64, from, to, event, message string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -1187,10 +1228,17 @@ func (s *Server) setOrderStatus(orderID int64, status string) error {
 	if _, err := tx.Exec(`UPDATE cards SET status = 'available', order_id = 0, updated_at = ? WHERE order_id = ? AND status = 'reserved'`, models.Now(), orderID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = 'pending'`, status, models.Now(), orderID); err != nil {
+	if _, err := tx.Exec(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = ?`, to, models.Now(), orderID, from); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return db.AddOrderLog(s.db, orderID, event, message, from, to, 0, "")
+}
+
+func (s *Server) setOrderStatus(orderID int64, status string) error {
+	return s.setOrderStatusWithLog(orderID, status, "status_changed", "状态变更", 0)
 }
 
 func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
