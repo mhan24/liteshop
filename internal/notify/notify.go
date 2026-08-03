@@ -123,6 +123,9 @@ func (n *Notifier) CurrentConfig() config.Config {
 	if v := get("telegram_chat_id"); v != "" {
 		cfg.TelegramChatID = v
 	}
+	if v := get("webhook_url"); v != "" {
+		cfg.WebhookURL = v
+	}
 	return cfg
 }
 

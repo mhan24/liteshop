@@ -13,6 +13,7 @@ import (
 	"shop/internal/bepusdt"
 	"shop/internal/db"
 	"shop/internal/models"
+	"shop/internal/notify"
 	"strconv"
 	"strings"
 	"time"
@@ -327,6 +328,12 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = db.AddOrderLog(s.db, order.ID, "order_created", "订单已创建", "", models.OrderCreated, 0, "")
+	payload := s.notifier.OrderPayload(notify.EventOrderCreated, order, nil, nil)
+	go s.notifier.Notify(notify.EventOrderCreated, payload)
+	// 库存不足检查
+	var remain int
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE product_id = ? AND status = 'available'`, p.ID).Scan(&remain)
+	go s.notifier.NotifyLowStock(p.ID, p.Name, remain)
 	payCfg := s.paymentConfig()
 	redirectURL := payCfg.PublicBaseURL + "/order/" + order.OrderNo + "?contact=" + input.Contact
 	paymentURL, tradeID, err := s.payClient().CreateTransaction(bepusdt.CreateInput{
@@ -341,6 +348,7 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		_ = s.setOrderStatusWithLog(order.ID, models.OrderPaymentFailed, "payment_failed", "创建 BEpusdt 交易失败: "+err.Error(), 0)
+		go s.notifier.NotifySystemError("创建支付交易失败 order=" + order.OrderNo + ": " + err.Error())
 		writeError(w, 502, err.Error())
 		return
 	}
@@ -1086,6 +1094,10 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 	cfg := s.notifier.CurrentConfig()
 	subject, mailBody, telegramBody := s.notifier.PaidTemplates()
+	events, _ := db.GetSetting(s.db, "notify_events")
+	if strings.TrimSpace(events) == "" {
+		events = "order_created,payment_success,delivered,low_stock,system_error"
+	}
 	writeJSON(w, 200, map[string]any{
 		"smtp_host":          cfg.SMTPHost,
 		"smtp_port":          cfg.SMTPPort,
@@ -1094,6 +1106,8 @@ func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 		"smtp_password_set":  cfg.SMTPPassword != "",
 		"telegram_chat_id":   cfg.TelegramChatID,
 		"telegram_token_set": cfg.TelegramBotToken != "",
+		"webhook_url":        cfg.WebhookURL,
+		"notify_events":      events,
 		"mail_paid_subject":  subject,
 		"mail_paid_body":     mailBody,
 		"telegram_paid_body": telegramBody,
@@ -1116,6 +1130,8 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 	setIfPresent("smtp_username", "smtp_username")
 	setIfPresent("smtp_from", "smtp_from")
 	setIfPresent("telegram_chat_id", "telegram_chat_id")
+	setIfPresent("webhook_url", "webhook_url")
+	setIfPresent("notify_events", "notify_events")
 	setIfPresent("mail_paid_subject", "mail_paid_subject")
 	setIfPresent("mail_paid_body", "mail_paid_body")
 	setIfPresent("telegram_paid_body", "telegram_paid_body")

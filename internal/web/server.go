@@ -992,13 +992,19 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 		order, changed, err := s.markPaid(params)
 		if err != nil {
 			log.Printf("mark paid %s: %v", params["order_id"], err)
+			go s.notifier.NotifySystemError("支付回调处理异常 order=" + params["order_id"] + ": " + err.Error())
 		}
 		if changed {
+			payPayload := s.notifier.OrderPayload(notify.EventPaymentSuccess, order, nil, nil)
+			go s.notifier.Notify(notify.EventPaymentSuccess, payPayload)
 			cards, delivered, derr := s.deliverOrder(order)
 			if derr != nil {
 				log.Printf("deliver order %s: %v", order.OrderNo, derr)
+				go s.notifier.NotifySystemError("发货异常 order=" + order.OrderNo + ": " + derr.Error())
 			}
 			if delivered {
+				deliverPayload := s.notifier.OrderPayload(notify.EventDelivered, order, cards, nil)
+				go s.notifier.Notify(notify.EventDelivered, deliverPayload)
 				go s.notifier.SendPaid(order, cards)
 			}
 		}

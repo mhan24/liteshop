@@ -25,6 +25,7 @@ type Config struct {
 	SMTPFrom          string
 	TelegramBotToken  string
 	TelegramChatID    string
+	WebhookURL        string
 }
 
 func ParseTradeTypes(list string) []string {
@@ -71,5 +72,6 @@ func Load() Config {
 		SMTPFrom:          "",
 		TelegramBotToken:  "",
 		TelegramChatID:    "",
+		WebhookURL:        "",
 	}
 }
