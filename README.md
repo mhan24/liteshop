@@ -142,6 +142,27 @@ go build -o shop ./cmd/shop
 
 ## 部署（服务器）
 
+### 一键安装（10 分钟）
+
+在全新 Ubuntu / Debian / CentOS / Rocky / Alma 服务器上，将域名 A 记录指向服务器后执行：
+
+```bash
+# 源码构建模式（首次约 10 分钟，自动装 Go/Node/Caddy/systemd/SSL）
+curl -sSL https://raw.githubusercontent.com/mhan24/liteshop/main/install.sh | DOMAIN=shop.example.com bash
+
+# 快速模式（推荐）：使用预构建产物，跳过源码构建，约 2 分钟
+curl -sSL https://raw.githubusercontent.com/mhan24/liteshop/main/install.sh | \
+  DOMAIN=shop.example.com BUILD_ARTIFACT=https://…/liteshop-release.tgz bash
+
+# 本地生成预构建产物：bash build-release.sh /tmp/liteshop-release.tgz
+```
+
+脚本自动完成：系统检测 → 安装依赖/Go/Node/Caddy → 构建或解压产物 → 创建运行用户与目录 → 写入 systemd 单元 → 生成 Caddyfile 并自动签发 HTTPS 证书 → 启动服务。
+
+可用环境变量：`DOMAIN`（必填）、`EMAIL`（Let's Encrypt 邮箱）、`BRANCH`、`SKIP_SSL=1`（纯 http）、`BUILD_ARTIFACT`（预构建 tgz URL/路径）、`SHOP_USER`。
+
+### 手动部署
+
 - Go：systemd `cardshop`，运行 `/opt/cardshop/shop`，监听 8080
 - 前台：systemd `liteshop-storefront`，运行 `/opt/liteshop-storefront/server/index.mjs`，监听 3001
 - Caddy：按路径分流 API/后台/回调 到 Go，其余到 Nuxt
