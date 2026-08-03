@@ -28,12 +28,14 @@ import (
 )
 
 type Server struct {
-	mux      *http.ServeMux
-	db       *sql.DB
-	cfg      config.Config
-	tpl      *template.Template
-	pay      *bepusdt.Client
-	notifier *notify.Notifier
+	mux       *http.ServeMux
+	db        *sql.DB
+	cfg       config.Config
+	tpl       *template.Template
+	pay       *bepusdt.Client
+	notifier  *notify.Notifier
+	dbPath    string
+	startTime time.Time
 
 	sessMu   sync.Mutex
 	sessions map[string]time.Time
@@ -76,12 +78,14 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		return nil, err
 	}
 	s := &Server{
-		db:       db,
-		cfg:      cfg,
-		tpl:      tpl,
-		pay:      bepusdt.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
-		notifier: notify.New(cfg, db),
-		sessions: make(map[string]time.Time),
+		db:        db,
+		cfg:       cfg,
+		tpl:       tpl,
+		pay:       bepusdt.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
+		notifier:  notify.New(cfg, db),
+		dbPath:    cfg.DatabasePath,
+		startTime: time.Now(),
+		sessions:  make(map[string]time.Time),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -719,6 +723,12 @@ func validEmail(v string) bool {
 		return false
 	}
 	return strings.Contains(v[at+1:], ".")
+}
+
+// startOfDay 返回当天 00:00 的 Unix 时间戳（北京时间）。
+func startOfDay(now int64) int64 {
+	t := time.Unix(now, 0).In(models.BeijingLocation)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, models.BeijingLocation).Unix()
 }
 
 func validTradeType(v string) bool {

@@ -8,13 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"strings"
-	"time"
-
+	"os"
+	"runtime"
 	"shop/internal/bepusdt"
 	"shop/internal/db"
 	"shop/internal/models"
+	"strconv"
+	"strings"
+	"time"
 )
 
 type apiResponse struct {
@@ -492,12 +493,100 @@ func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
-	var products, availableCards, pendingOrders, paidOrders int
+	dayStart := startOfDay(models.Now())
+
+	// 今日指标
+	var todayOrders, todaySales, todayPaidCards int
+	var todayRevenue int64
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE created_at >= ?`, dayStart).Scan(&todayOrders)
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status IN ('paid','processing','delivered','completed') AND paid_at >= ?`, dayStart).Scan(&todaySales)
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(amount_cents),0) FROM orders WHERE status IN ('paid','processing','delivered','completed') AND paid_at >= ?`, dayStart).Scan(&todayRevenue)
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'sold' AND sold_at >= ?`, dayStart).Scan(&todayPaidCards)
+
+	// 待处理
+	var pendingOrders, paymentFailed, deliveryFailed int
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status IN ('created','waiting_payment')`).Scan(&pendingOrders)
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status = 'payment_failed'`).Scan(&paymentFailed)
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status = 'delivery_failed'`).Scan(&deliveryFailed)
+
+	// 商品库存
+	var products, availableCards, soldCards, lockedCards int
 	_ = s.db.QueryRow(`SELECT COUNT(1) FROM products`).Scan(&products)
 	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'available'`).Scan(&availableCards)
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status IN ('created','waiting_payment')`).Scan(&pendingOrders)
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status IN ('paid','processing','delivered','completed')`).Scan(&paidOrders)
-	writeJSON(w, 200, map[string]any{"products": products, "available_cards": availableCards, "pending_orders": pendingOrders, "paid_orders": paidOrders})
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'sold'`).Scan(&soldCards)
+	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'locked'`).Scan(&lockedCards)
+
+	// 库存不足: 可用卡密 < 低库存阈值
+	lowStock := []map[string]any{}
+	rows, err := s.db.Query(`SELECT p.id, p.name, p.price_cents, (SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available') FROM products p WHERE (SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available') < ? AND p.status = 'active' ORDER BY (SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available') ASC LIMIT 10`, s.lowStockThreshold())
+	if err == nil {
+		for rows.Next() {
+			var id int64
+			var name string
+			var price int64
+			var avail int
+			if err := rows.Scan(&id, &name, &price, &avail); err == nil {
+				lowStock = append(lowStock, map[string]any{"id": id, "name": name, "price_cents": price, "available": avail})
+			}
+		}
+		rows.Close()
+	}
+
+	// 最近交易
+	recent := []map[string]any{}
+	orows, err := s.db.Query(`SELECT id, order_no, product_name, qty, amount_cents, fiat, status, created_at FROM orders ORDER BY id DESC LIMIT 8`)
+	if err == nil {
+		for orows.Next() {
+			var o models.Order
+			if err := orows.Scan(&o.ID, &o.OrderNo, &o.ProductName, &o.Qty, &o.AmountCents, &o.Fiat, &o.Status, &o.CreatedAt); err == nil {
+				recent = append(recent, map[string]any{
+					"id": o.ID, "order_no": o.OrderNo, "product_name": o.ProductName,
+					"qty": o.Qty, "amount": fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
+					"fiat": o.Fiat, "status": o.Status, "created_at": o.CreatedAt,
+				})
+			}
+		}
+		orows.Close()
+	}
+
+	// 系统状态
+	var dbSize int64
+	if st, err := os.Stat(s.dbPath); err == nil {
+		dbSize = st.Size()
+	}
+	ver := runtime.Version()
+	uptime := int64(time.Since(s.startTime).Seconds())
+
+	writeJSON(w, 200, map[string]any{
+		"today_orders":     todayOrders,
+		"today_sales":      todaySales,
+		"today_revenue":    todayRevenue,
+		"today_paid_cards": todayPaidCards,
+		"pending_orders":   pendingOrders,
+		"payment_failed":   paymentFailed,
+		"delivery_failed":  deliveryFailed,
+		"products":         products,
+		"available_cards":  availableCards,
+		"sold_cards":       soldCards,
+		"locked_cards":     lockedCards,
+		"low_stock":        lowStock,
+		"recent_orders":    recent,
+		"system": map[string]any{
+			"go_version": ver,
+			"db_size":    dbSize,
+			"uptime":     uptime,
+		},
+	})
+}
+
+// lowStockThreshold 低库存告警阈值 (可用卡密数量)。
+func (s *Server) lowStockThreshold() int {
+	raw := strings.TrimSpace(mustGetSetting(s, "low_stock_threshold"))
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 10
+	}
+	return n
 }
 
 func (s *Server) apiAdminProducts(w http.ResponseWriter, r *http.Request) {

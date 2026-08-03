@@ -59,6 +59,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 
@@ -68,6 +69,8 @@ const loading = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const filters = reactive({ q: '', status: '', range: null as [Date, Date] | null })
+const route = useRoute()
+if (typeof route.query.status === 'string') filters.status = route.query.status
 const pagedOrders = computed(() => orders.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
 
 const statusOptions = computed(() => ({
