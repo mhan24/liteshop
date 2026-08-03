@@ -27,15 +27,24 @@ type Product struct {
 	UpdatedAt   int64
 }
 
+// 卡密状态值。
+const (
+	CardAvailable = "available" // 可用
+	CardLocked    = "locked"    // 已被订单锁定（待支付）
+	CardSold      = "sold"      // 已售出
+	CardDisabled  = "disabled"  // 停用
+)
+
 type Card struct {
-	ID        int64
-	ProductID int64
-	OrderID   int64
-	Content   string
-	Status    string
-	CreatedAt int64
-	UpdatedAt int64
-	SoldAt    int64
+	ID            int64
+	ProductID     int64
+	ReservedOrder int64 // 锁定该卡密的订单（待支付）
+	SoldOrder     int64 // 售出该卡密的订单
+	Content       string
+	Status        string
+	CreatedAt     int64
+	UpdatedAt     int64
+	SoldAt        int64
 }
 
 type Order struct {

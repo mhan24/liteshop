@@ -119,14 +119,15 @@ func orderJSON(o models.Order) map[string]any {
 
 func cardJSON(c models.Card) map[string]any {
 	return map[string]any{
-		"id":         c.ID,
-		"product_id": c.ProductID,
-		"order_id":   c.OrderID,
-		"content":    c.Content,
-		"status":     c.Status,
-		"created_at": c.CreatedAt,
-		"updated_at": c.UpdatedAt,
-		"sold_at":    c.SoldAt,
+		"id":             c.ID,
+		"product_id":     c.ProductID,
+		"reserved_order": c.ReservedOrder,
+		"sold_order":     c.SoldOrder,
+		"content":        c.Content,
+		"status":         c.Status,
+		"created_at":     c.CreatedAt,
+		"updated_at":     c.UpdatedAt,
+		"sold_at":        c.SoldAt,
 	}
 }
 
@@ -634,7 +635,7 @@ func (s *Server) apiAdminCards(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	rows, err := s.db.Query(`SELECT id, product_id, order_id, content, status, created_at, updated_at, sold_at FROM cards WHERE product_id = ? ORDER BY id DESC LIMIT 500`, id)
+	rows, err := s.db.Query(`SELECT id, product_id, reserved_order, sold_order, content, status, created_at, updated_at, sold_at FROM cards WHERE product_id = ? ORDER BY id DESC LIMIT 500`, id)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -643,7 +644,7 @@ func (s *Server) apiAdminCards(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var c models.Card
-		if err := rows.Scan(&c.ID, &c.ProductID, &c.OrderID, &c.Content, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.SoldAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.ProductID, &c.ReservedOrder, &c.SoldOrder, &c.Content, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.SoldAt); err != nil {
 			writeError(w, 500, err.Error())
 			return
 		}
@@ -871,7 +872,7 @@ func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) 
 		writeError(w, 400, "订单缺少商品信息")
 		return
 	}
-	res, err := s.db.Exec(`UPDATE cards SET status = 'reserved', order_id = ?, updated_at = ? WHERE product_id = ? AND status = 'available' LIMIT ?`, o.ID, models.Now(), o.ProductID, o.Qty)
+	res, err := s.db.Exec(`UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ? WHERE product_id = ? AND status = 'available' LIMIT ?`, o.ID, models.Now(), o.ProductID, o.Qty)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return

@@ -49,7 +49,8 @@ func migrate(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS cards (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			product_id INTEGER NOT NULL REFERENCES products(id),
-			order_id INTEGER NOT NULL DEFAULT 0,
+			reserved_order INTEGER NOT NULL DEFAULT 0,
+			sold_order INTEGER NOT NULL DEFAULT 0,
 			content TEXT NOT NULL,
 			status TEXT NOT NULL DEFAULT 'available',
 			created_at INTEGER NOT NULL,
@@ -57,7 +58,6 @@ func migrate(db *sql.DB) error {
 			sold_at INTEGER NOT NULL DEFAULT 0
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_cards_product_status ON cards(product_id, status);`,
-		`CREATE INDEX IF NOT EXISTS idx_cards_order ON cards(order_id);`,
 		`CREATE TABLE IF NOT EXISTS orders (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			order_no TEXT NOT NULL UNIQUE,
@@ -104,7 +104,59 @@ func migrate(db *sql.DB) error {
 	if err := ensureProductColumns(db); err != nil {
 		return err
 	}
+	if err := ensureCardColumns(db); err != nil {
+		return err
+	}
 	if err := backfillOrderStatuses(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ensureCardColumns 为旧版 cards 表补充新列并迁移数据。
+func ensureCardColumns(db *sql.DB) error {
+	additions := []struct {
+		column string
+		ddl    string
+	}{
+		{"reserved_order", "ALTER TABLE cards ADD COLUMN reserved_order INTEGER NOT NULL DEFAULT 0"},
+		{"sold_order", "ALTER TABLE cards ADD COLUMN sold_order INTEGER NOT NULL DEFAULT 0"},
+	}
+	for _, a := range additions {
+		exists, err := columnExists(db, "cards", a.column)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := db.Exec(a.ddl); err != nil {
+				return err
+			}
+		}
+	}
+	// 旧表有 order_id 列时迁移数据并移除
+	if has, _ := columnExists(db, "cards", "order_id"); has {
+		if _, err := db.Exec(`UPDATE cards SET sold_order = order_id WHERE status = 'sold' AND order_id != 0`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`UPDATE cards SET reserved_order = order_id WHERE status IN ('reserved','locked') AND order_id != 0`); err != nil {
+			return err
+		}
+		// 删除引用 order_id 的旧索引后再删列
+		if _, err := db.Exec(`DROP INDEX IF EXISTS idx_cards_order`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`ALTER TABLE cards DROP COLUMN order_id`); err != nil {
+			return err
+		}
+	}
+	// 状态值映射：reserved -> locked
+	if _, err := db.Exec(`UPDATE cards SET status = 'locked' WHERE status = 'reserved'`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_cards_reserved_order ON cards(reserved_order)`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_cards_sold_order ON cards(sold_order)`); err != nil {
 		return err
 	}
 	return nil

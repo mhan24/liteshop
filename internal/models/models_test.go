@@ -99,12 +99,12 @@ func TestFormatBeijing(t *testing.T) {
 
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
-		"优惠码 2026":      "优惠码-2026",
+		"优惠码 2026":        "优惠码-2026",
 		"Voxi & Best VPN": "voxi-best-vpn",
 		"A---B":           "a-b",
 		"   ":             "p",
 		"Hello World!":    "hello-world",
-		"苹果-iPhone15":    "苹果-iphone15",
+		"苹果-iPhone15":     "苹果-iphone15",
 	}
 	for in, want := range cases {
 		if got := Slugify(in); got != want {

@@ -61,8 +61,8 @@ func TestOrderStateMachineFlow(t *testing.T) {
 
 	// 模拟支付回调
 	paid, changed, err := s.markPaid(map[string]string{
-		"order_id":            o.OrderNo,
-		"trade_id":            "T1",
+		"order_id":             o.OrderNo,
+		"trade_id":             "T1",
 		"block_transaction_id": "B1",
 	})
 	if err != nil || !changed {
@@ -83,7 +83,7 @@ func TestOrderStateMachineFlow(t *testing.T) {
 
 	// 验证卡密状态
 	var soldCount int
-	_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE order_id = ? AND status = 'sold'`, order.ID).Scan(&soldCount)
+	_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE sold_order = ? AND status = 'sold'`, order.ID).Scan(&soldCount)
 	if soldCount != 2 {
 		t.Fatalf("sold cards = %d, want 2", soldCount)
 	}
@@ -133,7 +133,7 @@ func TestOrderCancelFreesCards(t *testing.T) {
 		t.Fatalf("status = %s", o.Status)
 	}
 	var avail int
-	_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE status='available' AND order_id=0`).Scan(&avail)
+	_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE status='available' AND reserved_order=0`).Scan(&avail)
 	if avail != 1 {
 		t.Fatalf("cards freed = %d, want 1", avail)
 	}

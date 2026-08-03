@@ -1008,7 +1008,7 @@ func (s *Server) listProductViews(activeOnly bool) ([]ProductView, error) {
 	}
 	rows, err := s.db.Query(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.created_at, p.updated_at,
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available'),
-		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'reserved'),
+		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'locked'),
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'sold')
 		FROM products p ` + where + ` ORDER BY p.is_pinned DESC, p.sort_order ASC, p.id DESC`)
 	if err != nil {
@@ -1065,7 +1065,7 @@ func (s *Server) createPendingOrder(order *models.Order) error {
 		return errors.New("insufficient card stock")
 	}
 	for _, id := range ids {
-		if _, err := tx.Exec(`UPDATE cards SET status = 'reserved', order_id = ?, updated_at = ? WHERE id = ? AND status = 'available'`, order.ID, models.Now(), id); err != nil {
+		if _, err := tx.Exec(`UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ? WHERE id = ? AND status = 'available'`, order.ID, models.Now(), id); err != nil {
 			return err
 		}
 	}
@@ -1078,7 +1078,7 @@ func (s *Server) failOrder(orderID int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE cards SET status = 'available', order_id = 0, updated_at = ? WHERE order_id = ? AND status = 'reserved'`, models.Now(), orderID); err != nil {
+	if _, err := tx.Exec(`UPDATE cards SET status = 'available', reserved_order = 0, updated_at = ? WHERE reserved_order = ? AND status = 'locked'`, models.Now(), orderID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE orders SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'pending'`, models.Now(), orderID); err != nil {
@@ -1102,7 +1102,7 @@ func scanOrder(row *sql.Row) (models.Order, error) {
 }
 
 func (s *Server) getOrderCards(orderID int64) ([]models.Card, error) {
-	rows, err := s.db.Query(`SELECT id, product_id, order_id, content, status, created_at, updated_at, sold_at FROM cards WHERE order_id = ? ORDER BY id`, orderID)
+	rows, err := s.db.Query(`SELECT id, product_id, reserved_order, sold_order, content, status, created_at, updated_at, sold_at FROM cards WHERE sold_order = ? ORDER BY id`, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -1110,7 +1110,7 @@ func (s *Server) getOrderCards(orderID int64) ([]models.Card, error) {
 	var out []models.Card
 	for rows.Next() {
 		var c models.Card
-		if err := rows.Scan(&c.ID, &c.ProductID, &c.OrderID, &c.Content, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.SoldAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.ProductID, &c.ReservedOrder, &c.SoldOrder, &c.Content, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.SoldAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -1168,7 +1168,7 @@ func (s *Server) deliverOrder(order models.Order) ([]models.Card, bool, error) {
 		return nil, false, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE cards SET status = 'sold', sold_at = ?, updated_at = ? WHERE order_id = ? AND status = 'reserved'`, models.Now(), models.Now(), order.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE cards SET status = 'sold', sold_order = ?, reserved_order = 0, sold_at = ?, updated_at = ? WHERE reserved_order = ? AND status = 'locked'`, order.ID, models.Now(), models.Now(), order.ID); err != nil {
 		return nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1225,7 +1225,7 @@ func (s *Server) cancelOrExpire(orderID int64, from, to, event, message string) 
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE cards SET status = 'available', order_id = 0, updated_at = ? WHERE order_id = ? AND status = 'reserved'`, models.Now(), orderID); err != nil {
+	if _, err := tx.Exec(`UPDATE cards SET status = 'available', reserved_order = 0, updated_at = ? WHERE reserved_order = ? AND status = 'locked'`, models.Now(), orderID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = ?`, to, models.Now(), orderID, from); err != nil {
@@ -1679,7 +1679,7 @@ func (s *Server) handleAdminCards(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	rows, err := s.db.Query(`SELECT id, product_id, order_id, content, status, created_at, updated_at, sold_at FROM cards WHERE product_id = ? ORDER BY id DESC LIMIT 500`, id)
+	rows, err := s.db.Query(`SELECT id, product_id, reserved_order, sold_order, content, status, created_at, updated_at, sold_at FROM cards WHERE product_id = ? ORDER BY id DESC LIMIT 500`, id)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -1688,7 +1688,7 @@ func (s *Server) handleAdminCards(w http.ResponseWriter, r *http.Request) {
 	var cards []models.Card
 	for rows.Next() {
 		var c models.Card
-		if err := rows.Scan(&c.ID, &c.ProductID, &c.OrderID, &c.Content, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.SoldAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.ProductID, &c.ReservedOrder, &c.SoldOrder, &c.Content, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.SoldAt); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}

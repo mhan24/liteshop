@@ -14,7 +14,12 @@
       <el-table-column :label="t('common.status')">
         <template #default="{ row }">{{ statusText(row.status) }}</template>
       </el-table-column>
-      <el-table-column :label="t('cards.orderId')" prop="order_id" />
+      <el-table-column :label="t('cards.reservedOrder')">
+        <template #default="{ row }">{{ row.reserved_order || '-' }}</template>
+      </el-table-column>
+      <el-table-column :label="t('cards.soldOrder')">
+        <template #default="{ row }">{{ row.sold_order || '-' }}</template>
+      </el-table-column>
       <el-table-column :label="t('cards.createdAt')">
         <template #default="{ row }">{{ date(row.created_at) }}</template>
       </el-table-column>
