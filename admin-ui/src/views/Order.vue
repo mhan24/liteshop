@@ -11,7 +11,7 @@
     <!-- 操作按钮 -->
     <el-card style="margin-top:12px">
       <template #header><span>{{ t('orders.actions') }}</span></template>
-      <el-space wrap>
+      <el-space v-if="store.canWrite" wrap>
         <el-button
           v-if="['paid','processing','delivered','completed','delivery_failed'].includes(order.status) && cards.length"
           type="primary"
@@ -123,9 +123,11 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
 import { fmtDate } from '@/utils/format'
+import { useSessionStore } from '@/stores/session'
 
 const route = useRoute()
 const { t } = useI18n()
+const store = useSessionStore()
 const loading = ref(false)
 const savingStatus = ref(false)
 const order = ref<any>({})

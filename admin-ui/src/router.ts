@@ -19,6 +19,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'notify', component: () => import('@/views/Notify.vue') },
       { path: 'site', component: () => import('@/views/Site.vue') },
       { path: 'account', component: () => import('@/views/Account.vue') },
+      { path: 'admins', component: () => import('@/views/Admins.vue') },
+      { path: 'audit', component: () => import('@/views/AuditLogs.vue') },
       { path: 'system', component: () => import('@/views/System.vue') },
     ],
   },

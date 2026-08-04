@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"shop/internal/models"
 
@@ -28,9 +29,10 @@ func Open(path string) (*sql.DB, error) {
 func migrate(db *sql.DB) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS admins (
-			id INTEGER PRIMARY KEY CHECK (id = 1),
-			username TEXT NOT NULL,
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username TEXT NOT NULL UNIQUE,
 			password_hash TEXT NOT NULL,
+			role TEXT NOT NULL DEFAULT 'operator',
 			created_at INTEGER NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS products (
@@ -91,6 +93,18 @@ func migrate(db *sql.DB) error {
 			created_at INTEGER NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_order_logs_order ON order_logs(order_id, id);`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			admin_id INTEGER NOT NULL DEFAULT 0,
+			username TEXT NOT NULL DEFAULT '',
+			action TEXT NOT NULL,
+			target_type TEXT NOT NULL DEFAULT '',
+			target_id TEXT NOT NULL DEFAULT '',
+			before_value TEXT NOT NULL DEFAULT '',
+			after_value TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_time ON audit_logs(id);`,
 		`CREATE TABLE IF NOT EXISTS settings (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL DEFAULT '',
@@ -108,10 +122,61 @@ func migrate(db *sql.DB) error {
 	if err := ensureCardColumns(db); err != nil {
 		return err
 	}
+	if err := ensureAdminColumns(db); err != nil {
+		return err
+	}
 	if err := backfillOrderStatuses(db); err != nil {
 		return err
 	}
 	return nil
+}
+
+// ensureAdminColumns 为旧版单管理员表补充 role 列并支持多管理员。
+// 旧表带 CHECK(id=1) 约束，无法加列或插多行，需重建表。
+func ensureAdminColumns(db *sql.DB) error {
+	// 检测是否为旧式单管理员表（含 CHECK(id=1) 或无 role 列）
+	var sql0 string
+	_ = db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='admins'`).Scan(&sql0)
+	legacy := strings.Contains(sql0, "CHECK (id = 1)")
+	if hasRole, _ := columnExists(db, "admins", "role"); !hasRole {
+		legacy = true
+	}
+	if legacy {
+		if err := rebuildAdminsTable(db); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(`UPDATE admins SET role = 'admin' WHERE id = 1`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func rebuildAdminsTable(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`CREATE TABLE admins_new (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		role TEXT NOT NULL DEFAULT 'operator',
+		created_at INTEGER NOT NULL
+	)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO admins_new(id, username, password_hash, role, created_at) SELECT id, username, password_hash, 'admin', created_at FROM admins`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE admins`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE admins_new RENAME TO admins`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ensureCardColumns 为旧版 cards 表补充新列并迁移数据。
@@ -261,7 +326,7 @@ func AllSettings(db *sql.DB) (map[string]string, error) {
 
 func HasAdmin(db *sql.DB) bool {
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(1) FROM admins WHERE id = 1`).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(1) FROM admins`).Scan(&count); err != nil {
 		return false
 	}
 	return count > 0
@@ -271,7 +336,7 @@ func SeedAdmin(db *sql.DB, username, password string) error {
 	if HasAdmin(db) {
 		return nil
 	}
-	_, err := db.Exec(`INSERT INTO admins(id, username, password_hash, created_at) VALUES(1, ?, ?, ?)`, username, models.HashPassword(password), models.Now())
+	_, err := db.Exec(`INSERT INTO admins(id, username, password_hash, role, created_at) VALUES(1, ?, ?, 'admin', ?)`, username, models.HashPassword(password), models.Now())
 	return err
 }
 
@@ -295,6 +360,34 @@ func AddOrderLog(db *sql.DB, orderID int64, event, message, fromStatus, toStatus
 	_, err := db.Exec(`INSERT INTO order_logs(order_id, event, message, from_status, to_status, admin_id, metadata, created_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, orderID, event, message, fromStatus, toStatus, adminID, metadata, models.Now())
 	return err
+}
+
+// AddAuditLog 追加一条管理员审计日志。
+func AddAuditLog(db *sql.DB, adminID int64, username, action, targetType, targetID, before, after string) error {
+	_, err := db.Exec(`INSERT INTO audit_logs(admin_id, username, action, target_type, target_id, before_value, after_value, created_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, adminID, username, action, targetType, targetID, before, after, models.Now())
+	return err
+}
+
+// AuditLogs 返回审计日志（最新在前）。
+func AuditLogs(db *sql.DB, limit int) ([]models.AuditLog, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := db.Query(`SELECT id, admin_id, username, action, target_type, target_id, before_value, after_value, created_at FROM audit_logs ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.AuditLog{}
+	for rows.Next() {
+		var l models.AuditLog
+		if err := rows.Scan(&l.ID, &l.AdminID, &l.Username, &l.Action, &l.TargetType, &l.TargetID, &l.Before, &l.After, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // OrderLogs 返回某订单的事件日志（按时间正序）。

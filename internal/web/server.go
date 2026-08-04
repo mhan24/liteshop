@@ -38,7 +38,12 @@ type Server struct {
 	startTime time.Time
 
 	sessMu   sync.Mutex
-	sessions map[string]time.Time
+	sessions map[string]sessionInfo
+}
+
+type sessionInfo struct {
+	AdminID int64
+	Expiry  time.Time
 }
 
 type ProductView struct {
@@ -88,7 +93,7 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		notifier:  notify.New(cfg, db),
 		dbPath:    cfg.DatabasePath,
 		startTime: time.Now(),
-		sessions:  make(map[string]time.Time),
+		sessions:  make(map[string]sessionInfo),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -1327,17 +1332,14 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	username := strings.TrimSpace(r.FormValue("username"))
 	password := r.FormValue("password")
+	var adminID int64
 	var hash string
-	err := s.db.QueryRow(`SELECT password_hash FROM admins WHERE id = 1 AND username = ?`, username).Scan(&hash)
+	err := s.db.QueryRow(`SELECT id, password_hash FROM admins WHERE username = ?`, username).Scan(&adminID, &hash)
 	if err != nil || !models.CheckPassword(password, hash) {
 		s.render(w, r, 403, "admin_login", map[string]any{"Title": "admin_login", "Error": tr(chooseLang(r), "login_error")})
 		return
 	}
-	id := models.RandomToken(24)
-	s.sessMu.Lock()
-	s.sessions[id] = time.Now().Add(12 * time.Hour)
-	s.sessMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
+	s.startSession(w, adminID)
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
@@ -1492,7 +1494,7 @@ func (s *Server) handleAdminSystemReset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.sessMu.Lock()
-	s.sessions = make(map[string]time.Time)
+	s.sessions = make(map[string]sessionInfo)
 	s.sessMu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: "", Path: "/", MaxAge: -1})
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
@@ -1563,9 +1565,15 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
+// requireAdminAPI 要求至少 viewer 权限（登录即可访问）。
 func (s *Server) requireAdminAPI(next http.Handler) http.Handler {
+	return s.requireRole(models.RoleViewer, next)
+}
+
+// requireRole 要求至少指定角色权限。
+func (s *Server) requireRole(min string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.isAdmin(r) {
+		if !s.roleAtLeast(r, min) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 			return
 		}
@@ -1574,10 +1582,15 @@ func (s *Server) requireAdminAPI(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) startSession(w http.ResponseWriter) {
+// audit 记录一条管理员审计日志（记录谁/何时/改了什么/前后值）。
+func (s *Server) audit(r *http.Request, action, targetType, targetID, before, after string) {
+	_ = db.AddAuditLog(s.db, s.currentAdminID(r), s.currentAdminName(r), action, targetType, targetID, before, after)
+}
+
+func (s *Server) startSession(w http.ResponseWriter, adminID int64) {
 	id := models.RandomToken(24)
 	s.sessMu.Lock()
-	s.sessions[id] = time.Now().Add(12 * time.Hour)
+	s.sessions[id] = sessionInfo{AdminID: adminID, Expiry: time.Now().Add(12 * time.Hour)}
 	s.sessMu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
 }
@@ -1627,20 +1640,73 @@ func (s *Server) signSession(id string) string {
 }
 
 func (s *Server) isAdmin(r *http.Request) bool {
+	_, _, ok := s.currentSession(r)
+	return ok
+}
+
+// currentSession 返回当前登录管理员的 adminID 与角色；未登录返回 (0, "", false)。
+func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 	id, ok := s.sessionID(r)
 	if !ok {
-		return false
+		return 0, "", false
 	}
 	s.sessMu.Lock()
-	exp, ok := s.sessions[id]
-	if ok && time.Now().Before(exp) {
-		s.sessions[id] = time.Now().Add(12 * time.Hour)
+	info, ok := s.sessions[id]
+	if ok && time.Now().Before(info.Expiry) {
+		s.sessions[id] = sessionInfo{AdminID: info.AdminID, Expiry: time.Now().Add(12 * time.Hour)}
 	} else {
 		delete(s.sessions, id)
 		ok = false
 	}
 	s.sessMu.Unlock()
-	return ok
+	if !ok {
+		return 0, "", false
+	}
+	var role string
+	_ = s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, info.AdminID).Scan(&role)
+	if role == "" {
+		role = models.RoleViewer
+	}
+	return info.AdminID, role, true
+}
+
+// currentAdminID 返回当前管理员 ID。
+func (s *Server) currentAdminID(r *http.Request) int64 {
+	id, _, _ := s.currentSession(r)
+	return id
+}
+
+// currentAdminName 返回当前管理员用户名。
+func (s *Server) currentAdminName(r *http.Request) string {
+	id, _, ok := s.currentSession(r)
+	if !ok {
+		return ""
+	}
+	var name string
+	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&name)
+	return name
+}
+
+// roleAtLeast 判断当前用户是否至少具备指定角色权限。
+// 权限层级: viewer < operator < admin。
+func (s *Server) roleAtLeast(r *http.Request, min string) bool {
+	_, role, ok := s.currentSession(r)
+	if !ok {
+		return false
+	}
+	return roleRank(role) >= roleRank(min)
+}
+
+func roleRank(role string) int {
+	switch role {
+	case models.RoleAdmin:
+		return 3
+	case models.RoleOperator:
+		return 2
+	case models.RoleViewer:
+		return 1
+	}
+	return 0
 }
 
 func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {

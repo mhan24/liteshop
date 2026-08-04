@@ -55,32 +55,37 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 
 	mux.Handle("GET /api/v1/admin/products", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProducts)))
 	mux.Handle("GET /api/v1/admin/products/{id}", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProduct)))
-	mux.Handle("POST /api/v1/admin/products", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProductCreate)))
-	mux.Handle("POST /api/v1/admin/products/{id}/edit", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProductUpdate)))
+	mux.Handle("POST /api/v1/admin/products", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminProductCreate)))
+	mux.Handle("POST /api/v1/admin/products/{id}/edit", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminProductUpdate)))
 	mux.Handle("GET /api/v1/admin/products/{id}/cards", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCards)))
-	mux.Handle("POST /api/v1/admin/products/{id}/cards", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCardsImport)))
-	mux.Handle("POST /api/v1/admin/cards/{id}/delete", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCardDelete)))
+	mux.Handle("POST /api/v1/admin/products/{id}/cards", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCardsImport)))
+	mux.Handle("POST /api/v1/admin/cards/{id}/delete", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCardDelete)))
 	mux.Handle("GET /api/v1/admin/orders/export", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrdersExport)))
 	mux.Handle("GET /api/v1/admin/orders", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrders)))
 	mux.Handle("GET /api/v1/admin/orders/{id}", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrder)))
-	mux.Handle("POST /api/v1/admin/orders/{id}/expire", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderExpire)))
-	mux.Handle("POST /api/v1/admin/orders/{id}/cancel", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderCancel)))
-	mux.Handle("POST /api/v1/admin/orders/{id}/status", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderSetStatus)))
-	mux.Handle("POST /api/v1/admin/orders/{id}/resend", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderResend)))
-	mux.Handle("POST /api/v1/admin/orders/{id}/redeliver", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrderRedeliver)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/expire", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderExpire)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/cancel", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderCancel)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/status", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderSetStatus)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/resend", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderResend)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/redeliver", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderRedeliver)))
 	mux.Handle("GET /api/v1/admin/settings", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSettings)))
-	mux.Handle("POST /api/v1/admin/settings", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSettingsSave)))
+	mux.Handle("POST /api/v1/admin/settings", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSettingsSave)))
 	mux.Handle("GET /api/v1/admin/notify", s.requireAdminAPI(http.HandlerFunc(s.apiAdminNotify)))
-	mux.Handle("POST /api/v1/admin/notify", s.requireAdminAPI(http.HandlerFunc(s.apiAdminNotifySave)))
-	mux.Handle("POST /api/v1/admin/notify/test-email", s.requireAdminAPI(http.HandlerFunc(s.apiAdminNotifyTestEmail)))
-	mux.Handle("POST /api/v1/admin/notify/test-telegram", s.requireAdminAPI(http.HandlerFunc(s.apiAdminNotifyTestTelegram)))
+	mux.Handle("POST /api/v1/admin/notify", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminNotifySave)))
+	mux.Handle("POST /api/v1/admin/notify/test-email", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminNotifyTestEmail)))
+	mux.Handle("POST /api/v1/admin/notify/test-telegram", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminNotifyTestTelegram)))
 	mux.Handle("GET /api/v1/admin/site", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSite)))
-	mux.Handle("POST /api/v1/admin/site", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSiteSave)))
+	mux.Handle("POST /api/v1/admin/site", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSiteSave)))
 	mux.Handle("GET /api/v1/admin/account", s.requireAdminAPI(http.HandlerFunc(s.apiAdminAccount)))
-	mux.Handle("POST /api/v1/admin/account", s.requireAdminAPI(http.HandlerFunc(s.apiAdminAccountSave)))
-	mux.Handle("GET /api/v1/admin/system/backup", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSystemBackup)))
-	mux.Handle("POST /api/v1/admin/system/restore", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSystemRestore)))
-	mux.Handle("POST /api/v1/admin/system/reset", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSystemReset)))
+	mux.Handle("POST /api/v1/admin/account", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminAccountSave)))
+	mux.Handle("GET /api/v1/admin/system/backup", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSystemBackup)))
+	mux.Handle("POST /api/v1/admin/system/restore", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSystemRestore)))
+	mux.Handle("POST /api/v1/admin/system/reset", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSystemReset)))
+	mux.Handle("GET /api/v1/admin/admins", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminListAdmins)))
+	mux.Handle("POST /api/v1/admin/admins", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminCreateAdmin)))
+	mux.Handle("POST /api/v1/admin/admins/{id}/role", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSetRole)))
+	mux.Handle("POST /api/v1/admin/admins/{id}/delete", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminDeleteAdmin)))
+	mux.Handle("GET /api/v1/admin/audit-logs", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminAuditLogs)))
 }
 
 func faqJSON(faq []models.FAQItem) string {
@@ -572,7 +577,14 @@ func (s *Server) apiSetLang(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiAdminSession(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"ok": true})
+	id, role, ok := s.currentSession(r)
+	if !ok {
+		writeError(w, 401, "unauthorized")
+		return
+	}
+	var username string
+	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&username)
+	writeJSON(w, 200, map[string]any{"ok": true, "username": username, "role": role})
 }
 
 func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
@@ -584,13 +596,14 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
+	var adminID int64
 	var hash string
-	err := s.db.QueryRow(`SELECT password_hash FROM admins WHERE id = 1 AND username = ?`, strings.TrimSpace(input.Username)).Scan(&hash)
+	err := s.db.QueryRow(`SELECT id, password_hash FROM admins WHERE username = ?`, strings.TrimSpace(input.Username)).Scan(&adminID, &hash)
 	if err != nil || !models.CheckPassword(input.Password, hash) {
 		writeError(w, 403, "invalid credentials")
 		return
 	}
-	s.startSession(w)
+	s.startSession(w, adminID)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -817,6 +830,7 @@ func (s *Server) apiAdminProductCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
+	s.audit(r, "product_create", "product", p.Name, "", fmt.Sprintf("price=%d status=%s", p.PriceCents, p.Status))
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -840,6 +854,9 @@ func (s *Server) apiAdminProductUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
+	var oldName string
+	_ = s.db.QueryRow(`SELECT name FROM products WHERE id = ?`, id).Scan(&oldName)
+	s.audit(r, "product_update", "product", fmt.Sprintf("%d", id), oldName, fmt.Sprintf("name=%s price=%d status=%s", p.Name, p.PriceCents, p.Status))
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -884,6 +901,7 @@ func (s *Server) apiAdminCardsImport(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	now := models.Now()
+	imported := 0
 	for _, line := range strings.Split(input.Cards, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -893,11 +911,13 @@ func (s *Server) apiAdminCardsImport(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, err.Error())
 			return
 		}
+		imported++
 	}
 	if err := tx.Commit(); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
+	s.audit(r, "cards_import", "product", fmt.Sprintf("%d", id), "", fmt.Sprintf("imported=%d", imported))
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -908,6 +928,7 @@ func (s *Server) apiAdminCardDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = s.db.Exec(`DELETE FROM cards WHERE id = ? AND status = 'available'`, id)
+	s.audit(r, "card_delete", "card", fmt.Sprintf("%d", id), "", "deleted")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1031,6 +1052,7 @@ func (s *Server) apiAdminOrderExpire(w http.ResponseWriter, r *http.Request) {
 		}(o.TradeID)
 	}
 	_ = s.expireOrder(id)
+	s.audit(r, "order_expire", "order", fmt.Sprintf("%d", id), "", "")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1055,6 +1077,7 @@ func (s *Server) apiAdminOrderCancel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
+	s.audit(r, "order_cancel", "order", fmt.Sprintf("%d", id), o.Status, models.OrderCancelled)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1096,6 +1119,7 @@ func (s *Server) apiAdminOrderSetStatus(w http.ResponseWriter, r *http.Request) 
 		writeError(w, 500, err.Error())
 		return
 	}
+	s.audit(r, "order_status", "order", fmt.Sprintf("%d", id), o.Status, input.Status)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1143,6 +1167,7 @@ func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) 
 		}
 		go s.notifier.SendPaid(o, cards)
 		_ = db.AddOrderLog(s.db, o.ID, "resend", "管理员重新发送卡密", o.Status, models.OrderDelivered, 1, "")
+		s.audit(r, "order_redeliver", "order", fmt.Sprintf("%d", o.ID), o.Status, models.OrderDelivered)
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
@@ -1165,6 +1190,7 @@ func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) 
 	_ = s.setOrderStatusWithLog(o.ID, models.OrderDelivered, "delivered", "管理员补发卡密", 0)
 	go s.notifier.SendPaid(o, cards)
 	_ = db.AddOrderLog(s.db, o.ID, "resend", "管理员补发并发送卡密", o.Status, models.OrderDelivered, 1, "")
+	s.audit(r, "order_redeliver", "order", fmt.Sprintf("%d", o.ID), o.Status, models.OrderDelivered)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1376,12 +1402,14 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiAdminAccount(w http.ResponseWriter, r *http.Request) {
+	id := s.currentAdminID(r)
 	var username string
-	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = 1`).Scan(&username)
+	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&username)
 	writeJSON(w, 200, map[string]any{"username": username})
 }
 
 func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
+	id := s.currentAdminID(r)
 	var input struct {
 		Username        string `json:"username"`
 		CurrentPassword string `json:"current_password"`
@@ -1393,7 +1421,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var hash string
-	if err := s.db.QueryRow(`SELECT password_hash FROM admins WHERE id = 1`).Scan(&hash); err != nil {
+	if err := s.db.QueryRow(`SELECT password_hash FROM admins WHERE id = ?`, id).Scan(&hash); err != nil {
 		writeError(w, 500, "no admin")
 		return
 	}
@@ -1406,6 +1434,8 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "username empty")
 		return
 	}
+	var oldUsername string
+	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&oldUsername)
 	if input.NewPassword != "" {
 		if len(input.NewPassword) < 8 {
 			writeError(w, 400, "password too short")
@@ -1417,11 +1447,150 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		}
 		hash = models.HashPassword(input.NewPassword)
 	}
-	if _, err := s.db.Exec(`UPDATE admins SET username = ?, password_hash = ? WHERE id = 1`, username, hash); err != nil {
+	if _, err := s.db.Exec(`UPDATE admins SET username = ?, password_hash = ? WHERE id = ?`, username, hash, id); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
+	s.audit(r, "account_update", "admin", fmt.Sprintf("%d", id), oldUsername+" / "+(map[bool]string{true: "密码已修改", false: "密码未变"}[input.NewPassword != ""]), username+" / "+map[bool]string{true: "密码已修改", false: "密码未变"}[input.NewPassword != ""])
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// ---------- 管理员管理 (仅 admin) ----------
+
+func (s *Server) apiAdminListAdmins(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Query(`SELECT id, username, role, created_at FROM admins ORDER BY id`)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id int64
+		var username, role string
+		var createdAt int64
+		if err := rows.Scan(&id, &username, &role, &createdAt); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		out = append(out, map[string]any{"id": id, "username": username, "role": role, "created_at": createdAt})
+	}
+	writeJSON(w, 200, map[string]any{"admins": out})
+}
+
+func (s *Server) apiAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	username := strings.TrimSpace(input.Username)
+	if username == "" || len(input.Password) < 8 {
+		writeError(w, 400, "username/password invalid")
+		return
+	}
+	role := strings.TrimSpace(input.Role)
+	if role != models.RoleAdmin && role != models.RoleOperator && role != models.RoleViewer {
+		role = models.RoleOperator
+	}
+	if _, err := s.db.Exec(`INSERT INTO admins(username, password_hash, role, created_at) VALUES(?, ?, ?, ?)`, username, models.HashPassword(input.Password), role, models.Now()); err != nil {
+		writeError(w, 400, "create failed (username may exist)")
+		return
+	}
+	s.audit(r, "admin_create", "admin", username, "", role)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminSetRole(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	var input struct {
+		Role string `json:"role"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
+	role := strings.TrimSpace(input.Role)
+	if role != models.RoleAdmin && role != models.RoleOperator && role != models.RoleViewer {
+		writeError(w, 400, "invalid role")
+		return
+	}
+	// 防止取消最后一个 admin
+	if role != models.RoleAdmin {
+		var admins int
+		_ = s.db.QueryRow(`SELECT COUNT(1) FROM admins WHERE role = 'admin'`).Scan(&admins)
+		if admins <= 1 {
+			// 被改者若是唯一 admin, 拒绝
+			var cur string
+			_ = s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, id).Scan(&cur)
+			if cur == models.RoleAdmin && admins == 1 {
+				writeError(w, 400, "cannot demote the last admin")
+				return
+			}
+		}
+	}
+	var before string
+	_ = s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, id).Scan(&before)
+	if _, err := s.db.Exec(`UPDATE admins SET role = ? WHERE id = ?`, role, id); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	s.audit(r, "admin_role", "admin", fmt.Sprintf("%d", id), before, role)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminDeleteAdmin(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	if id == s.currentAdminID(r) {
+		writeError(w, 400, "cannot delete yourself")
+		return
+	}
+	var cur string
+	_ = s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, id).Scan(&cur)
+	if cur == models.RoleAdmin {
+		var admins int
+		_ = s.db.QueryRow(`SELECT COUNT(1) FROM admins WHERE role = 'admin'`).Scan(&admins)
+		if admins <= 1 {
+			writeError(w, 400, "cannot delete the last admin")
+			return
+		}
+	}
+	var uname string
+	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&uname)
+	if _, err := s.db.Exec(`DELETE FROM admins WHERE id = ?`, id); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	s.audit(r, "admin_delete", "admin", fmt.Sprintf("%d", id), uname, "deleted")
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// ---------- 审计日志 (仅 admin) ----------
+
+func (s *Server) apiAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
+	logs, err := db.AuditLogs(s.db, 200)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	out := []map[string]any{}
+	for _, l := range logs {
+		out = append(out, map[string]any{
+			"id": l.ID, "admin_id": l.AdminID, "username": l.Username,
+			"action": l.Action, "target_type": l.TargetType, "target_id": l.TargetID,
+			"before": l.Before, "after": l.After, "created_at": l.CreatedAt,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"logs": out})
 }
 
 func (s *Server) apiAdminSystemBackup(w http.ResponseWriter, r *http.Request) {
@@ -1480,8 +1649,9 @@ func (s *Server) apiAdminSystemReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sessMu.Lock()
-	s.sessions = make(map[string]time.Time)
+	s.sessions = make(map[string]sessionInfo)
 	s.sessMu.Unlock()
+	s.audit(r, "system_reset", "system", "all", "all data", "reset")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

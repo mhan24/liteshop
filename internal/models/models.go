@@ -146,6 +146,27 @@ type OrderEvent struct {
 	CreatedAt int64
 }
 
+// 管理员角色。
+const (
+	RoleAdmin    = "admin"    // 全部权限
+	RoleOperator = "operator" // 运营操作，不可改系统设置/管理员
+	RoleViewer   = "viewer"   // 只读
+)
+
+// AuditLog 管理员审计日志。
+type AuditLog struct {
+	ID         int64
+	AdminID    int64
+	Username   string
+	Action     string
+	TargetType string
+	TargetID   string
+	Before     string
+	After      string
+	CreatedAt  int64
+}
+
+// Now 返回当前 Unix 时间戳。
 func Now() int64 { return time.Now().Unix() }
 
 // Slugify 将商品名转为 URL 友好的 slug：小写、保留字母/数字/中文字符，
