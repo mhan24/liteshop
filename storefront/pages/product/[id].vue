@@ -8,7 +8,7 @@
       </div>
       <h1 class="text-2xl font-bold mt-3">{{ product.name }}</h1>
       <div class="md-body text-gray-600 mt-2" v-html="renderMarkdown(product.description)"></div>
-      <p class="text-2xl font-bold mt-4">¥{{ money(product.price_cents) }}</p>
+      <p class="text-2xl font-bold mt-4">{{ siteMoney(product.price_cents) }}</p>
       <p class="text-gray-500 text-sm">{{ t('currentStock') }} {{ available }}</p>
 
       <form class="mt-4 grid gap-3" @submit.prevent="submit">
@@ -58,6 +58,7 @@
 <script setup lang="ts">
 const route = useRoute()
 const { t } = useI18n()
+const { money: siteMoney, currency: siteCurrency } = useSiteConfig()
 const api = useApi()
 const req = useRequestURL()
 
@@ -218,7 +219,7 @@ useHead(() => {
               offers: {
                 '@type': 'Offer',
                 url,
-                priceCurrency: 'CNY',
+                priceCurrency: siteCurrency.value,
                 price: ((p.price_cents || 0) / 100).toFixed(2),
                 availability: available.value > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
               },

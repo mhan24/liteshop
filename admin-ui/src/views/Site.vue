@@ -15,6 +15,31 @@
       <el-form-item :label="t('site.subtitleNote')">
         <el-input v-model="form.site_subtitle" type="textarea" :rows="3" />
       </el-form-item>
+      <el-row :gutter="12">
+        <el-col :md="8">
+          <el-form-item :label="t('site.locale')">
+            <el-select v-model="form.site_locale" style="width:100%">
+              <el-option value="zh-CN">简体中文</el-option>
+              <el-option value="en-US">English</el-option>
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :md="8">
+          <el-form-item :label="t('site.currency')">
+            <el-select v-model="form.site_currency" style="width:100%">
+              <el-option value="CNY">CNY ¥</el-option>
+              <el-option value="USD">USD $</el-option>
+              <el-option value="EUR">EUR €</el-option>
+              <el-option value="GBP">GBP £</el-option>
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :md="8">
+          <el-form-item :label="t('site.timezone')">
+            <el-input v-model="form.site_timezone" placeholder="Asia/Shanghai" />
+          </el-form-item>
+        </el-col>
+      </el-row>
 
       <el-divider content-position="left">{{ t('site.linksTitle') }}</el-divider>
       <el-form-item :label="t('site.links')">

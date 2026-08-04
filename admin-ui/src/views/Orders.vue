@@ -62,6 +62,7 @@ import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
+import { fmtDate } from '@/utils/format'
 
 const { t } = useI18n()
 const orders = ref<any[]>([])
@@ -127,8 +128,7 @@ function money(c: number) {
   return ((c || 0) / 100).toFixed(2)
 }
 function date(ts: number) {
-  if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+  return fmtDate(ts)
 }
 function exportCSV() {
   const params: any = {}

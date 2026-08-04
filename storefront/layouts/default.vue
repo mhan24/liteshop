@@ -29,6 +29,7 @@ const site = ref<any>({})
 try {
   site.value = await useApi().get('/site')
 } catch {}
+loadSiteConfig(site.value)
 
 const maintenance = computed(() => !!site.value?.maintenance?.enabled)
 const maintenanceMessage = computed(() => site.value?.maintenance?.message || '')

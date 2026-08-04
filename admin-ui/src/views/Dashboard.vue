@@ -10,7 +10,7 @@
       <el-col :xs="12" :md="6">
         <el-card shadow="hover">
           <el-statistic :title="t('dashboard.todayRevenue')" :value="revenue" :precision="2" />
-          <div class="stat-sub">¥ CNY</div>
+          <div class="stat-sub">{{ currencyLabel }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :md="6">
@@ -80,7 +80,7 @@
               </template>
             </el-table-column>
             <el-table-column :label="t('common.price')" width="100">
-              <template #default="{ row }">¥{{ (row.price_cents / 100).toFixed(2) }}</template>
+              <template #default="{ row }">{{ fmtMoney(row.price_cents) }}</template>
             </el-table-column>
             <el-table-column label="" width="80">
               <template #default="{ row }">
@@ -120,7 +120,7 @@
         <el-table-column prop="order_no" :label="t('orders.orderNo')" width="220" />
         <el-table-column prop="product_name" :label="t('orders.product')" />
         <el-table-column :label="t('orders.amount')" width="110">
-          <template #default="{ row }">¥{{ row.amount }} {{ row.fiat }}</template>
+          <template #default="{ row }">{{ row.amount }} {{ row.fiat }}</template>
         </el-table-column>
         <el-table-column :label="t('common.status')" width="110">
           <template #default="{ row }">
@@ -140,12 +140,14 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Clock, Warning, Failed } from '@element-plus/icons-vue'
 import { api } from '@/api'
+import { fmtMoney, fmtDate, currencyLabel as getCurrencyLabel } from '@/utils/format'
 
 const { t } = useI18n()
 const loading = ref(false)
 const stats = ref<any>({})
 
 const revenue = computed(() => ((stats.value.today_revenue || 0) / 100).toFixed(2))
+const currencyLabel = computed(() => getCurrencyLabel())
 const uptimeText = computed(() => {
   const s = stats.value.system?.uptime || 0
   const d = Math.floor(s / 86400)
@@ -174,8 +176,7 @@ function statusType(status: string): any {
   return m[status] || 'info'
 }
 function date(ts: number) {
-  if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+  return fmtDate(ts)
 }
 onMounted(async () => {
   loading.value = true

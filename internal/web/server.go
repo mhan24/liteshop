@@ -65,6 +65,9 @@ type SiteSettings struct {
 	Copyright      string
 	Privacy        string
 	Terms          string
+	Locale         string
+	Currency       string
+	Timezone       string
 }
 
 type FooterLink struct {
@@ -243,6 +246,9 @@ func (s *Server) siteSettings() SiteSettings {
 		st.Copyright = "© {{year}} {{site_title}}. All rights reserved."
 	}
 	st.Copyright = renderSiteVars(st.Copyright, st.Title)
+	st.Locale = firstNonEmpty(get("site_locale"), "zh-CN")
+	st.Currency = firstNonEmpty(get("site_currency"), "CNY")
+	st.Timezone = firstNonEmpty(get("site_timezone"), "Asia/Shanghai")
 	return st
 }
 

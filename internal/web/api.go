@@ -181,12 +181,38 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"links":                 parseSiteLinks(mustGetSetting(s, "site_links")),
 		"copyright":             renderSiteVars(rawCopyright, st.Title),
 		"lang":                  chooseLang(r),
+		"locale":                st.Locale,
+		"currency":              st.Currency,
+		"currency_symbol":       currencySymbol(st.Currency),
+		"timezone":              st.Timezone,
 		"default_product_image": s.defaultProductImage(),
 		"maintenance": map[string]any{
 			"enabled": enabled,
 			"message": maintenanceMessage,
 		},
 	})
+}
+
+// currencySymbol 返回货币符号。
+func currencySymbol(currency string) string {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "CNY", "RMB":
+		return "¥"
+	case "USD", "USDT", "EUR", "GBP", "JPY":
+		// 常见符号; 其余回退为代码
+	}
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "USD":
+		return "$"
+	case "EUR":
+		return "€"
+	case "GBP":
+		return "£"
+	case "JPY":
+		return "¥"
+	default:
+		return strings.ToUpper(strings.TrimSpace(currency))
+	}
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -1282,6 +1308,9 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		"maintenance_pass_set":  mustGetSetting(s, "maintenance_password") != "",
 		"site_links":            parseSiteLinks(mustGetSetting(s, "site_links")),
 		"default_product_image": s.defaultProductImage(),
+		"site_locale":           st.Locale,
+		"site_currency":         st.Currency,
+		"site_timezone":         st.Timezone,
 	})
 }
 
@@ -1307,6 +1336,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 		"site_friend_links": "site_friend_links", "site_copyright": "site_copyright",
 		"privacy_policy": "privacy_policy", "terms_of_service": "terms_of_service", "turnstile_site_key": "turnstile_site_key",
 		"maintenance_message": "maintenance_message", "default_product_image": "default_product_image",
+		"site_locale": "site_locale", "site_currency": "site_currency", "site_timezone": "site_timezone",
 	} {
 		setIfPresent(key, field)
 	}

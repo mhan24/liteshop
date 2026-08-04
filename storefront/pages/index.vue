@@ -60,7 +60,7 @@
           </NuxtLink>
           <h3 class="font-semibold text-lg mt-2"><NuxtLink :to="productUrl(p.product)" class="hover:text-brand">{{ p.product.name }}</NuxtLink></h3>
           <p class="text-gray-500 text-sm mt-1 line-clamp-2">{{ markdownText(p.product.description) }}</p>
-          <p class="text-2xl font-bold mt-3">¥{{ (p.product.price_cents / 100).toFixed(2) }}</p>
+          <p class="text-2xl font-bold mt-3">{{ money(p.product.price_cents) }}</p>
           <p class="text-gray-500 text-sm">{{ t('stock') }} {{ p.available }}</p>
           <NuxtLink v-if="p.available > 0" :to="productUrl(p.product)" class="inline-block mt-3 bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2">{{ t('buyNow') }}</NuxtLink>
           <span v-else class="inline-block mt-3 bg-gray-300 text-white rounded-full px-4 py-2">{{ t('soldOut') }}</span>
@@ -75,6 +75,7 @@
 <script setup lang="ts">
 import { reactive, computed } from 'vue'
 const { t } = useI18n()
+const { money } = useSiteConfig()
 const api = useApi()
 const req = useRequestURL()
 const siteUrl = computed(() => req.origin + '/')

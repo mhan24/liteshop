@@ -38,6 +38,7 @@
 
 <script setup lang="ts">
 const { t } = useI18n()
+const { date: siteDate } = useSiteConfig()
 const api = useApi()
 const form = reactive({ contact: '', order_no: '' })
 const orders = ref<any[]>([])
@@ -62,8 +63,7 @@ async function submit() {
   }
 }
 function date(ts: number) {
-  if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+  return siteDate(ts)
 }
 function statusText(status: string) {
   return (t(`orderStatus.${status}`) as string) || status

@@ -36,13 +36,14 @@
 <script setup lang="ts">
 const route = useRoute()
 const { t } = useI18n()
+const { date: siteDate } = useSiteConfig()
 const api = useApi()
 const { data } = await useAsyncData(() => api.get('/orders/' + route.params.orderNo, { contact: route.query.contact }))
 const order = computed(() => (data.value as any)?.order || {})
 const cards = computed(() => (data.value as any)?.cards || [])
 
 function money(c: number) { return ((c || 0) / 100).toFixed(2) }
-function date(ts: number) { if (!ts) return '-'; return new Date(ts * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }
+function date(ts: number) { return siteDate(ts) }
 function statusText(status: string) {
   return (t(`orderStatus.${status}`) as string) || status
 }

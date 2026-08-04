@@ -122,6 +122,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
+import { fmtDate } from '@/utils/format'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -232,8 +233,7 @@ function money(c: number) {
   return ((c || 0) / 100).toFixed(2)
 }
 function date(ts: number) {
-  if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+  return fmtDate(ts)
 }
 onMounted(load)
 </script>
