@@ -102,6 +102,7 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 	})
 	mux.HandleFunc("POST /notify/bepusdt", s.handleBepusdtNotify)
 	s.registerAPI(mux)
+	s.registerDocs(mux)
 	mux.Handle("GET /admin/assets/", http.StripPrefix("/admin", http.FileServer(adminAssetsFS())))
 	mux.HandleFunc("GET /admin", s.adminIndex)
 	mux.HandleFunc("GET /admin/{path...}", s.adminIndex)

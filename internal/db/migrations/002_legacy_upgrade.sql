@@ -1,0 +1,8 @@
+-- 002_legacy_upgrade.sql - 存量库升级（Go 条件逻辑）
+--
+-- 本迁移由 Go 实现（见 migrations.go legacyUpgrade）：
+--   - products 补 image_url / faq 列
+--   - cards 拆 order_id -> reserved_order / sold_order
+--   - admins 重建为多管理员 + role 列
+--   - 订单/卡密状态值回填
+-- 对全新库（001_init 已建好）此迁移自动跳过。

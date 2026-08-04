@@ -1,0 +1,245 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "LiteShop API",
+    "description": "LiteShop 自动发卡系统 API。公共端点无需认证；管理端点需先登录获取会话 Cookie。",
+    "version": "1.0.0",
+    "contact": { "name": "LiteShop", "url": "https://github.com/mhan24/liteshop" }
+  },
+  "servers": [{ "url": "/" }],
+  "tags": [
+    { "name": "public", "description": "公开端点（前台）" },
+    { "name": "admin", "description": "管理端点（需登录）" },
+    { "name": "webhook", "description": "BEpusdt 回调" }
+  ],
+  "paths": {
+    "/api/v1/site": {
+      "get": {
+        "tags": ["public"],
+        "summary": "站点信息",
+        "description": "站点标题/副标题/公告/语言/货币/时区/维护状态",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/v1/products": {
+      "get": {
+        "tags": ["public"],
+        "summary": "商品列表",
+        "description": "支持 q(关键词) / category(分类) / min_price / max_price 筛选",
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" } },
+          { "name": "category", "in": "query", "schema": { "type": "string" } },
+          { "name": "min_price", "in": "query", "schema": { "type": "number" } },
+          { "name": "max_price", "in": "query", "schema": { "type": "number" } }
+        ],
+        "responses": { "200": { "description": "分类商品列表" } }
+      }
+    },
+    "/api/v1/products/{id}": {
+      "get": {
+        "tags": ["public"],
+        "summary": "商品详情",
+        "description": "按 id 或 slug 查找商品，含库存/收款类型/FAQ",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "OK" }, "404": { "description": "not found" } }
+      }
+    },
+    "/api/v1/orders": {
+      "post": {
+        "tags": ["public"],
+        "summary": "创建订单",
+        "description": "需 Turnstile token。创建订单并生成 BEpusdt 交易。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["product_id", "contact", "cf-turnstile-response"],
+                "properties": {
+                  "product_id": { "type": "integer" },
+                  "qty": { "type": "integer", "default": 1 },
+                  "contact": { "type": "string", "format": "email" },
+                  "trade_type": { "type": "string" },
+                  "cf-turnstile-response": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "order_no + payment_url" } }
+      },
+      "get": {
+        "tags": ["public"],
+        "summary": "按邮箱查询订单",
+        "parameters": [{ "name": "contact", "in": "query", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "订单列表" } }
+      }
+    },
+    "/api/v1/orders/{orderNo}": {
+      "get": {
+        "tags": ["public"],
+        "summary": "订单详情（含卡密，需下单邮箱匹配）",
+        "parameters": [
+          { "name": "orderNo", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "contact", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "订单 + 卡密" } }
+      }
+    },
+    "/api/v1/orders/{orderNo}/cancel": {
+      "post": {
+        "tags": ["public"],
+        "summary": "取消订单（释放卡密并关闭 BEpusdt 交易）",
+        "parameters": [{ "name": "orderNo", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/pages/{slug}": {
+      "get": {
+        "tags": ["public"],
+        "summary": "静态页（隐私/条款）",
+        "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "页面内容" } }
+      }
+    },
+    "/notify/bepusdt": {
+      "post": {
+        "tags": ["webhook"],
+        "summary": "BEpusdt 支付回调",
+        "description": "BEpusdt 回调，MD5 验签后更新订单状态并发卡。",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object" } } }
+        },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/health": {
+      "get": { "tags": ["public"], "summary": "健康检查", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/login": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "管理员登录（设置会话 Cookie）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["username", "password"],
+                "properties": {
+                  "username": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/session": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "当前会话（含角色）",
+        "responses": { "200": { "description": "username + role" } }
+      }
+    },
+    "/api/v1/admin/dashboard": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "运营驾驶舱数据",
+        "responses": { "200": { "description": "今日订单/收入/库存/待处理/系统状态" } }
+      }
+    },
+    "/api/v1/admin/products": {
+      "get": { "tags": ["admin"], "summary": "商品列表（含库存）", "responses": { "200": { "description": "OK" } } },
+      "post": { "tags": ["admin"], "summary": "新建商品（需 operator+）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/products/{id}": {
+      "get": { "tags": ["admin"], "summary": "商品详情", "responses": { "200": { "description": "OK" } } }
+    },
+    "/api/v1/admin/products/{id}/edit": {
+      "post": { "tags": ["admin"], "summary": "编辑商品（需 operator+）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/products/{id}/cards": {
+      "get": { "tags": ["admin"], "summary": "卡密列表", "responses": { "200": { "description": "OK" } } },
+      "post": { "tags": ["admin"], "summary": "导入卡密（需 operator+）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/orders": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "订单列表",
+        "description": "支持 q / status / start / end 筛选",
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "start", "in": "query", "schema": { "type": "integer" } },
+          { "name": "end", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "订单详情（含卡密 + 日志）",
+        "responses": { "200": { "description": "order + cards + logs" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}/status": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "修改订单状态（需 operator+）",
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}/redeliver": {
+      "post": { "tags": ["admin"], "summary": "重新发卡（需 operator+）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/orders/{id}/cancel": {
+      "post": { "tags": ["admin"], "summary": "取消订单（需 operator+）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/orders/{id}/expire": {
+      "post": { "tags": ["admin"], "summary": "标记过期（需 operator+）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/orders/{id}/resend": {
+      "post": { "tags": ["admin"], "summary": "重发通知（需 operator+）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/orders/export": {
+      "get": { "tags": ["admin"], "summary": "订单 CSV 导出", "responses": { "200": { "description": "CSV" } } }
+    },
+    "/api/v1/admin/settings": {
+      "get": { "tags": ["admin"], "summary": "支付设置读取", "responses": { "200": { "description": "OK" } } },
+      "post": { "tags": ["admin"], "summary": "支付设置保存（需 admin）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/notify": {
+      "get": { "tags": ["admin"], "summary": "通知设置读取", "responses": { "200": { "description": "OK" } } },
+      "post": { "tags": ["admin"], "summary": "通知设置保存（需 admin）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/site": {
+      "get": { "tags": ["admin"], "summary": "站点设置读取", "responses": { "200": { "description": "OK" } } },
+      "post": { "tags": ["admin"], "summary": "站点设置保存（需 admin）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/admins": {
+      "get": { "tags": ["admin"], "summary": "管理员列表（需 admin）", "responses": { "200": { "description": "OK" } } },
+      "post": { "tags": ["admin"], "summary": "创建管理员（需 admin）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/admin/audit-logs": {
+      "get": { "tags": ["admin"], "summary": "审计日志（需 admin）", "responses": { "200": { "description": "OK" } } }
+    },
+    "/api/v1/admin/account": {
+      "get": { "tags": ["admin"], "summary": "当前账号信息", "responses": { "200": { "description": "OK" } } },
+      "post": { "tags": ["admin"], "summary": "修改账号/密码（需 operator+）", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/maintenance/unlock": {
+      "post": { "tags": ["public"], "summary": "维护模式解锁", "responses": { "200": { "description": "ok" } } }
+    },
+    "/api/v1/setup": {
+      "get": { "tags": ["public"], "summary": "初始化状态检查", "responses": { "200": { "description": "OK" } } },
+      "post": { "tags": ["public"], "summary": "初始化站点", "responses": { "200": { "description": "ok" } } }
+    }
+  }
+}
