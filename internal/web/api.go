@@ -249,7 +249,37 @@ func (s *Server) apiProducts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
-	groups := groupIndexProducts(products)
+	// 筛选: q 关键词 / category 分类 / min_price / max_price
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	minPrice := strings.TrimSpace(r.URL.Query().Get("min_price"))
+	maxPrice := strings.TrimSpace(r.URL.Query().Get("max_price"))
+	filtered := []ProductView{}
+	for _, p := range products {
+		if q != "" {
+			hay := strings.ToLower(p.Product.Name + " " + p.Product.Description)
+			if !strings.Contains(hay, strings.ToLower(q)) {
+				continue
+			}
+		}
+		if category != "" && category != "all" {
+			if p.Product.Category != category {
+				continue
+			}
+		}
+		if minPrice != "" {
+			if cents, err := strconv.ParseFloat(minPrice, 64); err == nil && float64(p.Product.PriceCents)/100 < cents {
+				continue
+			}
+		}
+		if maxPrice != "" {
+			if cents, err := strconv.ParseFloat(maxPrice, 64); err == nil && float64(p.Product.PriceCents)/100 > cents {
+				continue
+			}
+		}
+		filtered = append(filtered, p)
+	}
+	groups := groupIndexProducts(filtered)
 	out := []map[string]any{}
 	for _, g := range groups {
 		items := []map[string]any{}
@@ -258,7 +288,31 @@ func (s *Server) apiProducts(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, map[string]any{"name": g.Name, "default_key": g.DefaultKey, "products": items})
 	}
-	writeJSON(w, 200, map[string]any{"categories": out})
+	writeJSON(w, 200, map[string]any{
+		"categories":     out,
+		"categories_all": s.allCategories(),
+	})
+}
+
+// allCategories 返回全部上架商品的分类列表（去重，供筛选器使用）。
+func (s *Server) allCategories() []string {
+	products, err := s.listProductViews(true)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, p := range products {
+		c := strings.TrimSpace(p.Product.Category)
+		if c == "" {
+			c = "默认分类"
+		}
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
