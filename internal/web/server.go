@@ -25,6 +25,7 @@ import (
 	"shop/internal/db"
 	"shop/internal/models"
 	"shop/internal/notify"
+	"shop/internal/order"
 )
 
 type Server struct {
@@ -34,6 +35,7 @@ type Server struct {
 	tpl       *template.Template
 	pay       *bepusdt.Client
 	notifier  *notify.Notifier
+	orders    *order.Service
 	dbPath    string
 	startTime time.Time
 
@@ -95,6 +97,12 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		startTime: time.Now(),
 		sessions:  make(map[string]sessionInfo),
 	}
+	s.orders = order.NewService(
+		order.NewRepository(db),
+		s.payClient,
+		s.paymentConfigForService,
+	)
+	s.orders.SendPaid = s.notifier.SendPaid
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -201,6 +209,18 @@ func (s *Server) paymentConfig() config.Config {
 func (s *Server) payClient() *bepusdt.Client {
 	cfg := s.paymentConfig()
 	return bepusdt.New(cfg.BepusdtBaseURL, cfg.BepusdtToken)
+}
+
+// paymentConfigForService 供 order.Service 读取支付配置。
+func (s *Server) paymentConfigForService() order.PaymentConfig {
+	cfg := s.paymentConfig()
+	return order.PaymentConfig{
+		PublicBaseURL: cfg.PublicBaseURL,
+		NotifyURL:     cfg.NotifyURL,
+		TimeoutSec:    cfg.BepusdtTimeoutSec,
+		Fiat:          cfg.BepusdtFiat,
+		TradeTypes:    cfg.BepusdtTradeTypes,
+	}
 }
 
 func (s *Server) siteSettings() SiteSettings {
@@ -1001,7 +1021,7 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	switch params["status"] {
 	case "2":
-		order, changed, err := s.markPaid(params)
+		order, cards, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], params["trade_id"], params["block_transaction_id"])
 		if err != nil {
 			log.Printf("mark paid %s: %v", params["order_id"], err)
 			go s.notifier.NotifySystemError("支付回调处理异常 order=" + params["order_id"] + ": " + err.Error())
@@ -1009,20 +1029,15 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 		if changed {
 			payPayload := s.notifier.OrderPayload(notify.EventPaymentSuccess, order, nil, nil)
 			go s.notifier.Notify(notify.EventPaymentSuccess, payPayload)
-			cards, delivered, derr := s.deliverOrder(order)
-			if derr != nil {
-				log.Printf("deliver order %s: %v", order.OrderNo, derr)
-				go s.notifier.NotifySystemError("发货异常 order=" + order.OrderNo + ": " + derr.Error())
-			}
-			if delivered {
-				deliverPayload := s.notifier.OrderPayload(notify.EventDelivered, order, cards, nil)
-				go s.notifier.Notify(notify.EventDelivered, deliverPayload)
-				go s.notifier.SendPaid(order, cards)
-			}
+			deliverPayload := s.notifier.OrderPayload(notify.EventDelivered, order, cards, nil)
+			go s.notifier.Notify(notify.EventDelivered, deliverPayload)
 		}
 	case "3":
-		if err := s.markExpiredByOrderNo(params["order_id"]); err != nil {
-			log.Printf("mark expired %s: %v", params["order_id"], err)
+		if o, oerr := s.orders.Repo().GetOrderByNo(params["order_id"]); oerr == nil && o.TradeID != "" {
+			go func(tradeID string) {
+				_ = s.payClient().CancelTransaction(tradeID)
+			}(o.TradeID)
+			_ = s.orders.Expire(o.ID)
 		}
 	}
 	w.WriteHeader(http.StatusOK)

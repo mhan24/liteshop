@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"shop/internal/bepusdt"
 	"shop/internal/db"
 	"shop/internal/models"
 	"shop/internal/notify"
@@ -416,52 +415,23 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid trade type")
 		return
 	}
-	now := models.Now()
-	order := models.Order{
-		OrderNo:      models.NewOrderNo(),
-		ProductID:    p.ID,
-		ProductName:  p.Name,
-		Qty:          input.Qty,
-		AmountCents:  p.PriceCents * int64(input.Qty),
-		Fiat:         s.fiat(),
-		TradeType:    tradeType,
-		BuyerContact: input.Contact,
-		Status:       "pending",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	if err := s.createPendingOrder(&order); err != nil {
-		writeError(w, 400, "out of stock")
-		return
-	}
-	_ = db.AddOrderLog(s.db, order.ID, "order_created", "订单已创建", "", models.OrderCreated, 0, "")
-	payload := s.notifier.OrderPayload(notify.EventOrderCreated, order, nil, nil)
-	go s.notifier.Notify(notify.EventOrderCreated, payload)
-	// 库存不足检查
-	var remain int
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE product_id = ? AND status = 'available'`, p.ID).Scan(&remain)
-	go s.notifier.NotifyLowStock(p.ID, p.Name, remain)
-	payCfg := s.paymentConfig()
-	redirectURL := payCfg.PublicBaseURL + "/order/" + order.OrderNo + "?contact=" + input.Contact
-	paymentURL, tradeID, err := s.payClient().CreateTransaction(bepusdt.CreateInput{
-		OrderID:     order.OrderNo,
-		AmountYuan:  float64(order.AmountCents) / 100,
-		Fiat:        s.fiat(),
-		TradeType:   tradeType,
-		Name:        p.Name,
-		NotifyURL:   payCfg.NotifyURL,
-		RedirectURL: redirectURL,
-		TimeoutSec:  payCfg.BepusdtTimeoutSec,
-	})
+	orderNo, paymentURL, err := s.orders.CreateOrder(p, input.Qty, input.Contact, tradeType)
 	if err != nil {
-		_ = s.setOrderStatusWithLog(order.ID, models.OrderPaymentFailed, "payment_failed", "创建 BEpusdt 交易失败: "+err.Error(), 0)
-		go s.notifier.NotifySystemError("创建支付交易失败 order=" + order.OrderNo + ": " + err.Error())
+		go s.notifier.NotifySystemError("创建支付交易失败: " + err.Error())
 		writeError(w, 502, err.Error())
 		return
 	}
-	_, _ = s.db.Exec(`UPDATE orders SET trade_id = ?, payment_url = ?, updated_at = ? WHERE id = ?`, tradeID, paymentURL, models.Now(), order.ID)
-	_ = s.setOrderStatusWithLog(order.ID, models.OrderWaitingPayment, "transaction_created", "BEpusdt 交易已创建", 0)
-	writeJSON(w, 200, map[string]any{"order_no": order.OrderNo, "payment_url": paymentURL})
+	// 订单创建事件通知 + 库存不足检查
+	go func() {
+		if o, oerr := s.orders.Repo().GetOrderByNo(orderNo); oerr == nil {
+			payload := s.notifier.OrderPayload(notify.EventOrderCreated, o, nil, nil)
+			s.notifier.Notify(notify.EventOrderCreated, payload)
+		}
+		var remain int
+		_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE product_id = ? AND status = 'available'`, p.ID).Scan(&remain)
+		s.notifier.NotifyLowStock(p.ID, p.Name, remain)
+	}()
+	writeJSON(w, 200, map[string]any{"order_no": orderNo, "payment_url": paymentURL})
 }
 
 func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
@@ -470,40 +440,30 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid email")
 		return
 	}
-	rows, err := s.db.Query(`SELECT id, order_no, product_name, qty, amount_cents, fiat, trade_type, status, payment_url, created_at, paid_at FROM orders WHERE buyer_contact = ? ORDER BY id DESC LIMIT 10`, contact)
+	orders, err := s.orders.Repo().OrdersByContact(contact, 10)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	defer rows.Close()
 	out := []map[string]any{}
-	for rows.Next() {
-		var id int64
-		var orderNo, productName, fiat, tradeType, status, paymentURL string
-		var qty int
-		var amountCents int64
-		var createdAt, paidAt int64
-		if err := rows.Scan(&id, &orderNo, &productName, &qty, &amountCents, &fiat, &tradeType, &status, &paymentURL, &createdAt, &paidAt); err != nil {
-			writeError(w, 500, err.Error())
-			return
-		}
+	for _, o := range orders {
 		item := map[string]any{
-			"product_name": productName,
-			"qty":          qty,
-			"amount":       fmt.Sprintf("%.2f", float64(amountCents)/100),
-			"fiat":         fiat,
-			"trade_type":   tradeType,
-			"status":       status,
-			"created_at":   createdAt,
-			"paid_at":      paidAt,
+			"product_name": o.ProductName,
+			"qty":          o.Qty,
+			"amount":       fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
+			"fiat":         o.Fiat,
+			"trade_type":   o.TradeType,
+			"status":       o.Status,
+			"created_at":   o.CreatedAt,
+			"paid_at":      o.PaidAt,
 		}
-		if status == models.OrderWaitingPayment {
-			item["order_no"] = orderNo
-			item["url"] = "/order/" + orderNo + "?contact=" + contact
-			item["payment_url"] = paymentURL
-		} else if status != models.OrderPaid {
-			item["order_no"] = orderNo
-			item["url"] = "/order/" + orderNo + "?contact=" + contact
+		if o.Status == models.OrderWaitingPayment {
+			item["order_no"] = o.OrderNo
+			item["url"] = "/order/" + o.OrderNo + "?contact=" + contact
+			item["payment_url"] = o.PaymentURL
+		} else if o.Status != models.OrderPaid {
+			item["order_no"] = o.OrderNo
+			item["url"] = "/order/" + o.OrderNo + "?contact=" + contact
 		}
 		out = append(out, item)
 	}
@@ -512,7 +472,7 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiCancelOrder(w http.ResponseWriter, r *http.Request) {
 	orderNo := r.PathValue("orderNo")
-	o, err := s.getOrderByNo(orderNo)
+	o, err := s.orders.Repo().GetOrderByNo(orderNo)
 	if err != nil {
 		writeError(w, 404, "订单不存在")
 		return
@@ -527,7 +487,7 @@ func (s *Server) apiCancelOrder(w http.ResponseWriter, r *http.Request) {
 			_ = s.payClient().CancelTransaction(tradeID)
 		}(o.TradeID)
 	}
-	if err := s.cancelOrder(o.ID); err != nil {
+	if err := s.orders.Cancel(o.ID); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
@@ -536,7 +496,7 @@ func (s *Server) apiCancelOrder(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 	orderNo := r.PathValue("orderNo")
-	order, err := s.getOrderByNo(orderNo)
+	order, err := s.orders.Repo().GetOrderByNo(orderNo)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
@@ -546,7 +506,7 @@ func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 	if contact != "" && contact == order.BuyerContact {
 		switch order.Status {
 		case models.OrderPaid, models.OrderProcessing, models.OrderDelivered, models.OrderCompleted:
-			cards, _ := s.getOrderCards(order.ID)
+			cards, _ := s.orders.Repo().GetOrderCards(order.ID)
 			list := []map[string]any{}
 			for _, c := range cards {
 				list = append(list, cardJSON(c))
@@ -866,19 +826,13 @@ func (s *Server) apiAdminCards(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	rows, err := s.db.Query(`SELECT id, product_id, reserved_order, sold_order, content, status, created_at, updated_at, sold_at FROM cards WHERE product_id = ? ORDER BY id DESC LIMIT 500`, id)
+	cards, err := s.orders.Repo().ListCardsByProduct(id)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	defer rows.Close()
 	out := []map[string]any{}
-	for rows.Next() {
-		var c models.Card
-		if err := rows.Scan(&c.ID, &c.ProductID, &c.ReservedOrder, &c.SoldOrder, &c.Content, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.SoldAt); err != nil {
-			writeError(w, 500, err.Error())
-			return
-		}
+	for _, c := range cards {
 		out = append(out, cardJSON(c))
 	}
 	writeJSON(w, 200, map[string]any{"cards": out})
@@ -894,30 +848,18 @@ func (s *Server) apiAdminCardsImport(w http.ResponseWriter, r *http.Request) {
 		Cards string `json:"cards"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input)
-	tx, err := s.db.Begin()
-	if err != nil {
-		writeError(w, 500, err.Error())
-		return
-	}
-	defer tx.Rollback()
-	now := models.Now()
-	imported := 0
+	lines := []string{}
 	for _, line := range strings.Split(input.Cards, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+		if line != "" {
+			lines = append(lines, line)
 		}
-		if _, err := tx.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?, ?, 'available', ?, ?)`, id, line, now, now); err != nil {
-			writeError(w, 500, err.Error())
-			return
-		}
-		imported++
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.orders.Repo().AddCards(id, lines); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	s.audit(r, "cards_import", "product", fmt.Sprintf("%d", id), "", fmt.Sprintf("imported=%d", imported))
+	s.audit(r, "cards_import", "product", fmt.Sprintf("%d", id), "", fmt.Sprintf("imported=%d", len(lines)))
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -927,7 +869,7 @@ func (s *Server) apiAdminCardDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	_, _ = s.db.Exec(`DELETE FROM cards WHERE id = ? AND status = 'available'`, id)
+	_ = s.orders.Repo().DeleteAvailableCard(id)
 	s.audit(r, "card_delete", "card", fmt.Sprintf("%d", id), "", "deleted")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -961,21 +903,16 @@ func orderFilterArgs(r *http.Request) (string, []any) {
 
 func (s *Server) apiAdminOrdersExport(w http.ResponseWriter, r *http.Request) {
 	where, args := orderFilterArgs(r)
-	rows, err := s.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE `+where+` ORDER BY id DESC LIMIT 5000`, args...)
+	orders, err := s.orders.Repo().ListOrders(where, args, 5000)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	defer rows.Close()
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
 	w.Write([]byte("\xEF\xBB\xBF"))
 	w.Write([]byte("ID,订单号,商品,数量,金额,法币,收款类型,联系方式,状态,创建时间,支付时间\n"))
-	for rows.Next() {
-		var o models.Order
-		if err := rows.Scan(&o.ID, &o.OrderNo, &o.ProductID, &o.ProductName, &o.Qty, &o.AmountCents, &o.Fiat, &o.TradeType, &o.BuyerContact, &o.Status, &o.TradeID, &o.PaymentURL, &o.BlockTransactionID, &o.CreatedAt, &o.UpdatedAt, &o.PaidAt); err != nil {
-			continue
-		}
+	for _, o := range orders {
 		fmt.Fprintf(w, "%d,%s,%s,%d,%s,%s,%s,%s,%s,%s,%s\n",
 			o.ID, o.OrderNo, o.ProductName, o.Qty,
 			fmt.Sprintf("%.2f", float64(o.AmountCents)/100), o.Fiat, o.TradeType,
@@ -988,20 +925,13 @@ func (s *Server) apiAdminOrdersExport(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminOrders(w http.ResponseWriter, r *http.Request) {
 	where, args := orderFilterArgs(r)
-	query := `SELECT id, order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE ` + where + ` ORDER BY id DESC LIMIT 500`
-	rows, err := s.db.Query(query, args...)
+	orders, err := s.orders.Repo().ListOrders(where, args, 500)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	defer rows.Close()
 	out := []map[string]any{}
-	for rows.Next() {
-		var o models.Order
-		if err := rows.Scan(&o.ID, &o.OrderNo, &o.ProductID, &o.ProductName, &o.Qty, &o.AmountCents, &o.Fiat, &o.TradeType, &o.BuyerContact, &o.Status, &o.TradeID, &o.PaymentURL, &o.BlockTransactionID, &o.CreatedAt, &o.UpdatedAt, &o.PaidAt); err != nil {
-			writeError(w, 500, err.Error())
-			return
-		}
+	for _, o := range orders {
 		out = append(out, orderJSON(o))
 	}
 	writeJSON(w, 200, map[string]any{"orders": out})
@@ -1013,17 +943,17 @@ func (s *Server) apiAdminOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	o, err := s.getOrderByID(id)
+	o, err := s.orders.Repo().GetOrderByID(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
 	}
-	cards, _ := s.getOrderCards(o.ID)
+	cards, _ := s.orders.Repo().GetOrderCards(o.ID)
 	list := []map[string]any{}
 	for _, c := range cards {
 		list = append(list, cardJSON(c))
 	}
-	logs, _ := db.OrderLogs(s.db, o.ID)
+	logs, _ := s.orders.Repo().Logs(o.ID)
 	logList := []map[string]any{}
 	for _, e := range logs {
 		logList = append(logList, map[string]any{
@@ -1046,12 +976,12 @@ func (s *Server) apiAdminOrderExpire(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	if o, err := s.getOrderByID(id); err == nil && o.TradeID != "" {
+	if o, oerr := s.orders.Repo().GetOrderByID(id); oerr == nil && o.TradeID != "" {
 		go func(tradeID string) {
 			_ = s.payClient().CancelTransaction(tradeID)
 		}(o.TradeID)
 	}
-	_ = s.expireOrder(id)
+	_ = s.orders.Expire(id)
 	s.audit(r, "order_expire", "order", fmt.Sprintf("%d", id), "", "")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -1063,7 +993,7 @@ func (s *Server) apiAdminOrderCancel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	o, err := s.getOrderByID(id)
+	o, err := s.orders.Repo().GetOrderByID(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
@@ -1073,7 +1003,7 @@ func (s *Server) apiAdminOrderCancel(w http.ResponseWriter, r *http.Request) {
 			_ = s.payClient().CancelTransaction(tradeID)
 		}(o.TradeID)
 	}
-	if err := s.cancelOrder(id); err != nil {
+	if err := s.orders.Cancel(id); err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -1101,7 +1031,7 @@ func (s *Server) apiAdminOrderSetStatus(w http.ResponseWriter, r *http.Request) 
 		writeError(w, 400, "status required")
 		return
 	}
-	o, err := s.getOrderByID(id)
+	o, err := s.orders.Repo().GetOrderByID(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
@@ -1110,13 +1040,8 @@ func (s *Server) apiAdminOrderSetStatus(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 200, map[string]any{"ok": true, "noop": true})
 		return
 	}
-	// 支付后状态（paid 及之后）不可回退，防止误操作
-	if o.PaidAt > 0 && (input.Status == models.OrderCreated || input.Status == models.OrderWaitingPayment) {
-		writeError(w, 400, "已支付订单不可回退到未支付状态")
-		return
-	}
-	if err := s.setOrderStatusWithLog(id, input.Status, "status_changed", firstNonEmpty(input.Message, "管理员手动修改状态"), 1); err != nil {
-		writeError(w, 500, err.Error())
+	if err := s.orders.SetStatus(id, input.Status, firstNonEmpty(input.Message, "管理员手动修改状态")); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
 	s.audit(r, "order_status", "order", fmt.Sprintf("%d", id), o.Status, input.Status)
@@ -1129,67 +1054,33 @@ func (s *Server) apiAdminOrderResend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	o, err := s.getOrderByID(id)
+	o, err := s.orders.Repo().GetOrderByID(id)
 	if err == nil && (o.Status == models.OrderDelivered || o.Status == models.OrderPaid || o.Status == models.OrderCompleted || o.Status == models.OrderDeliveryFailed) {
-		cards, _ := s.getOrderCards(o.ID)
+		cards, _ := s.orders.Repo().GetOrderCards(o.ID)
 		if len(cards) > 0 {
 			go s.notifier.SendPaid(o, cards)
-			_ = db.AddOrderLog(s.db, o.ID, "resend", "管理员重新发送卡密", o.Status, o.Status, 0, "")
+			_ = s.orders.Repo().AddLog(o.ID, "resend", "管理员重新发送卡密", o.Status, o.Status, 0)
 		}
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
-// apiAdminOrderRedeliver 对发卡失败/支付异常的订单尝试重新交付：
-// 若该订单还没有预留卡密，则从同商品可用库存中重新预留并发放。
+// apiAdminOrderRedeliver 对发卡失败/支付异常的订单尝试重新交付。
 func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
 	}
-	o, err := s.getOrderByID(id)
+	o, err := s.orders.Repo().GetOrderByID(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
 	}
-	if o.Status == models.OrderPaymentFailed {
-		// 支付异常但用户可能已付款：尝试创建交易？此处仅支持已支付订单重新交付
-		_ = db.AddOrderLog(s.db, o.ID, "redeliver_attempt", "尝试重新交付失败：订单未支付", o.Status, o.Status, 1, "")
-		writeError(w, 400, "订单未支付，无法重新发卡")
+	if err := s.orders.Redeliver(id); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
-	cards, _ := s.getOrderCards(o.ID)
-	if len(cards) > 0 {
-		// 已有卡密，直接推进为 delivered 并重发通知
-		if o.Status != models.OrderDelivered && o.Status != models.OrderCompleted {
-			_ = s.setOrderStatusWithLog(o.ID, models.OrderDelivered, "delivered", "管理员手动确认发卡", 0)
-		}
-		go s.notifier.SendPaid(o, cards)
-		_ = db.AddOrderLog(s.db, o.ID, "resend", "管理员重新发送卡密", o.Status, models.OrderDelivered, 1, "")
-		s.audit(r, "order_redeliver", "order", fmt.Sprintf("%d", o.ID), o.Status, models.OrderDelivered)
-		writeJSON(w, 200, map[string]any{"ok": true})
-		return
-	}
-	// 无预留卡密：从同商品可用库存补扣
-	if o.ProductID <= 0 {
-		writeError(w, 400, "订单缺少商品信息")
-		return
-	}
-	res, err := s.db.Exec(`UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ? WHERE product_id = ? AND status = 'available' LIMIT ?`, o.ID, models.Now(), o.ProductID, o.Qty)
-	if err != nil {
-		writeError(w, 500, err.Error())
-		return
-	}
-	affected, _ := res.RowsAffected()
-	if affected != int64(o.Qty) {
-		writeError(w, 400, "可用卡密不足，无法补发")
-		return
-	}
-	cards, _ = s.getOrderCards(o.ID)
-	_ = s.setOrderStatusWithLog(o.ID, models.OrderDelivered, "delivered", "管理员补发卡密", 0)
-	go s.notifier.SendPaid(o, cards)
-	_ = db.AddOrderLog(s.db, o.ID, "resend", "管理员补发并发送卡密", o.Status, models.OrderDelivered, 1, "")
 	s.audit(r, "order_redeliver", "order", fmt.Sprintf("%d", o.ID), o.Status, models.OrderDelivered)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }

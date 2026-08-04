@@ -169,6 +169,12 @@ type AuditLog struct {
 // Now 返回当前 Unix 时间戳。
 func Now() int64 { return time.Now().Unix() }
 
+// StartOfDay 返回指定时间所在自然日的 00:00（北京时间）。
+func StartOfDay(now int64) int64 {
+	t := time.Unix(now, 0).In(BeijingLocation)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, BeijingLocation).Unix()
+}
+
 // Slugify 将商品名转为 URL 友好的 slug：小写、保留字母/数字/中文字符，
 // 其余字符（空格、符号等）折叠为单个连字符，并去除首尾连字符。
 func Slugify(s string) string {
