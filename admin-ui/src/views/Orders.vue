@@ -2,7 +2,10 @@
   <div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h2>{{ t('orders.title') }}</h2>
-      <el-button @click="exportCSV">{{ t('common.exportCsv') }}</el-button>
+      <div>
+        <el-button v-if="selected.length" type="warning" @click="batchResend">{{ t('orders.batchResend') }} ({{ selected.length }})</el-button>
+        <el-button @click="exportCSV">{{ t('common.exportCsv') }}</el-button>
+      </div>
     </div>
     <el-card style="margin-bottom:12px">
       <el-form :inline="true" @submit.prevent="search">
@@ -29,7 +32,8 @@
         </el-form-item>
       </el-form>
     </el-card>
-    <el-table :data="pagedOrders" v-loading="loading" size="large">
+    <el-table :data="pagedOrders" v-loading="loading" size="large" @selection-change="(rows: any[]) => selected = rows.map(r => r.id)">
+      <el-table-column type="selection" width="45" />
       <el-table-column prop="id" :label="t('common.id')" width="70" />
       <el-table-column prop="order_no" :label="t('orders.orderNo')" />
       <el-table-column prop="product_name" :label="t('orders.product')" />
@@ -61,11 +65,13 @@
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { ElMessage } from 'element-plus'
 import { api } from '@/api'
 import { fmtDate } from '@/utils/format'
 
 const { t } = useI18n()
 const orders = ref<any[]>([])
+const selected = ref<number[]>([])
 const loading = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -129,6 +135,15 @@ function money(c: number) {
 }
 function date(ts: number) {
   return fmtDate(ts)
+}
+async function batchResend() {
+  try {
+    const res = await api.post('/admin/orders/batch-resend', { ids: selected.value })
+    ElMessage.success(`${t('orders.resendSent')} (${res.sent})`)
+    selected.value = []
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
 }
 function exportCSV() {
   const params: any = {}

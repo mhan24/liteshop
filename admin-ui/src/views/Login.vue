@@ -9,7 +9,10 @@
         <el-form-item :label="t('login.password')" prop="password" :rules="[{ required: true, message: t('login.passwordRequired') }]">
           <el-input v-model="form.password" type="password" show-password @keyup.enter="submit" />
         </el-form-item>
-        <el-button type="primary" :loading="loading" @click="submit" style="width:100%">{{ t('login.login') }}</el-button>
+        <el-form-item v-if="totpStep" :label="t('login.otp')" prop="otp" :rules="[{ required: true, message: t('login.otpRequired') }]">
+          <el-input v-model="form.otp" inputmode="numeric" maxlength="6" @keyup.enter="submit" />
+        </el-form-item>
+        <el-button type="primary" :loading="loading" @click="submit" style="width:100%">{{ t(totpStep ? 'login.verify' : 'login.login') }}</el-button>
       </el-form>
     </el-card>
   </div>
@@ -26,7 +29,9 @@ const router = useRouter()
 const { t } = useI18n()
 const loading = ref(false)
 const formRef = ref()
-const form = reactive({ username: '', password: '' })
+const totpStep = ref(false)
+const totpToken = ref('')
+const form = reactive({ username: '', password: '', otp: '' })
 
 onMounted(async () => {
   try {
@@ -46,8 +51,18 @@ async function submit() {
   }
   loading.value = true
   try {
-    await api.post('/admin/login', form)
-    window.location.href = '/admin/'
+    if (!totpStep.value) {
+      const res = await api.post('/admin/login', { username: form.username, password: form.password })
+      if (res.totp_required) {
+        totpStep.value = true
+        totpToken.value = res.token
+        return
+      }
+      window.location.href = '/admin/'
+    } else {
+      await api.post('/admin/login/verify', { token: totpToken.value, otp: form.otp })
+      window.location.href = '/admin/'
+    }
   } catch (e: any) {
     ElMessage.error(e.message)
   } finally {

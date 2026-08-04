@@ -40,6 +40,12 @@
           </el-form-item>
         </el-col>
       </el-row>
+      <el-form-item :label="t('site.stockDisplay')">
+        <el-select v-model="form.stock_display_mode" style="width:200px">
+          <el-option :label="t('site.stockExact')" value="exact" />
+          <el-option :label="t('site.stockFuzzy')" value="fuzzy" />
+        </el-select>
+      </el-form-item>
 
       <el-divider content-position="left">{{ t('site.linksTitle') }}</el-divider>
       <el-form-item :label="t('site.links')">

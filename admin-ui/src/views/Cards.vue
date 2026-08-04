@@ -2,10 +2,16 @@
   <div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h2>{{ t('cards.title') }}</h2>
-      <el-button @click="$router.push('/products')">{{ t('cards.back') }}</el-button>
+      <div>
+        <el-button @click="exportCsv">{{ t('cards.export') }}</el-button>
+        <el-button @click="$router.push('/products')">{{ t('cards.back') }}</el-button>
+      </div>
     </div>
     <el-card :header="t('cards.import')">
       <el-input v-model="cardsText" type="textarea" :rows="6" placeholder="CARD-001&#10;CARD-002" />
+      <div style="margin-top:12px">
+        <el-checkbox v-model="dedupe">{{ t('cards.dedupe') }}</el-checkbox>
+      </div>
       <el-button type="primary" style="margin-top:12px" :loading="importing" @click="importCards">{{ t('cards.importBtn') }}</el-button>
     </el-card>
     <el-table :data="cards" style="margin-top:16px" v-loading="loading" size="large">
@@ -48,6 +54,7 @@ const loading = ref(false)
 const importing = ref(false)
 const cards = ref<any[]>([])
 const cardsText = ref('')
+const dedupe = ref(false)
 
 async function load() {
   loading.value = true
@@ -60,8 +67,11 @@ async function load() {
 async function importCards() {
   importing.value = true
   try {
-    await api.post('/admin/products/' + route.params.id + '/cards', { cards: cardsText.value })
-    ElMessage.success(t('cards.imported'))
+    const res = await api.post('/admin/products/' + route.params.id + '/cards', { cards: cardsText.value, dedupe: dedupe.value })
+    const msg = dedupe.value
+      ? `${t('cards.added')}: ${res.added}, ${t('cards.skipped')}: ${res.skipped}`
+      : `${t('cards.imported')}: ${res.added}`
+    ElMessage.success(msg)
     cardsText.value = ''
     await load()
   } catch (e: any) {
@@ -69,6 +79,9 @@ async function importCards() {
   } finally {
     importing.value = false
   }
+}
+function exportCsv() {
+  window.location.href = '/api/v1/admin/products/' + route.params.id + '/cards/export'
 }
 async function remove(id: number) {
   await ElMessageBox.confirm(t('cards.deleteConfirm'), t('common.prompt'), { type: 'warning' })

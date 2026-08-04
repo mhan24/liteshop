@@ -113,6 +113,22 @@
       </el-col>
     </el-row>
 
+    <!-- 销售报表 -->
+    <el-row :gutter="16" style="margin-top:16px">
+      <el-col :md="12">
+        <el-card>
+          <template #header><span>{{ t('dashboard.salesTrend') }}</span></template>
+          <div ref="trendChart" style="height:260px"></div>
+        </el-card>
+      </el-col>
+      <el-col :md="12">
+        <el-card>
+          <template #header><span>{{ t('dashboard.productShare') }}</span></template>
+          <div ref="shareChart" style="height:260px"></div>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <!-- 最近交易 -->
     <el-card style="margin-top:16px">
       <template #header><span>{{ t('dashboard.recentOrders') }}</span></template>
@@ -185,7 +201,61 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  loadCharts()
 })
+
+const trendChart = ref<HTMLElement | null>(null)
+const shareChart = ref<HTMLElement | null>(null)
+let echartsRef: any = null
+
+function loadEcharts(): Promise<any> {
+  return new Promise((resolve) => {
+    if (echartsRef) return resolve(echartsRef)
+    const id = 'echarts-script'
+    const done = () => {
+      echartsRef = (window as any).echarts
+      resolve(echartsRef)
+    }
+    if ((window as any).echarts) return done()
+    if (document.getElementById(id)) {
+      const check = setInterval(() => {
+        if ((window as any).echarts) { clearInterval(check); done() }
+      }, 200)
+      return
+    }
+    const s = document.createElement('script')
+    s.id = id
+    s.src = 'https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js'
+    s.onload = done
+    document.head.appendChild(s)
+  })
+}
+
+async function loadCharts() {
+  const echarts = await loadEcharts()
+  if (!echarts || !trendChart.value || !shareChart.value) return
+  let report: any = {}
+  try {
+    report = await api.get('/admin/sales-report?days=14')
+  } catch {
+    return
+  }
+  const daily = report.daily || []
+  const trend = echarts.init(trendChart.value)
+  trend.setOption({
+    grid: { left: 50, right: 20, top: 30, bottom: 30 },
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: daily.map((d: any) => d.Date) },
+    yAxis: { type: 'value' },
+    series: [{ name: t('dashboard.todayRevenue'), type: 'line', smooth: true, areaStyle: { opacity: 0.15 }, data: daily.map((d: any) => (d.Revenue / 100).toFixed(2)) }],
+  })
+  const products = report.products || []
+  const share = echarts.init(shareChart.value)
+  share.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    series: [{ type: 'pie', radius: ['35%', '65%'], data: products.map((p: any) => ({ name: p.Name, value: p.Qty })) }],
+  })
+}
 </script>
 
 <style scoped>
