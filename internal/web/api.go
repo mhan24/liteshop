@@ -384,7 +384,7 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		}
 		var remain int
 		_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE product_id = ? AND status = 'available'`, p.ID).Scan(&remain)
-		s.notifier.NotifyLowStock(p.ID, p.Name, remain)
+		s.notifier.NotifyLowStock(p.ID, p.Name, remain, s.lowStockThreshold())
 	}()
 	writeJSON(w, 200, map[string]any{"order_no": orderNo, "payment_url": paymentURL})
 }
@@ -848,13 +848,25 @@ func (s *Server) apiAdminOrdersExport(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ID,订单号,商品,数量,金额,法币,收款类型,联系方式,状态,创建时间,支付时间\n"))
 	for _, o := range orders {
 		fmt.Fprintf(w, "%d,%s,%s,%d,%s,%s,%s,%s,%s,%s,%s\n",
-			o.ID, o.OrderNo, o.ProductName, o.Qty,
-			fmt.Sprintf("%.2f", float64(o.AmountCents)/100), o.Fiat, o.TradeType,
-			o.BuyerContact, o.Status,
+			o.ID, csvSafe(o.OrderNo), csvSafe(o.ProductName), o.Qty,
+			fmt.Sprintf("%.2f", float64(o.AmountCents)/100), csvSafe(o.Fiat), csvSafe(o.TradeType),
+			csvSafe(o.BuyerContact), csvSafe(o.Status),
 			time.Unix(o.CreatedAt, 0).In(tz).Format("2006-01-02 15:04:05"),
 			map[bool]string{true: time.Unix(o.PaidAt, 0).In(tz).Format("2006-01-02 15:04:05"), false: "-"}[o.PaidAt > 0],
 		)
 	}
+}
+
+// csvSafe 防止 CSV 公式注入：以 = + - @ 开头的单元格前缀单引号。
+func csvSafe(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@':
+		return "'" + s
+	}
+	return s
 }
 
 func (s *Server) apiAdminOrders(w http.ResponseWriter, r *http.Request) {

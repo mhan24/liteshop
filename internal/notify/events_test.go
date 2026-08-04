@@ -106,8 +106,8 @@ func TestNotifyLowStock(t *testing.T) {
 	_ = db.SetSetting(d, "webhook_url", srv.URL)
 	n := &Notifier{cfg: defaultCfg(), db: d}
 
-	n.NotifyLowStock(1, "测试商品", 3) // 低于阈值
-	n.NotifyLowStock(1, "测试商品", 3) // 30分钟内重复, 应被限频
+	n.NotifyLowStock(1, "测试商品", 3, 5) // 低于阈值
+	n.NotifyLowStock(1, "测试商品", 3, 5) // 30分钟内重复, 应被限频
 	time.Sleep(500 * time.Millisecond)
 	mu.Lock()
 	if count != 1 {

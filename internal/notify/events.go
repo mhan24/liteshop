@@ -150,15 +150,10 @@ func eventTitle(event string) string {
 }
 
 // NotifyLowStock 检查商品库存，低于阈值时发送库存不足通知（限频防刷屏）。
-// available 为当前可用卡密数。
-func (n *Notifier) NotifyLowStock(productID int64, productName string, available int) {
-	if n.db == nil {
+// threshold 由调用方传入（统一入口为 web 的 lowStockThreshold）。
+func (n *Notifier) NotifyLowStock(productID int64, productName string, available, threshold int) {
+	if n.db == nil || threshold <= 0 {
 		return
-	}
-	th, _ := db.GetSetting(n.db, "low_stock_threshold")
-	threshold := 10
-	if v, err := strconv.Atoi(strings.TrimSpace(th)); err == nil && v > 0 {
-		threshold = v
 	}
 	if available > threshold {
 		return
