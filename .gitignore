@@ -13,3 +13,4 @@ data/
 /storefront/node_modules
 /storefront/.nuxt
 /storefront/.output
+.DS_Store
