@@ -2,6 +2,7 @@ package web
 
 import (
 	"testing"
+	"time"
 
 	"shop/internal/bepusdt"
 	"shop/internal/db"
@@ -143,9 +144,9 @@ func TestOrderCancelFreesCards(t *testing.T) {
 	}
 }
 
-// TestRedeliverFreesAndRelocks 验证补发卡密（ReserveCardsFromStock 子查询）不触发
-// UPDATE...LIMIT 语法错误，并正确从库存锁定卡密。
-func TestRedeliverFreesAndRelocks(t *testing.T) {
+// TestRedeliverFromStock 验证补发卡密：从库存补扣、幂等释放旧锁定，
+// 并正确将新卡密标记为售出（不触发 UPDATE...LIMIT 语法错误）。
+func TestRedeliverFromStock(t *testing.T) {
 	d, err := db.Open(t.TempDir() + "/test.db")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -192,5 +193,72 @@ func TestRedeliverFreesAndRelocks(t *testing.T) {
 	_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE status='available'`).Scan(&avail)
 	if avail != 2 {
 		t.Fatalf("available = %d, want 2", avail)
+	}
+}
+
+// TestRedeliverIdempotent 验证重复补发不超扣库存（幂等释放旧锁定）。
+func TestRedeliverIdempotent(t *testing.T) {
+	d, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer d.Close()
+	now := models.Now()
+	_, _ = d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('t','',100,'active',?,?)`, now, now)
+	var productID int64
+	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&productID)
+	for i := 0; i < 3; i++ {
+		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,?, 'available', ?, ?)`, productID, "C"+string(rune('0'+i)), now, now)
+	}
+	repo := order.NewRepository(d)
+	svc := order.NewService(repo, func() *bepusdt.Client { return nil }, nil)
+	orderRec := models.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now}
+	if err := repo.CreatePendingOrder(&orderRec); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// 连续补发两次：第二次应在已 delivered 且卡密已售时无副作用
+	if err := svc.Redeliver(orderRec.ID); err != nil {
+		t.Fatalf("redeliver 1: %v", err)
+	}
+	if err := svc.Redeliver(orderRec.ID); err != nil {
+		t.Fatalf("redeliver 2: %v", err)
+	}
+	var sold int
+	_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE sold_order = ? AND status = 'sold'`, orderRec.ID).Scan(&sold)
+	if sold != 1 {
+		t.Fatalf("sold = %d, want 1 (no over-consume)", sold)
+	}
+	var avail int
+	_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE status='available'`).Scan(&avail)
+	if avail != 2 {
+		t.Fatalf("available = %d, want 2", avail)
+	}
+}
+
+// TestOrderCountsWithTimezone 验证非北京时区自然日统计。
+func TestOrderCountsWithTimezone(t *testing.T) {
+	d, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer d.Close()
+	// 用 UTC 时区仓库
+	repo := order.NewRepositoryWithTZ(d, time.UTC)
+	// 插入一笔"今天"的订单（UTC 当天）
+	now := time.Now().In(time.UTC)
+	if _, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('t','',100,'active',?,?)`, now.Unix(), now.Unix()); err != nil {
+		t.Fatalf("product: %v", err)
+	}
+	var pid int64
+	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&pid)
+	if _, err := d.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, created_at, updated_at, paid_at) VALUES(?,?,?,?,?,?,?,?,'paid',?,?,?)`, models.NewOrderNo(), pid, "t", 1, 100, "CNY", "usdt-trc20", "a@b.com", now.Unix(), now.Unix(), now.Unix()); err != nil {
+		t.Fatalf("order: %v", err)
+	}
+	today, sales, _, _, _, _, err := repo.OrderCounts()
+	if err != nil {
+		t.Fatalf("counts: %v", err)
+	}
+	if today != 1 || sales != 1 {
+		t.Fatalf("today=%d sales=%d, want 1/1 (UTC natural day)", today, sales)
 	}
 }

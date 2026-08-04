@@ -518,7 +518,7 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "invalid credentials")
 		return
 	}
-	s.startSession(w, adminID)
+	s.startSession(w, adminID, r.TLS != nil)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -841,6 +841,7 @@ func (s *Server) apiAdminOrdersExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
+	tz := models.LocationFromTimezone(s.siteSettings().Timezone)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
 	w.Write([]byte("\xEF\xBB\xBF"))
@@ -850,8 +851,8 @@ func (s *Server) apiAdminOrdersExport(w http.ResponseWriter, r *http.Request) {
 			o.ID, o.OrderNo, o.ProductName, o.Qty,
 			fmt.Sprintf("%.2f", float64(o.AmountCents)/100), o.Fiat, o.TradeType,
 			o.BuyerContact, o.Status,
-			time.Unix(o.CreatedAt, 0).In(models.BeijingLocation).Format("2006-01-02 15:04:05"),
-			map[bool]string{true: time.Unix(o.PaidAt, 0).In(models.BeijingLocation).Format("2006-01-02 15:04:05"), false: "-"}[o.PaidAt > 0],
+			time.Unix(o.CreatedAt, 0).In(tz).Format("2006-01-02 15:04:05"),
+			map[bool]string{true: time.Unix(o.PaidAt, 0).In(tz).Format("2006-01-02 15:04:05"), false: "-"}[o.PaidAt > 0],
 		)
 	}
 }
@@ -1005,7 +1006,7 @@ func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) 
 		writeError(w, 404, "not found")
 		return
 	}
-	o, err := s.orders.Repo().GetOrderByID(id)
+	before, err := s.orders.Repo().GetOrderStatus(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
@@ -1014,7 +1015,7 @@ func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) 
 		writeError(w, 400, err.Error())
 		return
 	}
-	s.audit(r, "order_redeliver", "order", fmt.Sprintf("%d", o.ID), o.Status, models.OrderDelivered)
+	s.audit(r, "order_redeliver", "order", fmt.Sprintf("%d", id), before, models.OrderDelivered)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

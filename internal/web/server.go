@@ -559,12 +559,12 @@ func (s *Server) audit(r *http.Request, action, targetType, targetID, before, af
 	_ = db.AddAuditLog(s.db, s.currentAdminID(r), s.currentAdminName(r), action, targetType, targetID, before, after)
 }
 
-func (s *Server) startSession(w http.ResponseWriter, adminID int64) {
+func (s *Server) startSession(w http.ResponseWriter, adminID int64, secure bool) {
 	id := models.RandomToken(24)
 	s.sessMu.Lock()
 	s.sessions[id] = sessionInfo{AdminID: adminID, Expiry: time.Now().Add(12 * time.Hour)}
 	s.sessMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
+	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
 }
 
 func (s *Server) sessionID(r *http.Request) (string, bool) {

@@ -185,6 +185,8 @@ const messages = {
       smtpHost: 'SMTP Host',
       smtpPort: 'SMTP Port',
       smtpUsername: 'SMTP Username',
+      smtpUsernamePlaceholder: 'leave blank to keep',
+      smtpUsernamePlaceholder: '留空保持不变',
       smtpPassword: 'SMTP Password',
       smtpPasswordPlaceholder: '留空保持不变',
       smtpFrom: 'SMTP From',

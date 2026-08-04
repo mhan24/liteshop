@@ -177,6 +177,8 @@ func (s *Service) Redeliver(orderID int64) error {
 	if o.ProductID <= 0 {
 		return fmt.Errorf("订单缺少商品信息")
 	}
+	// 幂等释放旧锁定，避免残留 reserved_order 造成库存超扣/孤儿锁定
+	_ = s.repo.ReleaseLockedCards(o.ID)
 	affected, err := s.repo.ReserveCardsFromStock(o.ProductID, o.Qty, o.ID)
 	if err != nil {
 		return err

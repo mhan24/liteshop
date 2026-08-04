@@ -4,7 +4,7 @@
     <el-form label-position="top" :model="form" style="max-width:680px">
       <el-form-item :label="t('notify.smtpHost')"><el-input v-model="form.smtp_host" /></el-form-item>
       <el-form-item :label="t('notify.smtpPort')"><el-input-number v-model="form.smtp_port" :min="1" /></el-form-item>
-      <el-form-item :label="t('notify.smtpUsername')"><el-input v-model="form.smtp_username" type="password" :placeholder="t('notify.smtpPasswordPlaceholder')" show-password /></el-form-item>
+      <el-form-item :label="t('notify.smtpUsername')"><el-input v-model="form.smtp_username" :placeholder="t('notify.smtpUsernamePlaceholder')" /></el-form-item>
       <el-form-item :label="t('notify.smtpPassword')"><el-input v-model="form.smtp_password" type="password" :placeholder="t('notify.smtpPasswordPlaceholder')" show-password /></el-form-item>
       <el-form-item :label="t('notify.smtpFrom')"><el-input v-model="form.smtp_from" /></el-form-item>
       <el-form-item :label="t('notify.telegramChatId')"><el-input v-model="form.telegram_chat_id" /></el-form-item>
