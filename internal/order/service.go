@@ -184,6 +184,10 @@ func (s *Service) Redeliver(orderID int64) error {
 	if affected != o.Qty {
 		return fmt.Errorf("可用卡密不足，无法补发")
 	}
+	// 将新锁定的卡密真正售出
+	if err := s.repo.DeliverCards(o.ID); err != nil {
+		return err
+	}
 	cards, _ = s.repo.GetOrderCards(o.ID)
 	_ = s.repo.SetOrderStatus(o.ID, models.OrderDelivered)
 	_ = s.repo.AddLog(o.ID, "delivered", "管理员补发卡密", o.Status, models.OrderDelivered, 0)

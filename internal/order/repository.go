@@ -4,6 +4,7 @@ package order
 
 import (
 	"database/sql"
+	"time"
 
 	"shop/internal/models"
 )
@@ -25,10 +26,19 @@ func scanOrderRows(rows *sql.Rows) (models.Order, error) {
 // Repository 封装订单与卡密的所有数据访问。
 type Repository struct {
 	db *sql.DB
+	tz *time.Location
 }
 
 func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+	return &Repository{db: db, tz: models.BeijingLocation}
+}
+
+// NewRepositoryWithTZ 使用指定时区（用于多地区统计自然日）。
+func NewRepositoryWithTZ(db *sql.DB, tz *time.Location) *Repository {
+	if tz == nil {
+		tz = models.BeijingLocation
+	}
+	return &Repository{db: db, tz: tz}
 }
 
 // CreatePendingOrder 创建订单并锁定对应数量的可用卡密（事务）。
@@ -220,8 +230,17 @@ func (r *Repository) ReleaseLockedCards(orderID int64) error {
 }
 
 // ReserveCardsFromStock 从同商品可用库存锁定指定数量卡密（补发用）。
+// 注意：不使用 UPDATE ... LIMIT（modernc/sqlite 未启用 SQLITE_ENABLE_UPDATE_DELETE_LIMIT），
+// 改用子查询 IN (SELECT id ... LIMIT ?)。
 func (r *Repository) ReserveCardsFromStock(productID int64, qty int, orderID int64) (int, error) {
-	res, err := r.db.Exec(`UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ? WHERE product_id = ? AND status = 'available' LIMIT ?`, orderID, models.Now(), productID, qty)
+	res, err := r.db.Exec(`
+		UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ?
+		WHERE id IN (
+			SELECT id FROM cards
+			WHERE product_id = ? AND status = 'available'
+			ORDER BY id
+			LIMIT ?
+		)`, orderID, models.Now(), productID, qty)
 	if err != nil {
 		return 0, err
 	}
@@ -264,7 +283,7 @@ func (e *NoRowsError) Error() string { return "no rows affected" }
 
 // OrderCounts 各类订单统计。
 func (r *Repository) OrderCounts() (todayOrders, todaySales, pending, paymentFailed, deliveryFailed int, todayRevenue int64, err error) {
-	dayStart := models.StartOfDay(models.Now())
+	dayStart := models.StartOfDayIn(models.Now(), r.tz)
 	if err = r.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE created_at >= ?`, dayStart).Scan(&todayOrders); err != nil {
 		return
 	}

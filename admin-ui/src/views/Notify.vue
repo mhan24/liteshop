@@ -4,7 +4,7 @@
     <el-form label-position="top" :model="form" style="max-width:680px">
       <el-form-item :label="t('notify.smtpHost')"><el-input v-model="form.smtp_host" /></el-form-item>
       <el-form-item :label="t('notify.smtpPort')"><el-input-number v-model="form.smtp_port" :min="1" /></el-form-item>
-      <el-form-item :label="t('notify.smtpUsername')"><el-input v-model="form.smtp_username" /></el-form-item>
+      <el-form-item :label="t('notify.smtpUsername')"><el-input v-model="form.smtp_username" type="password" :placeholder="t('notify.smtpPasswordPlaceholder')" show-password /></el-form-item>
       <el-form-item :label="t('notify.smtpPassword')"><el-input v-model="form.smtp_password" type="password" :placeholder="t('notify.smtpPasswordPlaceholder')" show-password /></el-form-item>
       <el-form-item :label="t('notify.smtpFrom')"><el-input v-model="form.smtp_from" /></el-form-item>
       <el-form-item :label="t('notify.telegramChatId')"><el-input v-model="form.telegram_chat_id" /></el-form-item>
@@ -44,6 +44,7 @@ onMounted(async () => {
   loading.value = true
   try {
     form.value = await api.get('/admin/notify')
+    form.value.smtp_username = ''
     form.value.smtp_password = ''
     form.value.telegram_bot_token = ''
     events.value = String(form.value.notify_events || '').split(',').filter(Boolean)

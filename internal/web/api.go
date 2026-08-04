@@ -70,7 +70,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/orders/{id}/redeliver", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderRedeliver)))
 	mux.Handle("GET /api/v1/admin/settings", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSettings)))
 	mux.Handle("POST /api/v1/admin/settings", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSettingsSave)))
-	mux.Handle("GET /api/v1/admin/notify", s.requireAdminAPI(http.HandlerFunc(s.apiAdminNotify)))
+	mux.Handle("GET /api/v1/admin/notify", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminNotify)))
 	mux.Handle("POST /api/v1/admin/notify", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminNotifySave)))
 	mux.Handle("POST /api/v1/admin/notify/test-email", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminNotifyTestEmail)))
 	mux.Handle("POST /api/v1/admin/notify/test-telegram", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminNotifyTestTelegram)))
@@ -533,7 +533,7 @@ func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
-	dayStart := models.StartOfDay(models.Now())
+	dayStart := models.StartOfDayIn(models.Now(), models.LocationFromTimezone(s.siteSettings().Timezone))
 
 	// 今日/待处理指标（订单仓储）
 	todayOrders, todaySales, pendingOrders, paymentFailed, deliveryFailed, todayRevenue, err := s.orders.Repo().OrderCounts()
@@ -1031,8 +1031,6 @@ func (s *Server) apiAdminSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) saveIfPresent(map[string]string) {}
-
 func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
@@ -1053,6 +1051,7 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(str(input["bepusdt_api_token"])); v != "" {
 		_ = db.SetSetting(s.db, "bepusdt_api_token", v)
 	}
+	s.audit(r, "payment_update", "settings", "payment", "", "支付配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1066,7 +1065,7 @@ func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"smtp_host":          cfg.SMTPHost,
 		"smtp_port":          cfg.SMTPPort,
-		"smtp_username":      cfg.SMTPUsername,
+		"smtp_username_set":  cfg.SMTPUsername != "",
 		"smtp_from":          cfg.SMTPFrom,
 		"smtp_password_set":  cfg.SMTPPassword != "",
 		"telegram_chat_id":   cfg.TelegramChatID,
@@ -1092,7 +1091,6 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 	}
 	setIfPresent("smtp_host", "smtp_host")
 	setIfPresent("smtp_port", "smtp_port")
-	setIfPresent("smtp_username", "smtp_username")
 	setIfPresent("smtp_from", "smtp_from")
 	setIfPresent("telegram_chat_id", "telegram_chat_id")
 	setIfPresent("webhook_url", "webhook_url")
@@ -1100,12 +1098,16 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 	setIfPresent("mail_paid_subject", "mail_paid_subject")
 	setIfPresent("mail_paid_body", "mail_paid_body")
 	setIfPresent("telegram_paid_body", "telegram_paid_body")
+	if v := strings.TrimSpace(str(input["smtp_username"])); v != "" {
+		_ = db.SetSetting(s.db, "smtp_username", v)
+	}
 	if v := strings.TrimSpace(str(input["smtp_password"])); v != "" {
 		_ = db.SetSetting(s.db, "smtp_password", v)
 	}
 	if v := strings.TrimSpace(str(input["telegram_bot_token"])); v != "" {
 		_ = db.SetSetting(s.db, "telegram_bot_token", v)
 	}
+	s.audit(r, "notify_update", "settings", "notify", "", "通知配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1222,6 +1224,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(str(input["turnstile_secret"])); v != "" {
 		_ = db.SetSetting(s.db, "turnstile_secret", v)
 	}
+	s.audit(r, "site_update", "settings", "site", "", "站点配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

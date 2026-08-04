@@ -86,7 +86,7 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		sessions:  make(map[string]sessionInfo),
 	}
 	s.orders = order.NewService(
-		order.NewRepository(db),
+		order.NewRepositoryWithTZ(db, models.LocationFromTimezone(s.siteSettings().Timezone)),
 		s.payClient,
 		s.paymentConfigForService,
 	)

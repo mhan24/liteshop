@@ -287,6 +287,9 @@ const messages = {
         admin_role: '修改角色',
         admin_delete: '删除管理员',
         system_reset: '重置系统',
+        notify_update: '更新通知配置',
+        payment_update: '更新支付配置',
+        site_update: '更新站点配置',
       },
     },
     system: {
@@ -589,6 +592,9 @@ const messages = {
         admin_role: 'Change role',
         admin_delete: 'Delete admin',
         system_reset: 'Reset system',
+        notify_update: 'Update notification config',
+        payment_update: 'Update payment config',
+        site_update: 'Update site config',
       },
     },
     system: {

@@ -169,10 +169,29 @@ type AuditLog struct {
 // Now 返回当前 Unix 时间戳。
 func Now() int64 { return time.Now().Unix() }
 
-// StartOfDay 返回指定时间所在自然日的 00:00（北京时间）。
+// StartOfDay 返回指定时间所在自然日的 00:00（默认北京时区）。
 func StartOfDay(now int64) int64 {
-	t := time.Unix(now, 0).In(BeijingLocation)
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, BeijingLocation).Unix()
+	return StartOfDayIn(now, BeijingLocation)
+}
+
+// StartOfDayIn 返回指定时间在指定时区的自然日 00:00。
+func StartOfDayIn(now int64, loc *time.Location) int64 {
+	if loc == nil {
+		loc = BeijingLocation
+	}
+	t := time.Unix(now, 0).In(loc)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc).Unix()
+}
+
+// LocationFromTimezone 从 IANA 时区名解析 Location，失败回退北京。
+func LocationFromTimezone(name string) *time.Location {
+	if name == "" {
+		return BeijingLocation
+	}
+	if loc, err := time.LoadLocation(name); err == nil {
+		return loc
+	}
+	return BeijingLocation
 }
 
 // Slugify 将商品名转为 URL 友好的 slug：小写、保留字母/数字/中文字符，
