@@ -14,6 +14,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'products/:id/edit', component: () => import('@/views/ProductForm.vue') },
       { path: 'products/:id/cards', component: () => import('@/views/Cards.vue') },
       { path: 'orders', component: () => import('@/views/Orders.vue') },
+      { path: 'coupons', component: () => import('@/views/Coupons.vue') },
       { path: 'orders/:id', component: () => import('@/views/Order.vue') },
       { path: 'settings', component: () => import('@/views/Payment.vue') },
       { path: 'notify', component: () => import('@/views/Notify.vue') },

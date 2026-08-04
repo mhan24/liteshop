@@ -24,14 +24,40 @@ type Product struct {
 	SortOrder   int
 	IsPinned    bool
 	FAQ         []FAQItem
+	Wholesale   []WholesaleTier // 阶梯价
+	MinQty      int
+	MaxQty      int
+	CostCents   int64
 	CreatedAt   int64
 	UpdatedAt   int64
+}
+
+// WholesaleTier 阶梯价档位。
+type WholesaleTier struct {
+	MinQty   int `json:"min_qty"`
+	Discount int `json:"discount"` // 折扣百分比，如 95 表示 9.5 折
 }
 
 // FAQItem 商品常见问题条目。
 type FAQItem struct {
 	Q string `json:"q"`
 	A string `json:"a"`
+}
+
+// Coupon 优惠券。
+type Coupon struct {
+	ID             int64
+	Code           string
+	Type           string // fixed | percent
+	ValueCents     int64
+	Percent        int
+	MinAmountCents int64
+	MaxUses        int
+	UsedCount      int
+	ProductID      int64
+	Active         bool
+	ExpiresAt      int64
+	CreatedAt      int64
 }
 
 // 卡密状态值。

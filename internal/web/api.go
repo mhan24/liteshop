@@ -86,6 +86,10 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/admins/{id}/role", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSetRole)))
 	mux.Handle("POST /api/v1/admin/admins/{id}/delete", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminDeleteAdmin)))
 	mux.Handle("GET /api/v1/admin/audit-logs", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminAuditLogs)))
+	mux.Handle("GET /api/v1/admin/coupons", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCoupons)))
+	mux.Handle("POST /api/v1/admin/coupons", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCouponCreate)))
+	mux.Handle("POST /api/v1/admin/coupons/{id}/edit", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCouponUpdate)))
+	mux.Handle("POST /api/v1/admin/coupons/{id}/delete", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCouponDelete)))
 }
 
 func faqJSON(faq []models.FAQItem) string {
@@ -104,6 +108,10 @@ func productJSON(p models.Product) map[string]any {
 	for _, f := range p.FAQ {
 		faq = append(faq, map[string]string{"q": f.Q, "a": f.A})
 	}
+	wholesale := []map[string]any{}
+	for _, t := range p.Wholesale {
+		wholesale = append(wholesale, map[string]any{"min_qty": t.MinQty, "discount": t.Discount})
+	}
 	return map[string]any{
 		"id":          p.ID,
 		"name":        p.Name,
@@ -116,6 +124,10 @@ func productJSON(p models.Product) map[string]any {
 		"sort_order":  p.SortOrder,
 		"is_pinned":   p.IsPinned,
 		"faq":         faq,
+		"wholesale":   wholesale,
+		"min_qty":     p.MinQty,
+		"max_qty":     p.MaxQty,
+		"cost_cents":  p.CostCents,
 		"created_at":  p.CreatedAt,
 		"updated_at":  p.UpdatedAt,
 	}
@@ -331,6 +343,7 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		Qty               int    `json:"qty"`
 		Contact           string `json:"contact"`
 		TradeType         string `json:"trade_type"`
+		CouponCode        string `json:"coupon_code"`
 		TurnstileResponse string `json:"cf-turnstile-response"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
@@ -343,9 +356,6 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.Qty <= 0 {
 		input.Qty = 1
-	}
-	if input.Qty > 100 {
-		input.Qty = 100
 	}
 	if !validEmail(input.Contact) {
 		writeError(w, 400, "invalid email")
@@ -370,10 +380,15 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid trade type")
 		return
 	}
-	orderNo, paymentURL, err := s.orders.CreateOrder(p, input.Qty, input.Contact, tradeType)
+	orderNo, paymentURL, _, _, err := s.orders.CreateOrder(p, input.Qty, input.Contact, tradeType, input.CouponCode)
 	if err != nil {
 		go s.notifier.NotifySystemError("创建支付交易失败: " + err.Error())
-		writeError(w, 502, err.Error())
+		// 若订单已创建（orderNo 非空）但支付网关失败，返回订单号供重试
+		if orderNo != "" {
+			writeJSON(w, 502, map[string]any{"error": err.Error(), "order_no": orderNo})
+		} else {
+			writeError(w, 502, err.Error())
+		}
 		return
 	}
 	// 订单创建事件通知 + 库存不足检查
@@ -678,6 +693,31 @@ func productFromJSON(input map[string]any) (models.Product, error) {
 			}
 		}
 	}
+	// 批发价/限购/成本价
+	wholesale := []models.WholesaleTier{}
+	if items, ok := input["wholesale"].([]any); ok {
+		for _, it := range items {
+			if m, ok := it.(map[string]any); ok {
+				minQty, _ := strconv.Atoi(str(m["min_qty"]))
+				discount, _ := strconv.Atoi(str(m["discount"]))
+				if minQty > 0 && discount > 0 && discount < 100 {
+					wholesale = append(wholesale, models.WholesaleTier{MinQty: minQty, Discount: discount})
+				}
+			}
+		}
+	}
+	minQty, _ := strconv.Atoi(str(input["min_qty"]))
+	if minQty < 1 {
+		minQty = 1
+	}
+	maxQty, _ := strconv.Atoi(str(input["max_qty"]))
+	if maxQty < minQty {
+		maxQty = 100
+	}
+	costCents, _ := strconv.ParseInt(str(input["cost_cents"]), 10, 64)
+	if costCents < 0 {
+		costCents = 0
+	}
 	return models.Product{
 		Name:        name,
 		Description: strings.TrimSpace(str(input["description"])),
@@ -688,6 +728,10 @@ func productFromJSON(input map[string]any) (models.Product, error) {
 		SortOrder:   sortOrder,
 		IsPinned:    input["is_pinned"] == true,
 		FAQ:         faq,
+		Wholesale:   wholesale,
+		MinQty:      minQty,
+		MaxQty:      maxQty,
+		CostCents:   costCents,
 	}, nil
 }
 
@@ -1431,6 +1475,104 @@ func (s *Server) apiAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, 200, map[string]any{"logs": out})
+}
+
+// ---------- 优惠券管理 ----------
+
+func (s *Server) apiAdminCoupons(w http.ResponseWriter, r *http.Request) {
+	coupons, err := s.orders.Repo().ListCoupons()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	out := []map[string]any{}
+	for _, c := range coupons {
+		out = append(out, map[string]any{
+			"id": c.ID, "code": c.Code, "type": c.Type, "value_cents": c.ValueCents,
+			"percent": c.Percent, "min_amount_cents": c.MinAmountCents, "max_uses": c.MaxUses,
+			"used_count": c.UsedCount, "product_id": c.ProductID, "active": c.Active,
+			"expires_at": c.ExpiresAt, "created_at": c.CreatedAt,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"coupons": out})
+}
+
+func couponFromJSON(input map[string]any) (models.Coupon, error) {
+	code := strings.ToUpper(strings.TrimSpace(str(input["code"])))
+	if code == "" {
+		return models.Coupon{}, errString("code required")
+	}
+	cType := strings.TrimSpace(str(input["type"]))
+	if cType != "fixed" && cType != "percent" {
+		cType = "fixed"
+	}
+	value, _ := strconv.ParseInt(str(input["value_cents"]), 10, 64)
+	percent, _ := strconv.Atoi(str(input["percent"]))
+	minAmount, _ := strconv.ParseInt(str(input["min_amount_cents"]), 10, 64)
+	maxUses, _ := strconv.Atoi(str(input["max_uses"]))
+	productID, _ := strconv.ParseInt(str(input["product_id"]), 10, 64)
+	expiresAt, _ := strconv.ParseInt(str(input["expires_at"]), 10, 64)
+	active := str(input["active"]) != "false" && input["active"] != false
+	return models.Coupon{
+		Code: code, Type: cType, ValueCents: value, Percent: percent,
+		MinAmountCents: minAmount, MaxUses: maxUses, ProductID: productID,
+		Active: active, ExpiresAt: expiresAt,
+	}, nil
+}
+
+func (s *Server) apiAdminCouponCreate(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	c, err := couponFromJSON(input)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	if err := s.orders.Repo().CreateCoupon(c); err != nil {
+		writeError(w, 400, "create failed (code may exist)")
+		return
+	}
+	s.audit(r, "coupon_create", "coupon", c.Code, "", fmt.Sprintf("type=%s value=%d", c.Type, c.ValueCents))
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminCouponUpdate(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	var input map[string]any
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	c, err := couponFromJSON(input)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	c.ID = id
+	if err := s.orders.Repo().UpdateCoupon(c); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	s.audit(r, "coupon_update", "coupon", c.Code, "", fmt.Sprintf("type=%s value=%d active=%v", c.Type, c.ValueCents, c.Active))
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminCouponDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	_ = s.orders.Repo().DeleteCoupon(id)
+	s.audit(r, "coupon_delete", "coupon", fmt.Sprintf("%d", id), "", "deleted")
+	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func (s *Server) apiAdminSystemBackup(w http.ResponseWriter, r *http.Request) {

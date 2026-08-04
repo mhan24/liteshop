@@ -1,0 +1,142 @@
+package order
+
+import (
+	"database/sql"
+	"errors"
+
+	"shop/internal/models"
+)
+
+var (
+	ErrCouponNotFound      = errors.New("优惠券不存在或已停用")
+	ErrCouponExpired       = errors.New("优惠券已过期")
+	ErrCouponUsedUp        = errors.New("优惠券使用次数已用完")
+	ErrCouponNotApplicable = errors.New("优惠券不适用于该商品或金额不足")
+)
+
+// GetCouponByCode 按券码查询优惠券（含有效期/启用检查）。
+func (r *Repository) GetCouponByCode(code string) (models.Coupon, error) {
+	var c models.Coupon
+	err := r.db.QueryRow(`SELECT id, code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at FROM coupons WHERE code = ?`, code).Scan(&c.ID, &c.Code, &c.Type, &c.ValueCents, &c.Percent, &c.MinAmountCents, &c.MaxUses, &c.UsedCount, &c.ProductID, &c.Active, &c.ExpiresAt, &c.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c, ErrCouponNotFound
+		}
+		return c, err
+	}
+	if !c.Active {
+		return c, ErrCouponNotFound
+	}
+	if c.ExpiresAt > 0 && models.Now() > c.ExpiresAt {
+		return c, ErrCouponExpired
+	}
+	if c.MaxUses > 0 && c.UsedCount >= c.MaxUses {
+		return c, ErrCouponUsedUp
+	}
+	return c, nil
+}
+
+// ApplyCoupon 校验并计算优惠券抵扣金额。
+// amountCents 为订单原始金额（分），productID 为商品。
+// 返回抵扣金额（分）与校验错误。
+func (r *Repository) ApplyCoupon(code string, amountCents int64, productID int64) (int64, error) {
+	c, err := r.GetCouponByCode(code)
+	if err != nil {
+		return 0, err
+	}
+	if c.ProductID != 0 && c.ProductID != productID {
+		return 0, ErrCouponNotApplicable
+	}
+	if amountCents < c.MinAmountCents {
+		return 0, ErrCouponNotApplicable
+	}
+	var discount int64
+	switch c.Type {
+	case "percent":
+		discount = amountCents * int64(c.Percent) / 100
+	default: // fixed
+		discount = c.ValueCents
+	}
+	if discount > amountCents {
+		discount = amountCents
+	}
+	if discount <= 0 {
+		return 0, ErrCouponNotApplicable
+	}
+	return discount, nil
+}
+
+// UseCoupon 记录一次优惠券使用（券用量 +1，写入使用记录）。
+func (r *Repository) UseCoupon(couponID int64, orderNo string, discountCents int64) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE coupons SET used_count = used_count + 1, updated_at = ? WHERE id = ?`, models.Now(), couponID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, ?, ?, ?)`, couponID, orderNo, discountCents, models.Now()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// GetCouponIDByCode 返回券 ID（验券后使用）。
+func (r *Repository) GetCouponIDByCode(code string) (int64, error) {
+	var id int64
+	err := r.db.QueryRow(`SELECT id FROM coupons WHERE code = ?`, code).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, ErrCouponNotFound
+		}
+		return 0, err
+	}
+	return id, nil
+}
+
+// ListCoupons 返回全部优惠券。
+func (r *Repository) ListCoupons() ([]models.Coupon, error) {
+	rows, err := r.db.Query(`SELECT id, code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at FROM coupons ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.Coupon
+	for rows.Next() {
+		var c models.Coupon
+		if err := rows.Scan(&c.ID, &c.Code, &c.Type, &c.ValueCents, &c.Percent, &c.MinAmountCents, &c.MaxUses, &c.UsedCount, &c.ProductID, &c.Active, &c.ExpiresAt, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// CreateCoupon 新建优惠券。
+func (r *Repository) CreateCoupon(c models.Coupon) error {
+	now := models.Now()
+	_, err := r.db.Exec(`INSERT INTO coupons(code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+		c.Code, c.Type, c.ValueCents, c.Percent, c.MinAmountCents, c.MaxUses, c.ProductID, boolInt(c.Active), c.ExpiresAt, now, now)
+	return err
+}
+
+// UpdateCoupon 更新优惠券。
+func (r *Repository) UpdateCoupon(c models.Coupon) error {
+	_, err := r.db.Exec(`UPDATE coupons SET type = ?, value_cents = ?, percent = ?, min_amount_cents = ?, max_uses = ?, product_id = ?, active = ?, expires_at = ?, updated_at = ? WHERE id = ?`,
+		c.Type, c.ValueCents, c.Percent, c.MinAmountCents, c.MaxUses, c.ProductID, boolInt(c.Active), c.ExpiresAt, models.Now(), c.ID)
+	return err
+}
+
+// DeleteCoupon 删除优惠券。
+func (r *Repository) DeleteCoupon(id int64) error {
+	_, err := r.db.Exec(`DELETE FROM coupons WHERE id = ?`, id)
+	return err
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}

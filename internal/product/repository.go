@@ -32,7 +32,7 @@ func (r *Repository) ListViews(activeOnly bool) ([]View, error) {
 	if activeOnly {
 		where = "WHERE p.status = 'active'"
 	}
-	rows, err := r.db.Query(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.faq, p.created_at, p.updated_at,
+	rows, err := r.db.Query(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.faq, p.wholesale, p.min_qty, p.max_qty, p.cost_cents, p.created_at, p.updated_at,
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available'),
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'locked'),
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'sold')
@@ -44,11 +44,12 @@ func (r *Repository) ListViews(activeOnly bool) ([]View, error) {
 	var out []View
 	for rows.Next() {
 		var v View
-		var faqRaw string
-		if err := rows.Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.ImageURL, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &faqRaw, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available, &v.Reserved, &v.Sold); err != nil {
+		var faqRaw, wholeRaw string
+		if err := rows.Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.ImageURL, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &faqRaw, &wholeRaw, &v.Product.MinQty, &v.Product.MaxQty, &v.Product.CostCents, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available, &v.Reserved, &v.Sold); err != nil {
 			return nil, err
 		}
 		v.Product.FAQ = parseFAQ(faqRaw)
+		v.Product.Wholesale = parseWholesale(wholeRaw)
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -57,14 +58,15 @@ func (r *Repository) ListViews(activeOnly bool) ([]View, error) {
 // GetByID 按 ID 查商品视图。
 func (r *Repository) GetByID(id int64) (View, error) {
 	var v View
-	var faqRaw string
-	err := r.db.QueryRow(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.faq, p.created_at, p.updated_at,
+	var faqRaw, wholeRaw string
+	err := r.db.QueryRow(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.faq, p.wholesale, p.min_qty, p.max_qty, p.cost_cents, p.created_at, p.updated_at,
 		(SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available')
-		FROM products p WHERE p.id = ?`, id).Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.ImageURL, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &faqRaw, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available)
+		FROM products p WHERE p.id = ?`, id).Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.ImageURL, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &faqRaw, &wholeRaw, &v.Product.MinQty, &v.Product.MaxQty, &v.Product.CostCents, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available)
 	if err != nil {
 		return v, err
 	}
 	v.Product.FAQ = parseFAQ(faqRaw)
+	v.Product.Wholesale = parseWholesale(wholeRaw)
 	return v, nil
 }
 
@@ -97,15 +99,15 @@ func (r *Repository) GetActiveByID(id int64) (View, error) {
 // Create 创建商品。
 func (r *Repository) Create(p models.Product) error {
 	now := models.Now()
-	_, err := r.db.Exec(`INSERT INTO products(name, description, image_url, price_cents, status, category, sort_order, is_pinned, faq, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), now, now)
+	_, err := r.db.Exec(`INSERT INTO products(name, description, image_url, price_cents, status, category, sort_order, is_pinned, faq, wholesale, min_qty, max_qty, cost_cents, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), wholesaleJSON(p.Wholesale), p.MinQty, p.MaxQty, p.CostCents, now, now)
 	return err
 }
 
 // Update 更新商品。
 func (r *Repository) Update(p models.Product, id int64) error {
-	_, err := r.db.Exec(`UPDATE products SET name = ?, description = ?, image_url = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, faq = ?, updated_at = ? WHERE id = ?`,
-		p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), models.Now(), id)
+	_, err := r.db.Exec(`UPDATE products SET name = ?, description = ?, image_url = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, faq = ?, wholesale = ?, min_qty = ?, max_qty = ?, cost_cents = ?, updated_at = ? WHERE id = ?`,
+		p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), wholesaleJSON(p.Wholesale), p.MinQty, p.MaxQty, p.CostCents, models.Now(), id)
 	return err
 }
 
@@ -188,6 +190,28 @@ func parseFAQ(raw string) []models.FAQItem {
 		return nil
 	}
 	return out
+}
+
+func parseWholesale(raw string) []models.WholesaleTier {
+	var out []models.WholesaleTier
+	if raw == "" {
+		return out
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func wholesaleJSON(tiers []models.WholesaleTier) string {
+	if len(tiers) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(tiers)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func faqJSON(faq []models.FAQItem) string {

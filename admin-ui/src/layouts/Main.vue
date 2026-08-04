@@ -14,6 +14,9 @@
         <el-menu-item index="/orders" @click="router.push('/orders')">
           <el-icon><List /></el-icon><template #title>{{ t('nav.orders') }}</template>
         </el-menu-item>
+        <el-menu-item index="/coupons" @click="router.push('/coupons')">
+          <el-icon><Ticket /></el-icon><template #title>{{ t('nav.coupons') }}</template>
+        </el-menu-item>
         <el-menu-item index="/settings" @click="router.push('/settings')">
           <el-icon><Wallet /></el-icon><template #title>{{ t('nav.payment') }}</template>
         </el-menu-item>
@@ -70,7 +73,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
-import { HomeFilled, Goods, List, Wallet, Bell, Setting, User, Tools, Link, SwitchButton, Expand, Fold, Avatar, Document } from '@element-plus/icons-vue'
+import { HomeFilled, Goods, List, Wallet, Bell, Setting, User, Tools, Link, SwitchButton, Expand, Fold, Avatar, Document, Ticket } from '@element-plus/icons-vue'
 import { useSessionStore } from '@/stores/session'
 
 const route = useRoute()

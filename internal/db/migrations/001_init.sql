@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS products (
     sort_order INTEGER NOT NULL DEFAULT 0,
     is_pinned INTEGER NOT NULL DEFAULT 0,
     faq TEXT NOT NULL DEFAULT '',
+    wholesale TEXT NOT NULL DEFAULT '',
+    min_qty INTEGER NOT NULL DEFAULT 1,
+    max_qty INTEGER NOT NULL DEFAULT 100,
+    cost_cents INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );

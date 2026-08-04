@@ -15,9 +15,10 @@ import (
 var migrationFS embed.FS
 
 // legacyUpgrades 为需要 Go 条件判断的存量库升级（SQLite 不支持 ADD COLUMN IF NOT EXISTS）。
-// key 为迁移版本名，会在 SQL 迁移之后按序执行。
+// key 为迁移文件 basename（含 .sql 后缀），与 listMigrationFiles 的 basename 匹配。
 var legacyUpgrades = map[string]func(*sql.DB) error{
-	"002_legacy_upgrade": legacyUpgrade,
+	"002_legacy_upgrade.sql":  legacyUpgrade,
+	"004_product_columns.sql": ensureProductColumns,
 }
 
 // migrateDB 执行所有未应用的数据库迁移。
@@ -44,8 +45,12 @@ func migrateDB(db *sql.DB) error {
 				return fmt.Errorf("migration %s: %w", name, err)
 			}
 		}
-		// 执行 Go 升级逻辑（如有）
-		if fn, ok := legacyUpgrades[name]; ok {
+		// 执行 Go 升级逻辑（如有），按 basename 匹配
+		base := name
+		if i := strings.LastIndex(base, "/"); i >= 0 {
+			base = base[i+1:]
+		}
+		if fn, ok := legacyUpgrades[base]; ok {
 			if err := fn(db); err != nil {
 				return fmt.Errorf("migration %s: %w", name, err)
 			}
@@ -83,7 +88,7 @@ func migrationApplied(db *sql.DB, name string) (bool, error) {
 
 // isGoOnlyMigration 标记仅含 Go 逻辑、无独立 SQL 的迁移文件。
 func isGoOnlyMigration(name string) bool {
-	return strings.Contains(name, "legacy_upgrade")
+	return strings.Contains(name, "legacy_upgrade") || strings.Contains(name, "004_product_columns")
 }
 
 func runSQLMigration(db *sql.DB, name string) error {

@@ -172,6 +172,10 @@ func ensureProductColumns(db *sql.DB) error {
 		{"is_pinned", "ALTER TABLE products ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0"},
 		{"image_url", "ALTER TABLE products ADD COLUMN image_url TEXT NOT NULL DEFAULT ''"},
 		{"faq", "ALTER TABLE products ADD COLUMN faq TEXT NOT NULL DEFAULT ''"},
+		{"wholesale", "ALTER TABLE products ADD COLUMN wholesale TEXT NOT NULL DEFAULT ''"},
+		{"min_qty", "ALTER TABLE products ADD COLUMN min_qty INTEGER NOT NULL DEFAULT 1"},
+		{"max_qty", "ALTER TABLE products ADD COLUMN max_qty INTEGER NOT NULL DEFAULT 100"},
+		{"cost_cents", "ALTER TABLE products ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0"},
 	}
 	for _, a := range additions {
 		exists, err := columnExists(db, "products", a.column)

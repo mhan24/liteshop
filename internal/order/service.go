@@ -29,11 +29,55 @@ func NewService(repo *Repository, payFn func() *bepusdt.Client, cfgFn func() Pay
 	return &Service{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
 
+func (s *Service) cfg() PaymentConfig {
+	if s.cfgFn != nil {
+		return s.cfgFn()
+	}
+	return PaymentConfig{}
+}
+
 // CreateOrder 创建订单并生成 BEpusdt 交易。
-// 返回订单号与支付地址。
-func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType string) (string, string, error) {
+// 支持批发价（阶梯折扣）与优惠券（couponCode 可空）。
+// 返回订单号、支付地址、优惠券抵扣金额（分）、优惠券 ID（0=未用）、错误。
+func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, couponCode string) (string, string, int64, int64, error) {
 	if qty <= 0 {
 		qty = 1
+	}
+	// 批发价：按数量匹配最高档折扣
+	baseCents := p.PriceCents
+	if p.MinQty < 1 {
+		p.MinQty = 1
+	}
+	if qty < p.MinQty {
+		return "", "", 0, 0, fmt.Errorf("最少购买 %d 件", p.MinQty)
+	}
+	if p.MaxQty > 0 && qty > p.MaxQty {
+		return "", "", 0, 0, fmt.Errorf("最多购买 %d 件", p.MaxQty)
+	}
+	amountCents := baseCents * int64(qty)
+	for _, tier := range p.Wholesale {
+		if qty >= tier.MinQty {
+			amountCents = baseCents * int64(qty) * int64(tier.Discount) / 100
+		}
+	}
+	// 优惠券
+	discount := int64(0)
+	couponID := int64(0)
+	if couponCode != "" {
+		var cidErr error
+		couponID, cidErr = s.repo.GetCouponIDByCode(couponCode)
+		if cidErr != nil {
+			return "", "", 0, 0, cidErr
+		}
+		d, err := s.repo.ApplyCoupon(couponCode, amountCents, p.ID)
+		if err != nil {
+			return "", "", 0, 0, err
+		}
+		discount = d
+		amountCents -= discount
+		if amountCents < 0 {
+			amountCents = 0
+		}
 	}
 	now := models.Now()
 	order := models.Order{
@@ -41,8 +85,8 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType stri
 		ProductID:    p.ID,
 		ProductName:  p.Name,
 		Qty:          qty,
-		AmountCents:  p.PriceCents * int64(qty),
-		Fiat:         s.cfgFn().Fiat,
+		AmountCents:  amountCents,
+		Fiat:         s.cfg().Fiat,
 		TradeType:    tradeType,
 		BuyerContact: contact,
 		Status:       models.OrderCreated,
@@ -50,10 +94,14 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType stri
 		UpdatedAt:    now,
 	}
 	if err := s.repo.CreatePendingOrder(&order); err != nil {
-		return "", "", err
+		return "", "", 0, 0, err
 	}
 	_ = s.repo.AddLog(order.ID, "order_created", "订单已创建", "", models.OrderCreated, 0)
-	cfg := s.cfgFn()
+	if discount > 0 {
+		_ = s.repo.UseCoupon(couponID, order.OrderNo, discount)
+		_ = s.repo.AddLog(order.ID, "coupon_used", fmt.Sprintf("优惠券抵扣 %d 分", discount), "", models.OrderCreated, 0)
+	}
+	cfg := s.cfg()
 	redirectURL := cfg.PublicBaseURL + "/order/" + order.OrderNo + "?contact=" + contact
 	paymentURL, tradeID, err := s.payFn().CreateTransaction(bepusdt.CreateInput{
 		OrderID:     order.OrderNo,
@@ -68,12 +116,12 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType stri
 	if err != nil {
 		_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
 		_ = s.repo.AddLog(order.ID, "payment_failed", "创建 BEpusdt 交易失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
-		return "", "", err
+		return order.OrderNo, "", discount, couponID, err
 	}
 	_ = s.repo.SetTradeInfo(order.ID, tradeID, paymentURL)
 	_ = s.repo.SetOrderStatus(order.ID, models.OrderWaitingPayment)
 	_ = s.repo.AddLog(order.ID, "transaction_created", "BEpusdt 交易已创建", models.OrderCreated, models.OrderWaitingPayment, 0)
-	return order.OrderNo, paymentURL, nil
+	return order.OrderNo, paymentURL, discount, couponID, nil
 }
 
 // MarkPaidAndDeliver 处理支付成功回调：置为 paid 并发卡。

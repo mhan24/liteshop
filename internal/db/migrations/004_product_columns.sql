@@ -1,0 +1,2 @@
+-- 004_product_columns.sql - 商品营销列（wholesale / min_qty / max_qty / cost_cents）
+-- 由 Go 迁移器执行（legacyUpgrades["004_product_columns"] -> promoteUpgrade）

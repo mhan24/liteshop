@@ -262,3 +262,61 @@ func TestOrderCountsWithTimezone(t *testing.T) {
 		t.Fatalf("today=%d sales=%d, want 1/1 (UTC natural day)", today, sales)
 	}
 }
+
+// TestCouponFixedDiscount 验证固定金额优惠券 + 批发价 + 限购。
+func TestCouponAndWholesale(t *testing.T) {
+	d, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer d.Close()
+	now := models.Now()
+	if _, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, created_at, updated_at) VALUES('t','',100,'active',2,10,'[{"min_qty":2,"discount":90}]',?,?)`, now, now); err != nil {
+		t.Fatalf("insert product: %v", err)
+	}
+	var pid int64
+	if err := d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&pid); err != nil {
+		t.Fatalf("scan pid: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,?, 'available', ?, ?)`, pid, "C"+string(rune('0'+i)), now, now)
+	}
+	repo := order.NewRepository(d)
+	svc := order.NewService(repo, func() *bepusdt.Client { return &bepusdt.Client{} }, func() order.PaymentConfig { return order.PaymentConfig{} })
+
+	// 固定券：满 1 元减 10 元（用于 1.8 元订单，可抵扣到 0 为止）
+	if err := repo.CreateCoupon(models.Coupon{Code: "TEST10", Type: "fixed", ValueCents: 1000, MinAmountCents: 100, MaxUses: 0, ProductID: 0, Active: true}); err != nil {
+		t.Fatalf("create coupon: %v", err)
+	}
+	// 限购：少于 min_qty 应报错
+	_, _, _, _, err = svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10}, 1, "a@b.com", "usdt-trc20", "")
+	if err == nil {
+		t.Fatalf("qty below min should fail")
+	}
+	// 批发价：买 2 件单价 9 折 = 100*2*90/100 = 180
+	// payFn 返回 nil，CreateTransaction 失败，但订单已创建且券已用
+	orderNo, _, discount, couponID, err := svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10, Wholesale: []models.WholesaleTier{{MinQty: 2, Discount: 90}}}, 2, "a@b.com", "usdt-trc20", "TEST10")
+	if err == nil {
+		t.Fatalf("expected pay failure with nil client")
+	}
+	if orderNo == "" {
+		t.Fatalf("orderNo should be set before pay attempt")
+	}
+	// 券抵扣被 cap 到订单金额：discount = 180，订单金额 = 0
+	if discount != 180 {
+		t.Fatalf("discount = %d, want 180", discount)
+	}
+	if couponID == 0 {
+		t.Fatalf("couponID should be set")
+	}
+	// 验证订单金额 = 180 - 180 = 0
+	o, _ := repo.GetOrderByNo(orderNo)
+	if o.AmountCents != 0 {
+		t.Fatalf("amount = %d, want 0", o.AmountCents)
+	}
+	// 券用量 +1
+	c, _ := repo.GetCouponByCode("TEST10")
+	if c.UsedCount != 1 {
+		t.Fatalf("coupon used = %d, want 1", c.UsedCount)
+	}
+}
