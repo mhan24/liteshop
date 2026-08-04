@@ -2,6 +2,9 @@ package notify
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -67,6 +70,12 @@ func (n *Notifier) sendWebhook(event string, payload map[string]string, site str
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "LiteShop-Webhook")
+	// 可选签名：若配置 webhook_secret，附加 HMAC-SHA256 供接收方验真
+	if secret := n.webhookSecret(); secret != "" {
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write(raw)
+		req.Header.Set("X-LiteShop-Signature", hex.EncodeToString(mac.Sum(nil)))
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -77,6 +86,18 @@ func (n *Notifier) sendWebhook(event string, payload map[string]string, site str
 	if resp.StatusCode >= 400 {
 		log.Printf("notify webhook http %d event=%s", resp.StatusCode, event)
 	}
+}
+
+// webhookSecret 返回 Webhook 签名密钥（未配置则空）。
+func (n *Notifier) webhookSecret() string {
+	if n.db == nil {
+		return ""
+	}
+	v, err := db.GetSetting(n.db, "webhook_secret")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(v)
 }
 
 // eventEnabled 判断事件是否已启用通知。

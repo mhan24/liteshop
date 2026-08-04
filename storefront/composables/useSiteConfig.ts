@@ -13,6 +13,17 @@ export function useSiteConfig() {
   const currency = computed(() => siteConfig.value.currency || 'CNY')
   const symbol = computed(() => siteConfig.value.currency_symbol || '¥')
   const timezone = computed(() => siteConfig.value.timezone || 'Asia/Shanghai')
+  const stockDisplay = computed(() => siteConfig.value.stock_display_mode || 'exact')
+
+  // 库存显示：exact 显示精确数；fuzzy 显示 充足/紧张/售罄
+  function stockText(available: number): string {
+    if (stockDisplay.value === 'fuzzy') {
+      if (available <= 0) return 'soldout'
+      if (available <= 10) return 'tight'
+      return 'plenty'
+    }
+    return String(available)
+  }
 
   // 金额格式化: 返回符号 + 数值 (两位小数)
   function money(cents?: number): string {
@@ -35,5 +46,5 @@ export function useSiteConfig() {
     }
   }
 
-  return { locale, currency, symbol, timezone, money, moneyWithCode, date }
+  return { locale, currency, symbol, timezone, stockDisplay, stockText, money, moneyWithCode, date }
 }

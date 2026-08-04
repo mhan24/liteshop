@@ -51,6 +51,30 @@ func ensureAdminColumns(db *sql.DB) error {
 	return nil
 }
 
+// ensureAdminSecurity 补充管理员 TOTP 列（SQLite 需条件 ALTER）。
+func ensureAdminSecurity(db *sql.DB) error {
+	additions := []struct {
+		column string
+		ddl    string
+	}{
+		{"totp_secret", "ALTER TABLE admins ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''"},
+		{"totp_enabled", "ALTER TABLE admins ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"},
+	}
+	for _, a := range additions {
+		exists, err := columnExists(db, "admins", a.column)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := db.Exec(a.ddl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func rebuildAdminsTable(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -62,6 +86,8 @@ func rebuildAdminsTable(db *sql.DB) error {
 		username TEXT NOT NULL UNIQUE,
 		password_hash TEXT NOT NULL,
 		role TEXT NOT NULL DEFAULT 'operator',
+		totp_secret TEXT NOT NULL DEFAULT '',
+		totp_enabled INTEGER NOT NULL DEFAULT 0,
 		created_at INTEGER NOT NULL
 	)`); err != nil {
 		return err

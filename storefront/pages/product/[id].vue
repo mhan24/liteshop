@@ -9,7 +9,7 @@
       <h1 class="text-2xl font-bold mt-3">{{ product.name }}</h1>
       <div class="md-body text-gray-600 mt-2" v-html="renderMarkdown(product.description)"></div>
       <p class="text-2xl font-bold mt-4">{{ siteMoney(product.price_cents) }}</p>
-      <p class="text-gray-500 text-sm">{{ t('currentStock') }} {{ available }}</p>
+      <p class="text-gray-500 text-sm">{{ t('currentStock') }} {{ stockLabel(available) }}</p>
 
       <div v-if="wholesale.length" class="mt-3 border rounded-lg overflow-hidden">
         <table class="w-full text-sm">
@@ -79,7 +79,7 @@
 <script setup lang="ts">
 const route = useRoute()
 const { t } = useI18n()
-const { money: siteMoney, currency: siteCurrency } = useSiteConfig()
+const { money: siteMoney, currency: siteCurrency, stockText } = useSiteConfig()
 const api = useApi()
 const req = useRequestURL()
 
@@ -93,6 +93,13 @@ const wholesale = computed(() => (product.value?.wholesale || []) as any[])
 const minQty = computed(() => product.value?.min_qty || 1)
 const maxQty = computed(() => Math.min(product.value?.max_qty || 100, available.value || 100))
 const available = computed(() => (data.value as any)?.available || 0)
+function stockLabel(n: number) {
+  const s = stockText(n)
+  if (s === 'plenty') return t('stockPlenty')
+  if (s === 'tight') return t('stockTight')
+  if (s === 'soldout') return t('stockSoldout')
+  return s
+}
 function wholesalePrice(minQtyNum: number) {
   const base = product.value?.price_cents || 0
   const tier = (wholesale.value as any[]).find((t) => t.min_qty === minQtyNum)

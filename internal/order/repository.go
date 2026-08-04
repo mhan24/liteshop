@@ -183,19 +183,42 @@ func (r *Repository) ListCardsByProduct(productID int64) ([]models.Card, error) 
 }
 
 // AddCards 批量导入可用卡密。
-func (r *Repository) AddCards(productID int64, contents []string) error {
+// AddCards 批量导入可用卡密。dedupe=true 时跳过该商品下已存在的卡密内容。
+// 返回新增数与跳过的重复数。
+func (r *Repository) AddCards(productID int64, contents []string, dedupe bool) (added, skipped int, err error) {
+	existing := map[string]bool{}
+	if dedupe {
+		rows, err := r.db.Query(`SELECT content FROM cards WHERE product_id = ?`, productID)
+		if err != nil {
+			return 0, 0, err
+		}
+		for rows.Next() {
+			var c string
+			if err := rows.Scan(&c); err != nil {
+				rows.Close()
+				return 0, 0, err
+			}
+			existing[c] = true
+		}
+		rows.Close()
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	defer tx.Rollback()
 	now := models.Now()
 	for _, content := range contents {
-		if _, err := tx.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?, ?, 'available', ?, ?)`, productID, content, now, now); err != nil {
-			return err
+		if dedupe && existing[content] {
+			skipped++
+			continue
 		}
+		if _, err := tx.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?, ?, 'available', ?, ?)`, productID, content, now, now); err != nil {
+			return 0, 0, err
+		}
+		added++
 	}
-	return tx.Commit()
+	return added, skipped, tx.Commit()
 }
 
 // DeleteAvailableCard 删除可用卡密。
@@ -349,4 +372,73 @@ func (r *Repository) Logs(orderID int64) ([]models.OrderEvent, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// DailyRevenue 返回最近 days 天每日营收（按支付时间，使用仓库时区自然日）。
+// 返回 [date, revenueCents] 列表，按日期升序。
+func (r *Repository) DailyRevenue(days int) ([]DailyRevenueRow, error) {
+	if days <= 0 {
+		days = 14
+	}
+	start := models.StartOfDayIn(models.Now()-int64(days-1)*86400, r.tz)
+	rows, err := r.db.Query(`SELECT paid_at, COALESCE(SUM(amount_cents),0) FROM orders
+		WHERE status IN ('paid','processing','delivered','completed') AND paid_at >= ?
+		GROUP BY paid_at ORDER BY paid_at`, start)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	// 按自然日聚合
+	byDay := map[string]int64{}
+	for rows.Next() {
+		var paidAt int64
+		var rev int64
+		if err := rows.Scan(&paidAt, &rev); err != nil {
+			return nil, err
+		}
+		day := time.Unix(paidAt, 0).In(r.tz).Format("2006-01-02")
+		byDay[day] += rev
+	}
+	var out []DailyRevenueRow
+	for i := days - 1; i >= 0; i-- {
+		d := time.Unix(models.Now()-int64(i)*86400, 0).In(r.tz).Format("2006-01-02")
+		out = append(out, DailyRevenueRow{Date: d, Revenue: byDay[d]})
+	}
+	return out, nil
+}
+
+// ProductSales 返回各商品销量与销售额（已支付订单）。
+func (r *Repository) ProductSales(limit int) ([]ProductSaleRow, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := r.db.Query(`SELECT product_name, SUM(qty), COALESCE(SUM(amount_cents),0) FROM orders
+		WHERE status IN ('paid','processing','delivered','completed')
+		GROUP BY product_name ORDER BY SUM(qty) DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProductSaleRow
+	for rows.Next() {
+		var s ProductSaleRow
+		if err := rows.Scan(&s.Name, &s.Qty, &s.Revenue); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// DailyRevenueRow 单日营收行。
+type DailyRevenueRow struct {
+	Date    string
+	Revenue int64
+}
+
+// ProductSaleRow 商品销量行。
+type ProductSaleRow struct {
+	Name    string
+	Qty     int
+	Revenue int64
 }

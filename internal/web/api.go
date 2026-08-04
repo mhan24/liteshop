@@ -14,6 +14,7 @@ import (
 	"shop/internal/models"
 	"shop/internal/notify"
 	"shop/internal/product"
+	"shop/internal/security"
 	"strconv"
 	"strings"
 	"time"
@@ -50,14 +51,17 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/admin/session", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSession)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/admin/login", s.rateLimitMiddleware(s.apiAdminLogin, 10))
+	mux.HandleFunc("POST /api/v1/admin/login/verify", s.rateLimitMiddleware(s.apiAdminLoginVerify, 10))
 	mux.Handle("POST /api/v1/admin/logout", s.requireAdminAPI(http.HandlerFunc(s.apiAdminLogout)))
 	mux.Handle("GET /api/v1/admin/dashboard", s.requireAdminAPI(http.HandlerFunc(s.apiDashboard)))
+	mux.Handle("GET /api/v1/admin/sales-report", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSalesReport)))
 
 	mux.Handle("GET /api/v1/admin/products", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProducts)))
 	mux.Handle("GET /api/v1/admin/products/{id}", s.requireAdminAPI(http.HandlerFunc(s.apiAdminProduct)))
 	mux.Handle("POST /api/v1/admin/products", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminProductCreate)))
 	mux.Handle("POST /api/v1/admin/products/{id}/edit", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminProductUpdate)))
 	mux.Handle("GET /api/v1/admin/products/{id}/cards", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCards)))
+	mux.Handle("GET /api/v1/admin/products/{id}/cards/export", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCardsExport)))
 	mux.Handle("POST /api/v1/admin/products/{id}/cards", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCardsImport)))
 	mux.Handle("POST /api/v1/admin/cards/{id}/delete", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCardDelete)))
 	mux.Handle("GET /api/v1/admin/orders/export", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrdersExport)))
@@ -67,6 +71,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/orders/{id}/cancel", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderCancel)))
 	mux.Handle("POST /api/v1/admin/orders/{id}/status", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderSetStatus)))
 	mux.Handle("POST /api/v1/admin/orders/{id}/resend", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderResend)))
+	mux.Handle("POST /api/v1/admin/orders/batch-resend", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrdersBatchResend)))
 	mux.Handle("POST /api/v1/admin/orders/{id}/redeliver", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderRedeliver)))
 	mux.Handle("GET /api/v1/admin/settings", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSettings)))
 	mux.Handle("POST /api/v1/admin/settings", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSettingsSave)))
@@ -78,7 +83,11 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/site", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSiteSave)))
 	mux.Handle("GET /api/v1/admin/account", s.requireAdminAPI(http.HandlerFunc(s.apiAdminAccount)))
 	mux.Handle("POST /api/v1/admin/account", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminAccountSave)))
+	mux.Handle("GET /api/v1/admin/totp", s.requireAdminAPI(http.HandlerFunc(s.apiAdminTotpStatus)))
+	mux.Handle("POST /api/v1/admin/totp/enable", s.requireAdminAPI(http.HandlerFunc(s.apiAdminTotpEnable)))
+	mux.Handle("POST /api/v1/admin/totp/disable", s.requireAdminAPI(http.HandlerFunc(s.apiAdminTotpDisable)))
 	mux.Handle("GET /api/v1/admin/system/backup", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSystemBackup)))
+	mux.Handle("GET /api/v1/admin/version", s.requireAdminAPI(http.HandlerFunc(s.apiAdminVersion)))
 	mux.Handle("POST /api/v1/admin/system/restore", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSystemRestore)))
 	mux.Handle("POST /api/v1/admin/system/reset", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSystemReset)))
 	mux.Handle("GET /api/v1/admin/admins", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminListAdmins)))
@@ -202,6 +211,7 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"currency":              st.Currency,
 		"currency_symbol":       currencySymbol(st.Currency),
 		"timezone":              st.Timezone,
+		"stock_display_mode":    st.StockDisplay,
 		"default_product_image": s.defaultProductImage(),
 		"maintenance": map[string]any{
 			"enabled": enabled,
@@ -521,19 +531,65 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Otp      string `json:"otp"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
 		writeError(w, 400, "bad json")
 		return
 	}
 	var adminID int64
-	var hash string
-	err := s.db.QueryRow(`SELECT id, password_hash FROM admins WHERE username = ?`, strings.TrimSpace(input.Username)).Scan(&adminID, &hash)
+	var hash, totpSecret string
+	var totpEnabled bool
+	err := s.db.QueryRow(`SELECT id, password_hash, totp_secret, totp_enabled FROM admins WHERE username = ?`, strings.TrimSpace(input.Username)).Scan(&adminID, &hash, &totpSecret, &totpEnabled)
 	if err != nil || !models.CheckPassword(input.Password, hash) {
 		writeError(w, 403, "invalid credentials")
 		return
 	}
+	if totpEnabled {
+		if strings.TrimSpace(input.Otp) == "" {
+			// 未提供 OTP，返回待验证状态
+			token := models.RandomToken(24)
+			s.sessMu.Lock()
+			s.sessions["2fa:"+token] = sessionInfo{AdminID: adminID, Expiry: time.Now().Add(5 * time.Minute)}
+			s.sessMu.Unlock()
+			writeJSON(w, 200, map[string]any{"ok": true, "totp_required": true, "token": token})
+			return
+		}
+		if !security.VerifyTotp(totpSecret, input.Otp, time.Now()) {
+			writeError(w, 403, "invalid otp")
+			return
+		}
+	}
 	s.startSession(w, adminID, r.TLS != nil)
+	writeJSON(w, 200, map[string]any{"ok": true, "totp_required": false})
+}
+
+func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Token string `json:"token"`
+		Otp   string `json:"otp"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	s.sessMu.Lock()
+	info, ok := s.sessions["2fa:"+input.Token]
+	if ok {
+		delete(s.sessions, "2fa:"+input.Token)
+	}
+	s.sessMu.Unlock()
+	if !ok {
+		writeError(w, 401, "invalid or expired token")
+		return
+	}
+	var totpSecret string
+	_ = s.db.QueryRow(`SELECT totp_secret FROM admins WHERE id = ?`, info.AdminID).Scan(&totpSecret)
+	if !security.VerifyTotp(totpSecret, input.Otp, time.Now()) {
+		writeError(w, 403, "invalid otp")
+		return
+	}
+	s.startSession(w, info.AdminID, r.TLS != nil)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -558,6 +614,13 @@ func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	var todayPaidCards int
 	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'sold' AND sold_at >= ?`, dayStart).Scan(&todayPaidCards)
+
+	// 今日毛利 = 今日营收 - 今日售出卡密的商品成本
+	var todayCost int64
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(p.cost_cents * o.qty), 0)
+		FROM orders o JOIN products p ON p.id = o.product_id
+		WHERE o.status IN ('paid','processing','delivered','completed') AND o.paid_at >= ?`, dayStart).Scan(&todayCost)
+	todayProfit := todayRevenue - todayCost
 
 	// 商品/卡密库存（商品仓储）
 	products, availableCards, soldCards, lockedCards, err := s.products.Repo().CardStockStats()
@@ -596,6 +659,8 @@ func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
 		"today_orders":     todayOrders,
 		"today_sales":      todaySales,
 		"today_revenue":    todayRevenue,
+		"today_cost":       todayCost,
+		"today_profit":     todayProfit,
 		"today_paid_cards": todayPaidCards,
 		"pending_orders":   pendingOrders,
 		"payment_failed":   paymentFailed,
@@ -611,6 +676,28 @@ func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
 			"db_size":    dbSize,
 			"uptime":     uptime,
 		},
+	})
+}
+
+// apiAdminSalesReport 返回销售报表（近 N 日营收曲线 + 商品销售占比）。
+func (s *Server) apiAdminSalesReport(w http.ResponseWriter, r *http.Request) {
+	days := 14
+	if d, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil && d > 0 && d <= 90 {
+		days = d
+	}
+	daily, err := s.orders.Repo().DailyRevenue(days)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	products, err := s.orders.Repo().ProductSales(10)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"daily":    daily,
+		"products": products,
 	})
 }
 
@@ -822,7 +909,8 @@ func (s *Server) apiAdminCardsImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Cards string `json:"cards"`
+		Cards  string `json:"cards"`
+		Dedupe bool   `json:"dedupe"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input)
 	lines := []string{}
@@ -832,12 +920,38 @@ func (s *Server) apiAdminCardsImport(w http.ResponseWriter, r *http.Request) {
 			lines = append(lines, line)
 		}
 	}
-	if err := s.orders.Repo().AddCards(id, lines); err != nil {
+	added, skipped, err := s.orders.Repo().AddCards(id, lines, input.Dedupe)
+	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	s.audit(r, "cards_import", "product", fmt.Sprintf("%d", id), "", fmt.Sprintf("imported=%d", len(lines)))
-	writeJSON(w, 200, map[string]any{"ok": true})
+	s.audit(r, "cards_import", "product", fmt.Sprintf("%d", id), "", fmt.Sprintf("added=%d skipped=%d", added, skipped))
+	writeJSON(w, 200, map[string]any{"ok": true, "added": added, "skipped": skipped})
+}
+
+// apiAdminCardsExport 导出商品卡密 CSV（可用 + 已售）。
+func (s *Server) apiAdminCardsExport(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	cards, err := s.orders.Repo().ListCardsByProduct(id)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=cards_%d.csv", id))
+	w.Write([]byte("\xEF\xBB\xBF"))
+	w.Write([]byte("ID,内容,状态,售出时间\n"))
+	for _, c := range cards {
+		ts := "-"
+		if c.SoldAt > 0 {
+			ts = models.FormatBeijing(c.SoldAt)
+		}
+		fmt.Fprintf(w, "%d,%s,%s,%s\n", c.ID, csvSafe(c.Content), c.Status, ts)
+	}
 }
 
 func (s *Server) apiAdminCardDelete(w http.ResponseWriter, r *http.Request) {
@@ -1055,7 +1169,35 @@ func (s *Server) apiAdminOrderResend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
-// apiAdminOrderRedeliver 对发卡失败/支付异常的订单尝试重新交付。
+// apiAdminOrdersBatchResend 批量重发选中订单的通知（已支付且有卡密）。
+func (s *Server) apiAdminOrdersBatchResend(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	sent := 0
+	for _, id := range input.IDs {
+		o, err := s.orders.Repo().GetOrderByID(id)
+		if err != nil {
+			continue
+		}
+		if o.Status != models.OrderDelivered && o.Status != models.OrderPaid && o.Status != models.OrderCompleted && o.Status != models.OrderDeliveryFailed {
+			continue
+		}
+		cards, _ := s.orders.Repo().GetOrderCards(o.ID)
+		if len(cards) == 0 {
+			continue
+		}
+		s.notifier.SendPaid(o, cards)
+		_ = s.orders.Repo().AddLog(o.ID, "resend", "批量重发卡密", o.Status, o.Status, 0)
+		sent++
+	}
+	s.audit(r, "orders_batch_resend", "orders", "", "", fmt.Sprintf("sent=%d", sent))
+	writeJSON(w, 200, map[string]any{"ok": true, "sent": sent})
+}
 func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
 	if err != nil {
@@ -1220,6 +1362,7 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		"site_locale":           st.Locale,
 		"site_currency":         st.Currency,
 		"site_timezone":         st.Timezone,
+		"stock_display_mode":    st.StockDisplay,
 	})
 }
 
@@ -1246,6 +1389,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 		"privacy_policy": "privacy_policy", "terms_of_service": "terms_of_service", "turnstile_site_key": "turnstile_site_key",
 		"maintenance_message": "maintenance_message", "default_product_image": "default_product_image",
 		"site_locale": "site_locale", "site_currency": "site_currency", "site_timezone": "site_timezone",
+		"stock_display_mode": "stock_display_mode",
 	} {
 		setIfPresent(key, field)
 	}
@@ -1336,6 +1480,58 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "account_update", "admin", fmt.Sprintf("%d", id), oldUsername+" / "+(map[bool]string{true: "密码已修改", false: "密码未变"}[input.NewPassword != ""]), username+" / "+map[bool]string{true: "密码已修改", false: "密码未变"}[input.NewPassword != ""])
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// ---------- TOTP 双因素 ----------
+
+func (s *Server) apiAdminTotpStatus(w http.ResponseWriter, r *http.Request) {
+	id := s.currentAdminID(r)
+	var enabled bool
+	var secret string
+	_ = s.db.QueryRow(`SELECT totp_enabled, totp_secret FROM admins WHERE id = ?`, id).Scan(&enabled, &secret)
+	writeJSON(w, 200, map[string]any{"enabled": enabled, "secret": secret, "issuer": s.siteSettings().Title})
+}
+
+func (s *Server) apiAdminTotpEnable(w http.ResponseWriter, r *http.Request) {
+	id := s.currentAdminID(r)
+	var input struct {
+		Secret string `json:"secret"`
+		Otp    string `json:"otp"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	if !security.VerifyTotp(input.Secret, input.Otp, time.Now()) {
+		writeError(w, 403, "invalid otp")
+		return
+	}
+	if _, err := s.db.Exec(`UPDATE admins SET totp_secret = ?, totp_enabled = 1 WHERE id = ?`, input.Secret, id); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	s.audit(r, "totp_enable", "admin", fmt.Sprintf("%d", id), "", "TOTP enabled")
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
+	id := s.currentAdminID(r)
+	var input struct {
+		Otp string `json:"otp"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
+	var secret string
+	_ = s.db.QueryRow(`SELECT totp_secret FROM admins WHERE id = ?`, id).Scan(&secret)
+	if !security.VerifyTotp(secret, input.Otp, time.Now()) {
+		writeError(w, 403, "invalid otp")
+		return
+	}
+	if _, err := s.db.Exec(`UPDATE admins SET totp_enabled = 0 WHERE id = ?`, id); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	s.audit(r, "totp_disable", "admin", fmt.Sprintf("%d", id), "", "TOTP disabled")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1719,4 +1915,12 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// Version 为构建版本号（可由 -ldflags 覆盖）。
+var Version = "v1.2.0"
+
+// apiAdminVersion 返回当前版本并异步检查 GitHub 最新 release。
+func (s *Server) apiAdminVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"version": Version, "repo": "mhan24/liteshop"})
 }

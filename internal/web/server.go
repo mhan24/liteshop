@@ -63,6 +63,7 @@ type SiteSettings struct {
 	Locale         string
 	Currency       string
 	Timezone       string
+	StockDisplay   string
 }
 
 type FooterLink struct {
@@ -97,7 +98,7 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
-	mux.HandleFunc("POST /notify/bepusdt", s.handleBepusdtNotify)
+	mux.HandleFunc("POST "+s.bepusdtNotifyPath(), s.handleBepusdtNotify)
 	s.registerAPI(mux)
 	s.registerDocs(mux)
 	mux.Handle("GET /admin/assets/", http.StripPrefix("/admin", http.FileServer(adminAssetsFS())))
@@ -142,6 +143,17 @@ func (s *Server) fiat() string {
 		return strings.ToUpper(strings.TrimSpace(value))
 	}
 	return s.cfg.BepusdtFiat
+}
+
+// bepusdtNotifyPath 返回 BEpusdt 回调路径（可配置，默认 /notify/bepusdt）。
+func (s *Server) bepusdtNotifyPath() string {
+	if v := strings.TrimSpace(mustGetSetting(s, "bepusdt_notify_path")); v != "" {
+		if !strings.HasPrefix(v, "/") {
+			v = "/" + v
+		}
+		return v
+	}
+	return "/notify/bepusdt"
 }
 
 func (s *Server) paymentConfig() config.Config {
@@ -251,6 +263,7 @@ func (s *Server) siteSettings() SiteSettings {
 	st.Locale = firstNonEmpty(get("site_locale"), "zh-CN")
 	st.Currency = firstNonEmpty(get("site_currency"), "CNY")
 	st.Timezone = firstNonEmpty(get("site_timezone"), "Asia/Shanghai")
+	st.StockDisplay = firstNonEmpty(get("stock_display_mode"), "exact")
 	return st
 }
 

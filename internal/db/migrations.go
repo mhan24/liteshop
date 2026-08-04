@@ -19,6 +19,7 @@ var migrationFS embed.FS
 var legacyUpgrades = map[string]func(*sql.DB) error{
 	"002_legacy_upgrade.sql":  legacyUpgrade,
 	"004_product_columns.sql": ensureProductColumns,
+	"005_security.sql":        ensureAdminSecurity,
 }
 
 // migrateDB 执行所有未应用的数据库迁移。
@@ -88,7 +89,7 @@ func migrationApplied(db *sql.DB, name string) (bool, error) {
 
 // isGoOnlyMigration 标记仅含 Go 逻辑、无独立 SQL 的迁移文件。
 func isGoOnlyMigration(name string) bool {
-	return strings.Contains(name, "legacy_upgrade") || strings.Contains(name, "004_product_columns")
+	return strings.Contains(name, "legacy_upgrade") || strings.Contains(name, "004_product_columns") || strings.Contains(name, "005_security")
 }
 
 func runSQLMigration(db *sql.DB, name string) error {

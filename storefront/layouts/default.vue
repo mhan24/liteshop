@@ -18,6 +18,16 @@
       <NuxtPage />
     </main>
     <SiteFooter :site="site" />
+
+    <div v-if="showAnnouncement" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+        <h2 class="text-lg font-bold">{{ site?.title || 'LiteShop' }}</h2>
+        <div class="md-body text-gray-600 mt-2 text-sm" v-html="renderMarkdown(site?.announcement)"></div>
+        <div class="mt-4 text-right">
+          <button type="button" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 text-sm" @click="dismissAnnouncement">{{ t('close') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -33,6 +43,20 @@ loadSiteConfig(site.value)
 
 const maintenance = computed(() => !!site.value?.maintenance?.enabled)
 const maintenanceMessage = computed(() => site.value?.maintenance?.message || '')
+
+// 公告弹窗：每次访问记忆一次（localStorage）
+const showAnnouncement = ref(false)
+function dismissAnnouncement() {
+  showAnnouncement.value = false
+}
+onMounted(() => {
+  const ann = site.value?.announcement
+  if (!ann) return
+  const key = 'liteshop_announcement_seen'
+  if (localStorage.getItem(key)) return
+  showAnnouncement.value = true
+  localStorage.setItem(key, '1')
+})
 const hasUnlock = ref(true)
 const unlockPassword = ref('')
 const unlocking = ref(false)
