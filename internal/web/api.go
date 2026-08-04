@@ -13,6 +13,7 @@ import (
 	"shop/internal/db"
 	"shop/internal/models"
 	"shop/internal/notify"
+	"shop/internal/product"
 	"strconv"
 	"strings"
 	"time"
@@ -274,42 +275,15 @@ func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiProducts(w http.ResponseWriter, r *http.Request) {
-	products, err := s.listProductViews(true)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	minPrice, _ := strconv.ParseFloat(r.URL.Query().Get("min_price"), 64)
+	maxPrice, _ := strconv.ParseFloat(r.URL.Query().Get("max_price"), 64)
+	groups, err := s.products.ListCategories(true, q, category, minPrice, maxPrice)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	// 筛选: q 关键词 / category 分类 / min_price / max_price
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	category := strings.TrimSpace(r.URL.Query().Get("category"))
-	minPrice := strings.TrimSpace(r.URL.Query().Get("min_price"))
-	maxPrice := strings.TrimSpace(r.URL.Query().Get("max_price"))
-	filtered := []ProductView{}
-	for _, p := range products {
-		if q != "" {
-			hay := strings.ToLower(p.Product.Name + " " + p.Product.Description)
-			if !strings.Contains(hay, strings.ToLower(q)) {
-				continue
-			}
-		}
-		if category != "" && category != "all" {
-			if p.Product.Category != category {
-				continue
-			}
-		}
-		if minPrice != "" {
-			if cents, err := strconv.ParseFloat(minPrice, 64); err == nil && float64(p.Product.PriceCents)/100 < cents {
-				continue
-			}
-		}
-		if maxPrice != "" {
-			if cents, err := strconv.ParseFloat(maxPrice, 64); err == nil && float64(p.Product.PriceCents)/100 > cents {
-				continue
-			}
-		}
-		filtered = append(filtered, p)
-	}
-	groups := groupIndexProducts(filtered)
 	out := []map[string]any{}
 	for _, g := range groups {
 		items := []map[string]any{}
@@ -318,53 +292,32 @@ func (s *Server) apiProducts(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, map[string]any{"name": g.Name, "default_key": g.DefaultKey, "products": items})
 	}
+	cats, _ := s.products.AllCategories()
 	writeJSON(w, 200, map[string]any{
 		"categories":     out,
-		"categories_all": s.allCategories(),
+		"categories_all": cats,
 	})
-}
-
-// allCategories 返回全部上架商品的分类列表（去重，供筛选器使用）。
-func (s *Server) allCategories() []string {
-	products, err := s.listProductViews(true)
-	if err != nil {
-		return nil
-	}
-	seen := map[string]bool{}
-	out := []string{}
-	for _, p := range products {
-		c := strings.TrimSpace(p.Product.Category)
-		if c == "" {
-			c = "默认分类"
-		}
-		if !seen[c] {
-			seen[c] = true
-			out = append(out, c)
-		}
-	}
-	return out
 }
 
 func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
 	param := r.PathValue("id")
 	var (
-		p         models.Product
-		available int
-		err       error
+		v   product.View
+		err error
 	)
 	// 支持 /products/{id} 或 /products/{slug}
 	if id, perr := strconv.ParseInt(param, 10, 64); perr == nil {
-		p, available, err = s.getProductView(id)
+		v, err = s.products.GetActiveView(id)
 	} else {
-		p, available, err = s.getProductViewBySlug(param)
+		v, err = s.products.GetBySlug(param)
 	}
-	if err != nil || p.Status != "active" {
+	if err != nil {
 		writeError(w, 404, "not found")
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"product":               productJSON(p),
-		"available":             available,
+		"product":               productJSON(v.Product),
+		"available":             v.Available,
 		"trade_types":           s.tradeTypes(),
 		"turnstile_site_key":    s.turnstileSiteKey(),
 		"default_product_image": s.defaultProductImage(),
@@ -398,11 +351,13 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid email")
 		return
 	}
-	p, available, err := s.getProductView(input.ProductID)
-	if err != nil || p.Status != "active" {
+	vw, err := s.products.GetActiveView(input.ProductID)
+	if err != nil {
 		writeError(w, 404, "not found")
 		return
 	}
+	p := vw.Product
+	available := vw.Available
 	if input.Qty > available {
 		writeError(w, 400, "out of stock")
 		return
@@ -578,60 +533,40 @@ func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
-	dayStart := startOfDay(models.Now())
+	dayStart := models.StartOfDay(models.Now())
 
-	// 今日指标
-	var todayOrders, todaySales, todayPaidCards int
-	var todayRevenue int64
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE created_at >= ?`, dayStart).Scan(&todayOrders)
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status IN ('paid','processing','delivered','completed') AND paid_at >= ?`, dayStart).Scan(&todaySales)
-	_ = s.db.QueryRow(`SELECT COALESCE(SUM(amount_cents),0) FROM orders WHERE status IN ('paid','processing','delivered','completed') AND paid_at >= ?`, dayStart).Scan(&todayRevenue)
+	// 今日/待处理指标（订单仓储）
+	todayOrders, todaySales, pendingOrders, paymentFailed, deliveryFailed, todayRevenue, err := s.orders.Repo().OrderCounts()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	var todayPaidCards int
 	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'sold' AND sold_at >= ?`, dayStart).Scan(&todayPaidCards)
 
-	// 待处理
-	var pendingOrders, paymentFailed, deliveryFailed int
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status IN ('created','waiting_payment')`).Scan(&pendingOrders)
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status = 'payment_failed'`).Scan(&paymentFailed)
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM orders WHERE status = 'delivery_failed'`).Scan(&deliveryFailed)
+	// 商品/卡密库存（商品仓储）
+	products, availableCards, soldCards, lockedCards, err := s.products.Repo().CardStockStats()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
 
-	// 商品库存
-	var products, availableCards, soldCards, lockedCards int
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM products`).Scan(&products)
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'available'`).Scan(&availableCards)
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'sold'`).Scan(&soldCards)
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'locked'`).Scan(&lockedCards)
-
-	// 库存不足: 可用卡密 < 低库存阈值
+	// 库存不足
 	lowStock := []map[string]any{}
-	rows, err := s.db.Query(`SELECT p.id, p.name, p.price_cents, (SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available') FROM products p WHERE (SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available') < ? AND p.status = 'active' ORDER BY (SELECT COUNT(1) FROM cards c WHERE c.product_id = p.id AND c.status = 'available') ASC LIMIT 10`, s.lowStockThreshold())
-	if err == nil {
-		for rows.Next() {
-			var id int64
-			var name string
-			var price int64
-			var avail int
-			if err := rows.Scan(&id, &name, &price, &avail); err == nil {
-				lowStock = append(lowStock, map[string]any{"id": id, "name": name, "price_cents": price, "available": avail})
-			}
-		}
-		rows.Close()
+	lowViews, _ := s.products.Repo().LowStock(s.lowStockThreshold())
+	for _, v := range lowViews {
+		lowStock = append(lowStock, map[string]any{"id": v.Product.ID, "name": v.Product.Name, "price_cents": v.Product.PriceCents, "available": v.Available})
 	}
 
 	// 最近交易
 	recent := []map[string]any{}
-	orows, err := s.db.Query(`SELECT id, order_no, product_name, qty, amount_cents, fiat, status, created_at FROM orders ORDER BY id DESC LIMIT 8`)
-	if err == nil {
-		for orows.Next() {
-			var o models.Order
-			if err := orows.Scan(&o.ID, &o.OrderNo, &o.ProductName, &o.Qty, &o.AmountCents, &o.Fiat, &o.Status, &o.CreatedAt); err == nil {
-				recent = append(recent, map[string]any{
-					"id": o.ID, "order_no": o.OrderNo, "product_name": o.ProductName,
-					"qty": o.Qty, "amount": fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
-					"fiat": o.Fiat, "status": o.Status, "created_at": o.CreatedAt,
-				})
-			}
-		}
-		orows.Close()
+	recentOrders, _ := s.orders.Repo().RecentOrders(8)
+	for _, o := range recentOrders {
+		recent = append(recent, map[string]any{
+			"id": o.ID, "order_no": o.OrderNo, "product_name": o.ProductName,
+			"qty": o.Qty, "amount": fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
+			"fiat": o.Fiat, "status": o.Status, "created_at": o.CreatedAt,
+		})
 	}
 
 	// 系统状态
@@ -675,7 +610,7 @@ func (s *Server) lowStockThreshold() int {
 }
 
 func (s *Server) apiAdminProducts(w http.ResponseWriter, r *http.Request) {
-	views, err := s.listProductViews(false)
+	views, err := s.products.Repo().ListViews(false)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -697,12 +632,12 @@ func (s *Server) apiAdminProduct(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	p, available, err := s.getProductView(id)
+	v, err := s.products.GetView(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"product": productJSON(p), "available": available})
+	writeJSON(w, 200, map[string]any{"product": productJSON(v.Product), "available": v.Available})
 }
 
 func productFromJSON(input map[string]any) (models.Product, error) {
@@ -785,8 +720,7 @@ func (s *Server) apiAdminProductCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	now := models.Now()
-	if _, err := s.db.Exec(`INSERT INTO products(name, description, image_url, price_cents, status, category, sort_order, is_pinned, faq, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), now, now); err != nil {
+	if err := s.products.Create(p); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
@@ -810,12 +744,11 @@ func (s *Server) apiAdminProductUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	if _, err := s.db.Exec(`UPDATE products SET name = ?, description = ?, image_url = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, faq = ?, updated_at = ? WHERE id = ?`, p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), models.Now(), id); err != nil {
+	oldName := s.products.Repo().GetName(id)
+	if err := s.products.Update(p, id); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	var oldName string
-	_ = s.db.QueryRow(`SELECT name FROM products WHERE id = ?`, id).Scan(&oldName)
 	s.audit(r, "product_update", "product", fmt.Sprintf("%d", id), oldName, fmt.Sprintf("name=%s price=%d status=%s", p.Name, p.PriceCents, p.Status))
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
