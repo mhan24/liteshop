@@ -8,6 +8,7 @@
       <el-form-item :label="t('payment.tradeTypes')"><el-input v-model="form.trade_types" type="textarea" :rows="3" /></el-form-item>
       <el-form-item :label="t('payment.timeout')"><el-input-number v-model="form.bepusdt_timeout_sec" :min="1" /></el-form-item>
       <el-form-item :label="t('payment.publicBaseUrl')"><el-input v-model="form.shop_public_base_url" /></el-form-item>
+      <el-form-item :label="t('payment.notifyPath')"><el-input v-model="form.bepusdt_notify_path" :placeholder="t('payment.notifyPathPlaceholder')" /></el-form-item>
       <el-form-item :label="t('payment.notifyUrl')"><el-input v-model="form.bepusdt_notify_url" /></el-form-item>
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>

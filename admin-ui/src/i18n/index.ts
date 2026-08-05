@@ -215,6 +215,8 @@ const messages = {
       timeout: '支付超时（秒）',
       publicBaseUrl: '前台公开地址',
       notifyUrl: '回调地址',
+      notifyPath: '回调路径',
+      notifyPathPlaceholder: '留空默认 /notify/bepusdt（自定义可隐藏回调地址防扫描）',
       saved: '已保存',
     },
     notify: {
@@ -575,6 +577,8 @@ const messages = {
       timeout: 'Payment timeout (seconds)',
       publicBaseUrl: 'Public base URL',
       notifyUrl: 'Notify URL',
+      notifyPath: 'Notify Path',
+      notifyPathPlaceholder: 'Blank = /notify/bepusdt (customize to hide endpoint)',
       saved: 'Saved',
     },
     notify: {

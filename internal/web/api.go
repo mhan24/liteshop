@@ -1299,6 +1299,7 @@ func (s *Server) apiAdminSettings(w http.ResponseWriter, r *http.Request) {
 		"trade_types":           strings.Join(s.tradeTypes(), ","),
 		"bepusdt_timeout_sec":   cfg.BepusdtTimeoutSec,
 		"shop_public_base_url":  cfg.PublicBaseURL,
+		"bepusdt_notify_path":   s.bepusdtNotifyPath(),
 		"bepusdt_notify_url":    cfg.NotifyURL,
 	})
 }
@@ -1320,6 +1321,12 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 	setIfPresent("bepusdt_timeout_sec", "bepusdt_timeout_sec")
 	setIfPresent("shop_public_base_url", "shop_public_base_url")
 	setIfPresent("bepusdt_notify_url", "bepusdt_notify_url")
+	// 回调路径需字符校验，非法值回退默认（不保存）
+	if v := strings.TrimSpace(str(input["bepusdt_notify_path"])); v != "" {
+		if reNotifyPath.MatchString(v) {
+			_ = db.SetSetting(s.db, "bepusdt_notify_path", v)
+		}
+	}
 	if v := strings.TrimSpace(str(input["bepusdt_api_token"])); v != "" {
 		_ = db.SetSetting(s.db, "bepusdt_api_token", v)
 	}
