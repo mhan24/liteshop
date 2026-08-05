@@ -731,9 +731,35 @@ func (s *Server) apiAdminSalesReport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
+	// 成本来源统计：区分下单真实快照/迁移估算/未知，供财务口径警示
+	var orderTime, migrationEstimate, unknown int
+	rows, err := s.db.Query(`SELECT cost_snapshot_source, COUNT(1) FROM orders WHERE status IN ('paid','processing','delivered','completed') GROUP BY cost_snapshot_source`)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var src string
+		var cnt int
+		_ = rows.Scan(&src, &cnt)
+		switch src {
+		case "order_time":
+			orderTime += cnt
+		case "migration_estimate":
+			migrationEstimate += cnt
+		default:
+			unknown += cnt
+		}
+	}
 	writeJSON(w, 200, map[string]any{
 		"daily":    daily,
 		"products": products,
+		"cost_source_stats": map[string]int{
+			"order_time":         orderTime,
+			"migration_estimate": migrationEstimate,
+			"unknown":            unknown,
+		},
 	})
 }
 
