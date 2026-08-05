@@ -58,7 +58,7 @@ func TestMigration007Backfill(t *testing.T) {
 	}
 }
 
-// TestMigration007Dedupe 验证 coupon_usages 去重：多组重复回退、used_count 与保留量一致、空 order_no 保留。
+// TestMigration007Dedupe 验证 coupon_usages 去重：多组重复、跨券同订单号、used_count 与保留量一致、空 order_no 保留。
 func TestMigration007Dedupe(t *testing.T) {
 	d, err := Open(t.TempDir() + "/test.db")
 	if err != nil {
@@ -66,25 +66,32 @@ func TestMigration007Dedupe(t *testing.T) {
 	}
 	defer d.Close()
 	now := models.Now()
-	// 券 A：ORD1 3 条 + ORD2 2 条 → 应回退 2+1=3；券 B：ORD3 2 条 → 应回退 1
-	if _, err := d.Exec(`INSERT INTO coupons(code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at, updated_at) VALUES('A','fixed',50,0,0,10,5,0,1,0,?,?)`, now, now); err != nil {
+	// 券 A：ORD1 3 条 + ORD2 2 条 + ORD3 1 条；券 B：ORD3 1 条（跨券共享 ORD3）；券 C：ORD4 2 条
+	if _, err := d.Exec(`INSERT INTO coupons(code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at, updated_at) VALUES('A','fixed',50,0,0,10,6,0,1,0,?,?)`, now, now); err != nil {
 		t.Fatalf("insert coupon A: %v", err)
 	}
-	if _, err := d.Exec(`INSERT INTO coupons(code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at, updated_at) VALUES('B','fixed',50,0,0,10,2,0,1,0,?,?)`, now, now); err != nil {
+	if _, err := d.Exec(`INSERT INTO coupons(code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at, updated_at) VALUES('B','fixed',50,0,0,10,1,0,1,0,?,?)`, now, now); err != nil {
 		t.Fatalf("insert coupon B: %v", err)
 	}
-	var aid, bid int64
+	if _, err := d.Exec(`INSERT INTO coupons(code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at, updated_at) VALUES('C','fixed',50,0,0,10,2,0,1,0,?,?)`, now, now); err != nil {
+		t.Fatalf("insert coupon C: %v", err)
+	}
+	var aid, bid, cid int64
 	_ = d.QueryRow(`SELECT id FROM coupons WHERE code='A'`).Scan(&aid)
 	_ = d.QueryRow(`SELECT id FROM coupons WHERE code='B'`).Scan(&bid)
-	// 模拟历史脏库：移除唯一索引，插入多组重复 + 空 order_no
+	_ = d.QueryRow(`SELECT id FROM coupons WHERE code='C'`).Scan(&cid)
+	// 模拟历史脏库：移除唯一索引，插入多组重复 + 跨券同订单号 + 空 order_no
 	if _, err := d.Exec(`DROP INDEX IF EXISTS idx_coupon_usage_order`); err != nil {
 		t.Fatalf("drop index: %v", err)
 	}
-	for _, o := range []string{"ORD1", "ORD1", "ORD1", "ORD2", "ORD2"} {
+	for _, o := range []string{"ORD1", "ORD1", "ORD1", "ORD2", "ORD2", "ORD3"} {
 		_, _ = d.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, ?, 50, ?)`, aid, o, now)
 	}
+	// 券 B 与券 A 共享 ORD3（跨券同订单号）
 	_, _ = d.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, 'ORD3', 50, ?)`, bid, now)
-	_, _ = d.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, 'ORD3', 50, ?)`, bid, now)
+	// 券 C：ORD4 两条
+	_, _ = d.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, 'ORD4', 50, ?)`, cid, now)
+	_, _ = d.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, 'ORD4', 50, ?)`, cid, now)
 	// 空订单号：券 A 两条、券 B 一条
 	for i := 0; i < 2; i++ {
 		_, _ = d.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, '', 0, ?)`, aid, now)
@@ -92,36 +99,27 @@ func TestMigration007Dedupe(t *testing.T) {
 	_, _ = d.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, '', 0, ?)`, bid, now)
 
 	// 复现迁移 007 分步 SQL（与迁移文件保持一致）
-	_, _ = d.Exec(`DROP TABLE IF EXISTS coupon_usage_dupes`)
-	if _, err := d.Exec(`CREATE TEMP TABLE coupon_usage_dupes AS SELECT coupon_id, order_no, COUNT(*) - 1 AS dupe_count FROM coupon_usages WHERE order_no <> '' GROUP BY coupon_id, order_no HAVING COUNT(*) > 1`); err != nil {
-		t.Fatalf("create dupe temp table: %v", err)
-	}
-	if _, err := d.Exec(`UPDATE coupons SET used_count = MAX(0, used_count - COALESCE((SELECT SUM(dupe_count) FROM coupon_usage_dupes d WHERE d.coupon_id = coupons.id), 0))`); err != nil {
-		t.Fatalf("refund used_count: %v", err)
-	}
-	_, _ = d.Exec(`DROP TABLE coupon_usage_dupes`)
 	if _, err := d.Exec(`DELETE FROM coupon_usages WHERE order_no <> '' AND id NOT IN (SELECT MIN(id) FROM coupon_usages WHERE order_no <> '' GROUP BY order_no)`); err != nil {
 		t.Fatalf("dedupe: %v", err)
 	}
-	// used_count 校验：A = 5-3 = 2，B = 2-1 = 1
-	var aUsed, bUsed int
+	if _, err := d.Exec(`UPDATE coupons SET used_count = (SELECT COUNT(*) FROM coupon_usages u WHERE u.coupon_id = coupons.id AND u.order_no <> '')`); err != nil {
+		t.Fatalf("recount used_count: %v", err)
+	}
+	// 去重后预期：ORD1 保留1、ORD2 保留1、ORD3 保留1（全局最小 id，恰为券A）、ORD4 保留1（券C）
+	// 券 A：ORD1+ORD2+ORD3 = 3；券 B：0（ORD3 被全局去重删除）；券 C：ORD4 = 1
+	var aUsed, bUsed, cUsed int
 	_ = d.QueryRow(`SELECT used_count FROM coupons WHERE id=?`, aid).Scan(&aUsed)
 	_ = d.QueryRow(`SELECT used_count FROM coupons WHERE id=?`, bid).Scan(&bUsed)
-	if aUsed != 2 {
-		t.Fatalf("coupon A used_count = %d, want 2 (5-3)", aUsed)
-	}
-	if bUsed != 1 {
-		t.Fatalf("coupon B used_count = %d, want 1 (2-1)", bUsed)
-	}
-	// 保留量校验：A 非空 = ORD1 + ORD2 = 2 条，B 非空 = 1 条
-	var aRows, bRows int
+	_ = d.QueryRow(`SELECT used_count FROM coupons WHERE id=?`, cid).Scan(&cUsed)
+	var aRows, bRows, cRows int
 	_ = d.QueryRow(`SELECT COUNT(1) FROM coupon_usages WHERE coupon_id=? AND order_no <> ''`, aid).Scan(&aRows)
 	_ = d.QueryRow(`SELECT COUNT(1) FROM coupon_usages WHERE coupon_id=? AND order_no <> ''`, bid).Scan(&bRows)
-	if aRows != aUsed {
-		t.Fatalf("coupon A usage rows = %d, used_count = %d, must be equal", aRows, aUsed)
+	_ = d.QueryRow(`SELECT COUNT(1) FROM coupon_usages WHERE coupon_id=? AND order_no <> ''`, cid).Scan(&cRows)
+	if aUsed != aRows || bUsed != bRows || cUsed != cRows {
+		t.Fatalf("used_count vs rows mismatch: A=%d/%d B=%d/%d C=%d/%d", aUsed, aRows, bUsed, bRows, cUsed, cRows)
 	}
-	if bRows != bUsed {
-		t.Fatalf("coupon B usage rows = %d, used_count = %d, must be equal", bRows, bUsed)
+	if aRows != 3 {
+		t.Fatalf("coupon A rows = %d, want 3", aRows)
 	}
 	// 空 order_no 记录应全部保留（A 两条 + B 一条 = 3 条）
 	var emptyRows int
@@ -162,7 +160,8 @@ func TestMigration007SQLIntegrity(t *testing.T) {
 	joined := strings.Join(stmts, " ")
 	// 关键语句必须存在且完整
 	for _, want := range []string{
-		"UPDATE coupons", "used_count", "MAX(0,",
+		"UPDATE coupons", "used_count",
+		"SELECT COUNT(*) FROM coupon_usages",
 		"DELETE FROM coupon_usages",
 		"DROP INDEX IF EXISTS idx_coupon_usage_order",
 		"CREATE UNIQUE INDEX", "WHERE order_no <> ''",
@@ -181,5 +180,57 @@ func TestMigration007SQLIntegrity(t *testing.T) {
 	// 最后一条语句应完整结束（以分号拆分后最后仍非空为正常，此处验证无截断注释）
 	if strings.Contains(stmts[len(stmts)-1], "--") {
 		t.Fatalf("007 trailing comment leaked into SQL statement")
+	}
+}
+
+// TestMigration007EndToEnd 走真实 migrateDB 验证 007 在迁移器事务中执行，
+// 且能正确处理脏数据（跨券同订单号 + 空订单号 + 多组重复）。
+func TestMigration007EndToEnd(t *testing.T) {
+	path := t.TempDir() + "/e2e.db"
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	now := models.Now()
+	// 移除 007 记录以便重跑
+	if _, err := d.Exec(`DELETE FROM schema_migrations WHERE version LIKE '%007%'`); err != nil {
+		d.Close()
+		t.Fatalf("delete 007 record: %v", err)
+	}
+	// 造脏数据
+	if _, err := d.Exec(`INSERT INTO coupons(code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at, updated_at) VALUES('A','fixed',50,0,0,10,3,0,1,0,?,?)`, now, now); err != nil {
+		d.Close()
+		t.Fatalf("insert coupon: %v", err)
+	}
+	var aid int64
+	_ = d.QueryRow(`SELECT id FROM coupons WHERE code='A'`).Scan(&aid)
+	if _, err := d.Exec(`DROP INDEX IF EXISTS idx_coupon_usage_order`); err != nil {
+		d.Close()
+		t.Fatalf("drop index: %v", err)
+	}
+	for _, o := range []string{"ORD1", "ORD1", "ORD1", "ORD2", "ORD2"} {
+		_, _ = d.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, ?, 50, ?)`, aid, o, now)
+	}
+	_, _ = d.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, '', 0, ?)`, aid, now)
+	d.Close()
+
+	// 重新打开触发 007 迁移
+	d2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer d2.Close()
+	var aUsed, aRows, emptyRows int
+	_ = d2.QueryRow(`SELECT used_count FROM coupons WHERE code='A'`).Scan(&aUsed)
+	_ = d2.QueryRow(`SELECT COUNT(1) FROM coupon_usages WHERE coupon_id=? AND order_no <> ''`, aid).Scan(&aRows)
+	_ = d2.QueryRow(`SELECT COUNT(1) FROM coupon_usages WHERE order_no = ''`).Scan(&emptyRows)
+	if aUsed != aRows {
+		t.Fatalf("e2e used_count=%d rows=%d mismatch", aUsed, aRows)
+	}
+	if aRows != 2 {
+		t.Fatalf("e2e coupon A rows = %d, want 2", aRows)
+	}
+	if emptyRows != 1 {
+		t.Fatalf("e2e empty order_no rows = %d, want 1", emptyRows)
 	}
 }

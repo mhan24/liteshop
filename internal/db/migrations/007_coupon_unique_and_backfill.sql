@@ -1,31 +1,23 @@
 -- 007: 优惠券使用唯一约束 + 旧订单成本回填（估算）
 -- 1) 清理历史脏数据：同一 order_no 可能有多条 coupon_usages（旧版无唯一约束）。
---    先聚合各券各订单重复使用量，回退 used_count（下限 0），再删除多余记录。
+--    以最终唯一键 order_no 为准去重，随后按清理结果直接重算 used_count，
+--    正确处理"同一 order_no 出现在不同优惠券下"的历史脏数据。
 --    空 order_no 的历史记录属于无效脏数据，予以保留不阻断索引（部分唯一索引）。
 
--- 1a) 聚合重复量：每券每订单超出 1 条的部分
-DROP TABLE IF EXISTS coupon_usage_dupes;
-CREATE TEMP TABLE coupon_usage_dupes AS
-SELECT coupon_id, order_no, COUNT(*) - 1 AS dupe_count
-FROM coupon_usages
-WHERE order_no <> ''
-GROUP BY coupon_id, order_no
-HAVING COUNT(*) > 1;
-
--- 1b) 按券汇总回退总量（正确处理同一券多个重复订单组）
-UPDATE coupons
-SET used_count = MAX(0, used_count - COALESCE((
-    SELECT SUM(dupe_count) FROM coupon_usage_dupes d WHERE d.coupon_id = coupons.id
-), 0));
-
-DROP TABLE coupon_usage_dupes;
-
--- 1c) 删除重复记录（保留每组 order_no 的最小 id 一条），仅限非空订单号
+-- 1a) 删除重复记录（保留每组 order_no 的最小 id 一条），仅限非空订单号
 DELETE FROM coupon_usages
 WHERE order_no <> ''
   AND id NOT IN (
       SELECT MIN(id) FROM coupon_usages WHERE order_no <> '' GROUP BY order_no
   );
+
+-- 1b) 清理后按各券剩余非空 usage 数量直接重算 used_count，
+--     保证 used_count 与保留 usage 数量一致（不依赖旧值可信度）
+UPDATE coupons
+SET used_count = (
+    SELECT COUNT(*) FROM coupon_usages u
+    WHERE u.coupon_id = coupons.id AND u.order_no <> ''
+);
 
 -- 2) 部分唯一索引：仅约束非空订单号（历史空 order_no 记录不阻断迁移）
 --    先删除旧版全列唯一索引（若存在），避免 IF NOT EXISTS 跳过导致部分索引不生效

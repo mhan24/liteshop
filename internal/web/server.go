@@ -225,7 +225,8 @@ func (s *Server) paymentConfig() config.Config {
 	if v := get("bepusdt_notify_url"); v != "" {
 		cfg.NotifyURL = v
 	} else if publicOverridden {
-		cfg.NotifyURL = cfg.PublicBaseURL + "/notify/bepusdt"
+		// 使用同一回调路径（可配置），避免自定义路径下回调 404
+		cfg.NotifyURL = cfg.PublicBaseURL + s.bepusdtNotifyPath()
 	}
 	return cfg
 }
