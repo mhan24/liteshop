@@ -75,6 +75,35 @@ func ensureAdminSecurity(db *sql.DB) error {
 	return nil
 }
 
+// ensureOrderCostSnapshot 补充 orders.cost_cents 成本快照列（条件 ALTER，幂等）。
+func ensureOrderCostSnapshot(db *sql.DB) error {
+	return addColumnIfMissing(db, "orders", "cost_cents", "ALTER TABLE orders ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0")
+}
+
+// ensureCostSnapshotSource 补充 orders.cost_snapshot_source 来源列，并回填估算来源（幂等）。
+func ensureCostSnapshotSource(db *sql.DB) error {
+	if err := addColumnIfMissing(db, "orders", "cost_snapshot_source", "ALTER TABLE orders ADD COLUMN cost_snapshot_source TEXT NOT NULL DEFAULT 'unknown'"); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`UPDATE orders SET cost_snapshot_source = 'migration_estimate' WHERE cost_cents > 0`); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addColumnIfMissing 仅当列不存在时执行 ALTER，保证迁移幂等。
+func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
+	exists, err := columnExists(db, table, column)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err = db.Exec(ddl)
+	return err
+}
+
 func rebuildAdminsTable(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {

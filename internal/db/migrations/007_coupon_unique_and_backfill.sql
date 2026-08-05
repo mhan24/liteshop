@@ -12,7 +12,9 @@ WHERE order_no <> ''
   );
 
 -- 1b) 清理后按各券剩余非空 usage 数量直接重算 used_count，
---     保证 used_count 与保留 usage 数量一致（不依赖旧值可信度）
+--     保证 used_count 与保留 usage 数量一致（不依赖旧值可信度）。
+--     口径说明：used_count 以 coupon_usages 记录为准；空 order_no 记录不计入；
+--     极早期若存在"used_count 递增但未写 usage 记录"的存量，重算会将其下调（风险极低）。
 UPDATE coupons
 SET used_count = (
     SELECT COUNT(*) FROM coupon_usages u
