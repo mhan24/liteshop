@@ -564,10 +564,17 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 403, "invalid otp")
 			return
 		}
-		// 旧明文升级为加密存储（首次验证成功后回写）
+		// 旧明文升级为加密存储（首次验证成功后回写）；失败须中断，防止迁移失败被掩盖
 		if !s.totpCipher.IsEncrypted(totpSecret) {
-			if enc, err := s.totpCipher.Encrypt(decrypted); err == nil {
-				_, _ = s.db.Exec(`UPDATE admins SET totp_secret = ? WHERE id = ?`, enc, adminID)
+			enc, err := s.totpCipher.Encrypt(decrypted)
+			if err != nil {
+				writeError(w, 500, "totp secret encrypt failed")
+				return
+			}
+			if _, err := s.db.Exec(`UPDATE admins SET totp_secret = ? WHERE id = ?`, enc, adminID); err != nil {
+				s.notifier.NotifySystemError("TOTP 旧明文升级失败 admin=" + fmt.Sprint(adminID) + ": " + err.Error())
+				writeError(w, 500, "totp secret upgrade failed")
+				return
 			}
 		}
 	}
@@ -605,10 +612,17 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "invalid otp")
 		return
 	}
-	// 旧明文升级为加密存储（首次验证成功后回写）
+	// 旧明文升级为加密存储（首次验证成功后回写）；失败须中断，防止迁移失败被掩盖
 	if !s.totpCipher.IsEncrypted(totpSecret) {
-		if enc, err := s.totpCipher.Encrypt(decrypted); err == nil {
-			_, _ = s.db.Exec(`UPDATE admins SET totp_secret = ? WHERE id = ?`, enc, info.AdminID)
+		enc, err := s.totpCipher.Encrypt(decrypted)
+		if err != nil {
+			writeError(w, 500, "totp secret encrypt failed")
+			return
+		}
+		if _, err := s.db.Exec(`UPDATE admins SET totp_secret = ? WHERE id = ?`, enc, info.AdminID); err != nil {
+			s.notifier.NotifySystemError("TOTP 旧明文升级失败 admin=" + fmt.Sprint(info.AdminID) + ": " + err.Error())
+			writeError(w, 500, "totp secret upgrade failed")
+			return
 		}
 	}
 	s.startSession(w, info.AdminID, r.TLS != nil)
@@ -1878,6 +1892,10 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 	s.sessMu.Lock()
 	s.sessions = make(map[string]sessionInfo)
 	s.sessMu.Unlock()
+	// 配置恢复后清空限流器，避免旧 IP 限制残留影响管理员操作
+	s.limitersMu.Lock()
+	s.limiters = make(map[string]*RateLimiter)
+	s.limitersMu.Unlock()
 	writeJSON(w, 200, map[string]any{"ok": true, "count": count})
 }
 

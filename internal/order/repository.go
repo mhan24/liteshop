@@ -48,8 +48,8 @@ func (r *Repository) CreatePendingOrder(order *models.Order) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, status, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?)`, order.OrderNo, order.ProductID, order.ProductName, order.Qty, order.AmountCents, order.CostCents, order.Fiat, order.TradeType, order.BuyerContact, order.CreatedAt, order.UpdatedAt)
+	res, err := tx.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, cost_cents, cost_snapshot_source, fiat, trade_type, buyer_contact, status, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?)`, order.OrderNo, order.ProductID, order.ProductName, order.Qty, order.AmountCents, order.CostCents, order.CostSnapshotSource, order.Fiat, order.TradeType, order.BuyerContact, order.CreatedAt, order.UpdatedAt)
 	if err != nil {
 		return err
 	}

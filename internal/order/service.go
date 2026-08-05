@@ -37,7 +37,7 @@ func (s *Service) ExpireStale(timeoutSec int) (int, error) {
 	}
 	cutoff := models.Now() - int64(timeoutSec)
 	orders, err := s.repo.ListOrders(
-		`status IN ('`+models.OrderCreated+`','`+models.OrderWaitingPayment+`') AND created_at < ?`,
+		`status IN ('created','waiting_payment') AND created_at < ?`,
 		[]any{cutoff}, 100,
 	)
 	if err != nil {
@@ -114,18 +114,19 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 	}
 	now := models.Now()
 	order := models.Order{
-		OrderNo:      models.NewOrderNo(),
-		ProductID:    p.ID,
-		ProductName:  p.Name,
-		Qty:          qty,
-		AmountCents:  amountCents,
-		CostCents:    p.CostCents,
-		Fiat:         s.cfg().Fiat,
-		TradeType:    tradeType,
-		BuyerContact: contact,
-		Status:       models.OrderCreated,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		OrderNo:            models.NewOrderNo(),
+		ProductID:          p.ID,
+		ProductName:        p.Name,
+		Qty:                qty,
+		AmountCents:        amountCents,
+		CostCents:          p.CostCents,
+		CostSnapshotSource: "order_time",
+		Fiat:               s.cfg().Fiat,
+		TradeType:          tradeType,
+		BuyerContact:       contact,
+		Status:             models.OrderCreated,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if err := s.repo.CreatePendingOrder(&order); err != nil {
 		return "", "", 0, 0, err
