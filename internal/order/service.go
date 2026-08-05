@@ -29,6 +29,30 @@ func NewService(repo *Repository, payFn func() *bepusdt.Client, cfgFn func() Pay
 	return &Service{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
 
+// ExpireStale 清理长时间停留 created / waiting_payment 的订单（释放卡密并回滚优惠券）。
+// 用作进程崩溃/异常中断后的补偿清理。返回处理的订单数。
+func (s *Service) ExpireStale(timeoutSec int) (int, error) {
+	if timeoutSec <= 0 {
+		timeoutSec = 3600
+	}
+	cutoff := models.Now() - int64(timeoutSec)
+	orders, err := s.repo.ListOrders(
+		`status IN ('`+models.OrderCreated+`','`+models.OrderWaitingPayment+`') AND created_at < ?`,
+		[]any{cutoff}, 100,
+	)
+	if err != nil {
+		return 0, err
+	}
+	expired := 0
+	for _, o := range orders {
+		if err := s.Expire(o.ID); err != nil {
+			continue
+		}
+		expired++
+	}
+	return expired, nil
+}
+
 func (s *Service) cfg() PaymentConfig {
 	if s.cfgFn != nil {
 		return s.cfgFn()
@@ -133,7 +157,11 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		_ = s.repo.AddLog(order.ID, "payment_failed", "创建 BEpusdt 交易失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
 		// 回滚优惠券用量（支付失败，券不应被消耗）
 		if discount > 0 {
-			_ = s.repo.RefundByOrderNo(order.OrderNo)
+			if refunded, err := s.repo.RefundByOrderNo(order.OrderNo); err != nil {
+				_ = s.repo.AddLog(order.ID, "coupon_refund_failed", "优惠券回滚失败: "+err.Error(), models.OrderPaymentFailed, models.OrderPaymentFailed, 0)
+			} else if !refunded {
+				_ = s.repo.AddLog(order.ID, "coupon_refund_missing", "支付失败但未找到优惠券使用记录", models.OrderPaymentFailed, models.OrderPaymentFailed, 0)
+			}
 		}
 		return order.OrderNo, "", discount, couponID, err
 	}
@@ -201,7 +229,9 @@ func (s *Service) Cancel(orderID int64) error {
 	_ = s.repo.SetOrderStatus(orderID, models.OrderCancelled)
 	_ = s.repo.AddLog(orderID, "cancelled", "订单已取消", o.Status, models.OrderCancelled, 0)
 	// 取消订单回滚优惠券用量
-	_ = s.repo.RefundByOrderNo(o.OrderNo)
+	if _, err := s.repo.RefundByOrderNo(o.OrderNo); err != nil {
+		_ = s.repo.AddLog(orderID, "coupon_refund_failed", "取消回滚优惠券失败: "+err.Error(), models.OrderCancelled, models.OrderCancelled, 0)
+	}
 	return nil
 }
 
@@ -220,7 +250,9 @@ func (s *Service) Expire(orderID int64) error {
 	_ = s.repo.SetOrderStatus(orderID, models.OrderExpired)
 	_ = s.repo.AddLog(orderID, "expired", "订单已过期", o.Status, models.OrderExpired, 0)
 	// 过期订单回滚优惠券用量
-	_ = s.repo.RefundByOrderNo(o.OrderNo)
+	if _, err := s.repo.RefundByOrderNo(o.OrderNo); err != nil {
+		_ = s.repo.AddLog(orderID, "coupon_refund_failed", "过期回滚优惠券失败: "+err.Error(), models.OrderExpired, models.OrderExpired, 0)
+	}
 	return nil
 }
 

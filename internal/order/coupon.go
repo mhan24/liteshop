@@ -88,36 +88,43 @@ func (r *Repository) UseCoupon(couponID int64, orderNo string, discountCents int
 }
 
 // RefundByOrderNo 按订单号回滚优惠券使用（支付失败/取消/过期时调用）。
-func (r *Repository) RefundByOrderNo(orderNo string) error {
+// 返回是否有实际回滚（幂等：重复调用返回 false）。
+func (r *Repository) RefundByOrderNo(orderNo string) (bool, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback()
 	// 找到该订单使用的券
 	rows, err := tx.Query(`SELECT coupon_id FROM coupon_usages WHERE order_no = ?`, orderNo)
 	if err != nil {
-		return err
+		return false, err
 	}
 	couponIDs := []int64{}
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return err
+			return false, err
 		}
 		couponIDs = append(couponIDs, id)
 	}
 	rows.Close()
+	if len(couponIDs) == 0 {
+		return false, nil // 无使用记录，幂等空操作
+	}
 	if _, err := tx.Exec(`DELETE FROM coupon_usages WHERE order_no = ?`, orderNo); err != nil {
-		return err
+		return false, err
 	}
 	for _, cid := range couponIDs {
 		if _, err := tx.Exec(`UPDATE coupons SET used_count = used_count - 1 WHERE id = ? AND used_count > 0`, cid); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // GetCouponIDByCode 返回券 ID（验券后使用）。

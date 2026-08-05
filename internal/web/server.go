@@ -128,6 +128,12 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 			}
 			s.sessMu.Unlock()
 			s.cleanupLimiters()
+			// 补偿清理超时未支付的 created/waiting 订单（释放卡密+回滚券）
+			if n, err := s.orders.ExpireStale(s.paymentConfigForService().TimeoutSec); err != nil {
+				log.Printf("expire stale orders: %v", err)
+			} else if n > 0 {
+				log.Printf("expired %d stale orders", n)
+			}
 		}
 	}()
 	return s, nil

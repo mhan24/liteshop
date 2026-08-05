@@ -403,3 +403,37 @@ func TestOrderCostSnapshot(t *testing.T) {
 		t.Fatalf("order cost snapshot = %d, want 40", o.CostCents)
 	}
 }
+
+func TestCouponRefundIdempotent(t *testing.T) {
+	d, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer d.Close()
+	repo := order.NewRepository(d)
+	if err := repo.CreateCoupon(models.Coupon{Code: "REF", Type: "fixed", ValueCents: 50, MinAmountCents: 0, MaxUses: 0, ProductID: 0, Active: true}); err != nil {
+		t.Fatalf("create coupon: %v", err)
+	}
+	c, _ := repo.GetCouponByCode("REF")
+	if err := repo.UseCoupon(c.ID, "REFORD", 50); err != nil {
+		t.Fatalf("use coupon: %v", err)
+	}
+	c2, _ := repo.GetCouponByCode("REF")
+	if c2.UsedCount != 1 {
+		t.Fatalf("used = %d, want 1", c2.UsedCount)
+	}
+	// 首次回滚：发生实际变化
+	refunded, err := repo.RefundByOrderNo("REFORD")
+	if err != nil || !refunded {
+		t.Fatalf("first refund should be real: %v %v", refunded, err)
+	}
+	c3, _ := repo.GetCouponByCode("REF")
+	if c3.UsedCount != 0 {
+		t.Fatalf("used after refund = %d, want 0", c3.UsedCount)
+	}
+	// 再次回滚：幂等空操作
+	refunded2, err := repo.RefundByOrderNo("REFORD")
+	if err != nil || refunded2 {
+		t.Fatalf("second refund should be no-op: %v %v", refunded2, err)
+	}
+}

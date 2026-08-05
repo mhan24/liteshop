@@ -564,6 +564,12 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 403, "invalid otp")
 			return
 		}
+		// 旧明文升级为加密存储（首次验证成功后回写）
+		if !s.totpCipher.IsEncrypted(totpSecret) {
+			if enc, err := s.totpCipher.Encrypt(decrypted); err == nil {
+				_, _ = s.db.Exec(`UPDATE admins SET totp_secret = ? WHERE id = ?`, enc, adminID)
+			}
+		}
 	}
 	s.startSession(w, adminID, r.TLS != nil)
 	writeJSON(w, 200, map[string]any{"ok": true, "totp_required": false})
@@ -598,6 +604,12 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 	if !security.VerifyTotp(decrypted, input.Otp, time.Now()) {
 		writeError(w, 403, "invalid otp")
 		return
+	}
+	// 旧明文升级为加密存储（首次验证成功后回写）
+	if !s.totpCipher.IsEncrypted(totpSecret) {
+		if enc, err := s.totpCipher.Encrypt(decrypted); err == nil {
+			_, _ = s.db.Exec(`UPDATE admins SET totp_secret = ? WHERE id = ?`, enc, info.AdminID)
+		}
 	}
 	s.startSession(w, info.AdminID, r.TLS != nil)
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -1853,12 +1865,19 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 		if len(k) > 80 || len(v) > 20000 {
 			continue
 		}
+		// session_secret 用于签名与 TOTP 加密派生，禁止被备份覆盖，防止会话/TOTP 密钥失配
+		if k == "session_secret" {
+			continue
+		}
 		if err := db.SetSetting(s.db, k, v); err != nil {
 			writeError(w, 500, err.Error())
 			return
 		}
 		count++
 	}
+	s.sessMu.Lock()
+	s.sessions = make(map[string]sessionInfo)
+	s.sessMu.Unlock()
 	writeJSON(w, 200, map[string]any{"ok": true, "count": count})
 }
 
