@@ -742,7 +742,10 @@ func (s *Server) apiAdminSalesReport(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var src string
 		var cnt int
-		_ = rows.Scan(&src, &cnt)
+		if err := rows.Scan(&src, &cnt); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
 		switch src {
 		case "order_time":
 			orderTime += cnt
@@ -751,6 +754,10 @@ func (s *Server) apiAdminSalesReport(w http.ResponseWriter, r *http.Request) {
 		default:
 			unknown += cnt
 		}
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, 500, err.Error())
+		return
 	}
 	writeJSON(w, 200, map[string]any{
 		"daily":    daily,
