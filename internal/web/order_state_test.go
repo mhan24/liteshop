@@ -1,6 +1,8 @@
 package web
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -294,29 +296,110 @@ func TestCouponAndWholesale(t *testing.T) {
 		t.Fatalf("qty below min should fail")
 	}
 	// 批发价：买 2 件单价 9 折 = 100*2*90/100 = 180
-	// payFn 返回 nil，CreateTransaction 失败，但订单已创建且券已用
+	// 固定券满 100 减 1000，抵扣后 180-1000<=0 → 0 元订单被拒绝
 	orderNo, _, discount, couponID, err := svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10, Wholesale: []models.WholesaleTier{{MinQty: 2, Discount: 90}}}, 2, "a@b.com", "usdt-trc20", "TEST10")
+	if err == nil {
+		t.Fatalf("0-amount order should be rejected")
+	}
+	if orderNo != "" {
+		t.Fatalf("orderNo should be empty when 0-amount order rejected, got %s", orderNo)
+	}
+	if discount != 0 || couponID != 0 {
+		t.Fatalf("discount/couponID should be zero when rejected, got %d/%d", discount, couponID)
+	}
+	// 券用量不应增加
+	c, _ := repo.GetCouponByCode("TEST10")
+	if c.UsedCount != 0 {
+		t.Fatalf("coupon used = %d, want 0", c.UsedCount)
+	}
+
+	// 用更小面额券避免 0 元：满 100 减 10 → 180-10=170，然后 payFn nil 支付失败
+	if err := repo.CreateCoupon(models.Coupon{Code: "TEST10B", Type: "fixed", ValueCents: 10, MinAmountCents: 100, MaxUses: 0, ProductID: 0, Active: true}); err != nil {
+		t.Fatalf("create coupon B: %v", err)
+	}
+	orderNo2, _, _, couponID2, err := svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10, Wholesale: []models.WholesaleTier{{MinQty: 2, Discount: 90}}}, 2, "a@b.com", "usdt-trc20", "TEST10B")
 	if err == nil {
 		t.Fatalf("expected pay failure with nil client")
 	}
-	if orderNo == "" {
+	if orderNo2 == "" {
 		t.Fatalf("orderNo should be set before pay attempt")
 	}
-	// 券抵扣被 cap 到订单金额：discount = 180，订单金额 = 0
-	if discount != 180 {
-		t.Fatalf("discount = %d, want 180", discount)
-	}
-	if couponID == 0 {
+	if couponID2 == 0 {
 		t.Fatalf("couponID should be set")
 	}
-	// 验证订单金额 = 180 - 180 = 0
-	o, _ := repo.GetOrderByNo(orderNo)
-	if o.AmountCents != 0 {
-		t.Fatalf("amount = %d, want 0", o.AmountCents)
+	// 支付失败后优惠券用量回滚
+	c2, _ := repo.GetCouponByCode("TEST10B")
+	if c2.UsedCount != 0 {
+		t.Fatalf("coupon used after pay failure = %d, want 0", c2.UsedCount)
 	}
-	// 券用量 +1
-	c, _ := repo.GetCouponByCode("TEST10")
-	if c.UsedCount != 1 {
-		t.Fatalf("coupon used = %d, want 1", c.UsedCount)
+}
+
+func TestCouponConcurrentMaxUses(t *testing.T) {
+	d, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer d.Close()
+	repo := order.NewRepository(d)
+	if err := repo.CreateCoupon(models.Coupon{Code: "RACE", Type: "fixed", ValueCents: 50, MinAmountCents: 0, MaxUses: 1, ProductID: 0, Active: true}); err != nil {
+		t.Fatalf("create coupon: %v", err)
+	}
+	c, _ := repo.GetCouponByCode("RACE")
+	if c.UsedCount != 0 {
+		t.Fatalf("coupon used initial = %d, want 0", c.UsedCount)
+	}
+	var wg sync.WaitGroup
+	success := make(chan int, 20)
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := repo.UseCoupon(c.ID, "ON"+fmt.Sprintf("%d", time.Now().UnixNano()), 50); err == nil {
+				success <- 1
+			}
+		}()
+	}
+	wg.Wait()
+	close(success)
+	got := 0
+	for range success {
+		got++
+	}
+	c2, _ := repo.GetCouponByCode("RACE")
+	if c2.UsedCount != 1 {
+		t.Fatalf("coupon used = %d, want 1", c2.UsedCount)
+	}
+	if got != 1 {
+		t.Fatalf("successful uses = %d, want 1", got)
+	}
+}
+
+func TestOrderCostSnapshot(t *testing.T) {
+	d, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer d.Close()
+	now := models.Now()
+	if _, err := d.Exec(`INSERT INTO products(name, description, price_cents, cost_cents, status, min_qty, max_qty, wholesale, created_at, updated_at) VALUES('t','',100,40,'active',1,100,'[]',?,?)`, now, now); err != nil {
+		t.Fatalf("insert product: %v", err)
+	}
+	var pid int64
+	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&pid)
+	for i := 0; i < 5; i++ {
+		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?, 'C', 'available', ?, ?)`, pid, now, now)
+	}
+	repo := order.NewRepository(d)
+	now = models.Now()
+	if err := repo.CreatePendingOrder(&models.Order{
+		OrderNo: "SNAP1", ProductID: pid, ProductName: "t", Qty: 2, AmountCents: 200, CostCents: 40,
+		Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com",
+		Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create pending order: %v", err)
+	}
+	o, _ := repo.GetOrderByNo("SNAP1")
+	if o.CostCents != 40 {
+		t.Fatalf("order cost snapshot = %d, want 40", o.CostCents)
 	}
 }

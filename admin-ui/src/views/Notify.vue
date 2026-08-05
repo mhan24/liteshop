@@ -10,6 +10,7 @@
       <el-form-item :label="t('notify.telegramChatId')"><el-input v-model="form.telegram_chat_id" /></el-form-item>
       <el-form-item :label="t('notify.telegramToken')"><el-input v-model="form.telegram_bot_token" type="password" :placeholder="t('notify.telegramTokenPlaceholder')" show-password /></el-form-item>
       <el-form-item :label="t('notify.webhookUrl')"><el-input v-model="form.webhook_url" :placeholder="t('notify.webhookPlaceholder')" /></el-form-item>
+      <el-form-item :label="t('notify.webhookSecret')"><el-input v-model="form.webhook_secret" type="password" :placeholder="t('notify.webhookSecretPlaceholder')" show-password /></el-form-item>
       <el-form-item :label="t('notify.events')">
         <el-checkbox-group v-model="events">
           <el-checkbox value="order_created">{{ t('notify.eventOrderCreated') }}</el-checkbox>
@@ -47,6 +48,7 @@ onMounted(async () => {
     form.value.smtp_username = ''
     form.value.smtp_password = ''
     form.value.telegram_bot_token = ''
+    form.value.webhook_secret = ''
     events.value = String(form.value.notify_events || '').split(',').filter(Boolean)
   } finally {
     loading.value = false

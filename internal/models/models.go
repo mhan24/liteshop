@@ -87,6 +87,7 @@ type Order struct {
 	ProductName        string
 	Qty                int
 	AmountCents        int64
+	CostCents          int64
 	Fiat               string
 	TradeType          string
 	BuyerContact       string

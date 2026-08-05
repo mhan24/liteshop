@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -50,8 +51,15 @@ func (rl *RateLimiter) Cleanup() {
 	}
 }
 
-func (s *Server) rateLimitMiddleware(next http.HandlerFunc, limit int) http.HandlerFunc {
-	rl := NewRateLimiter(limit, time.Minute)
+func (s *Server) rateLimitMiddleware(name string, limit int, next http.HandlerFunc) http.HandlerFunc {
+	key := fmt.Sprintf("%s-%d", name, limit)
+	s.limitersMu.Lock()
+	rl, exists := s.limiters[key]
+	if !exists {
+		rl = NewRateLimiter(limit, time.Minute)
+		s.limiters[key] = rl
+	}
+	s.limitersMu.Unlock()
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 		if !rl.Allow(ip) {
@@ -59,5 +67,14 @@ func (s *Server) rateLimitMiddleware(next http.HandlerFunc, limit int) http.Hand
 			return
 		}
 		next(w, r)
+	}
+}
+
+// cleanupLimiters 定期清理所有限流器中的过期 visitor，防止内存增长。
+func (s *Server) cleanupLimiters() {
+	s.limitersMu.Lock()
+	defer s.limitersMu.Unlock()
+	for _, rl := range s.limiters {
+		rl.Cleanup()
 	}
 }

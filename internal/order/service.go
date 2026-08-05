@@ -55,10 +55,19 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		return "", "", 0, 0, fmt.Errorf("最多购买 %d 件", p.MaxQty)
 	}
 	amountCents := baseCents * int64(qty)
+	bestMinQty := 0
+	bestDiscount := 100 // 默认无折扣
 	for _, tier := range p.Wholesale {
-		if qty >= tier.MinQty {
-			amountCents = baseCents * int64(qty) * int64(tier.Discount) / 100
+		if tier.MinQty < 1 || tier.Discount < 1 || tier.Discount > 100 {
+			continue
 		}
+		if qty >= tier.MinQty && tier.MinQty > bestMinQty {
+			bestMinQty = int(tier.MinQty)
+			bestDiscount = int(tier.Discount)
+		}
+	}
+	if bestDiscount != 100 {
+		amountCents = baseCents * int64(qty) * int64(bestDiscount) / 100
 	}
 	// 优惠券
 	discount := int64(0)
@@ -75,8 +84,8 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		}
 		discount = d
 		amountCents -= discount
-		if amountCents < 0 {
-			amountCents = 0
+		if amountCents <= 0 {
+			return "", "", 0, 0, fmt.Errorf("订单金额需大于 0（抵扣后金额为 0）")
 		}
 	}
 	now := models.Now()
@@ -86,6 +95,7 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		ProductName:  p.Name,
 		Qty:          qty,
 		AmountCents:  amountCents,
+		CostCents:    p.CostCents,
 		Fiat:         s.cfg().Fiat,
 		TradeType:    tradeType,
 		BuyerContact: contact,
@@ -98,7 +108,12 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 	}
 	_ = s.repo.AddLog(order.ID, "order_created", "订单已创建", "", models.OrderCreated, 0)
 	if discount > 0 {
-		_ = s.repo.UseCoupon(couponID, order.OrderNo, discount)
+		if err := s.repo.UseCoupon(couponID, order.OrderNo, discount); err != nil {
+			_ = s.repo.ReleaseLockedCards(order.ID)
+			_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
+			_ = s.repo.AddLog(order.ID, "coupon_failed", "优惠券占用失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
+			return order.OrderNo, "", 0, 0, err
+		}
 		_ = s.repo.AddLog(order.ID, "coupon_used", fmt.Sprintf("优惠券抵扣 %d 分", discount), "", models.OrderCreated, 0)
 	}
 	cfg := s.cfg()
@@ -116,6 +131,10 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 	if err != nil {
 		_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
 		_ = s.repo.AddLog(order.ID, "payment_failed", "创建 BEpusdt 交易失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
+		// 回滚优惠券用量（支付失败，券不应被消耗）
+		if discount > 0 {
+			_ = s.repo.RefundByOrderNo(order.OrderNo)
+		}
 		return order.OrderNo, "", discount, couponID, err
 	}
 	_ = s.repo.SetTradeInfo(order.ID, tradeID, paymentURL)
@@ -169,35 +188,39 @@ func (s *Service) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (models.O
 
 // Cancel 取消订单（释放卡密）。
 func (s *Service) Cancel(orderID int64) error {
-	from, err := s.repo.GetOrderStatus(orderID)
+	o, err := s.repo.GetOrderByID(orderID)
 	if err != nil {
 		return err
 	}
-	if from != models.OrderWaitingPayment && from != models.OrderCreated {
-		return fmt.Errorf("invalid order state for cancel: %s", from)
+	if o.Status != models.OrderWaitingPayment && o.Status != models.OrderCreated {
+		return fmt.Errorf("invalid order state for cancel: %s", o.Status)
 	}
 	if err := s.repo.ReleaseLockedCards(orderID); err != nil {
 		return err
 	}
 	_ = s.repo.SetOrderStatus(orderID, models.OrderCancelled)
-	_ = s.repo.AddLog(orderID, "cancelled", "订单已取消", from, models.OrderCancelled, 0)
+	_ = s.repo.AddLog(orderID, "cancelled", "订单已取消", o.Status, models.OrderCancelled, 0)
+	// 取消订单回滚优惠券用量
+	_ = s.repo.RefundByOrderNo(o.OrderNo)
 	return nil
 }
 
 // Expire 过期订单（释放卡密）。
 func (s *Service) Expire(orderID int64) error {
-	from, err := s.repo.GetOrderStatus(orderID)
+	o, err := s.repo.GetOrderByID(orderID)
 	if err != nil {
 		return err
 	}
-	if from != models.OrderWaitingPayment && from != models.OrderCreated {
+	if o.Status != models.OrderWaitingPayment && o.Status != models.OrderCreated {
 		return nil
 	}
 	if err := s.repo.ReleaseLockedCards(orderID); err != nil {
 		return err
 	}
 	_ = s.repo.SetOrderStatus(orderID, models.OrderExpired)
-	_ = s.repo.AddLog(orderID, "expired", "订单已过期", from, models.OrderExpired, 0)
+	_ = s.repo.AddLog(orderID, "expired", "订单已过期", o.Status, models.OrderExpired, 0)
+	// 过期订单回滚优惠券用量
+	_ = s.repo.RefundByOrderNo(o.OrderNo)
 	return nil
 }
 

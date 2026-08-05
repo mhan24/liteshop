@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"shop/internal/notify"
 	"shop/internal/order"
 	"shop/internal/product"
+	"shop/internal/security"
 )
 
 type Server struct {
@@ -42,6 +44,11 @@ type Server struct {
 
 	sessMu   sync.Mutex
 	sessions map[string]sessionInfo
+
+	limitersMu sync.Mutex
+	limiters   map[string]*RateLimiter
+
+	totpCipher *security.Cipher
 }
 
 type sessionInfo struct {
@@ -85,7 +92,9 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		dbPath:    cfg.DatabasePath,
 		startTime: time.Now(),
 		sessions:  make(map[string]sessionInfo),
+		limiters:  make(map[string]*RateLimiter),
 	}
+	s.totpCipher = security.NewCipher(s.sessionSecret())
 	s.orders = order.NewService(
 		order.NewRepositoryWithTZ(db, models.LocationFromTimezone(s.siteSettings().Timezone)),
 		s.payClient,
@@ -105,6 +114,22 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 	mux.HandleFunc("GET /admin", s.adminIndex)
 	mux.HandleFunc("GET /admin/{path...}", s.adminIndex)
 	s.mux = mux
+	// 定期清理过期 session（含 2FA 待验证 token）与限流器，防止内存无限增长
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.sessMu.Lock()
+			now := time.Now()
+			for k, v := range s.sessions {
+				if now.After(v.Expiry) {
+					delete(s.sessions, k)
+				}
+			}
+			s.sessMu.Unlock()
+			s.cleanupLimiters()
+		}
+	}()
 	return s, nil
 }
 
@@ -146,15 +171,20 @@ func (s *Server) fiat() string {
 }
 
 // bepusdtNotifyPath 返回 BEpusdt 回调路径（可配置，默认 /notify/bepusdt）。
+// 仅接受安全字符，非法配置回退默认路径，防止 ServeMux panic。
 func (s *Server) bepusdtNotifyPath() string {
 	if v := strings.TrimSpace(mustGetSetting(s, "bepusdt_notify_path")); v != "" {
 		if !strings.HasPrefix(v, "/") {
 			v = "/" + v
 		}
-		return v
+		if reNotifyPath.MatchString(v) {
+			return v
+		}
 	}
 	return "/notify/bepusdt"
 }
+
+var reNotifyPath = regexp.MustCompile(`^/[a-zA-Z0-9/_-]+$`)
 
 func (s *Server) paymentConfig() config.Config {
 	cfg := s.cfg

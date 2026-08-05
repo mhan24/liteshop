@@ -42,7 +42,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/site", s.apiSite)
 	mux.HandleFunc("GET /api/v1/products", s.apiProducts)
 	mux.HandleFunc("GET /api/v1/products/{id}", s.apiProduct)
-	mux.HandleFunc("POST /api/v1/orders", s.rateLimitMiddleware(s.apiCreateOrder, 20))
+	mux.HandleFunc("POST /api/v1/orders", s.rateLimitMiddleware("orders", 20, s.apiCreateOrder))
 	mux.HandleFunc("GET /api/v1/orders", s.apiOrdersByContact)
 	mux.HandleFunc("GET /api/v1/orders/{orderNo}", s.apiOrder)
 	mux.HandleFunc("POST /api/v1/orders/{orderNo}/cancel", s.apiCancelOrder)
@@ -50,8 +50,8 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/lang", s.apiSetLang)
 
 	mux.HandleFunc("GET /api/v1/admin/session", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSession)).ServeHTTP)
-	mux.HandleFunc("POST /api/v1/admin/login", s.rateLimitMiddleware(s.apiAdminLogin, 10))
-	mux.HandleFunc("POST /api/v1/admin/login/verify", s.rateLimitMiddleware(s.apiAdminLoginVerify, 10))
+	mux.HandleFunc("POST /api/v1/admin/login", s.rateLimitMiddleware("login", 10, s.apiAdminLogin))
+	mux.HandleFunc("POST /api/v1/admin/login/verify", s.rateLimitMiddleware("login_verify", 10, s.apiAdminLoginVerify))
 	mux.Handle("POST /api/v1/admin/logout", s.requireAdminAPI(http.HandlerFunc(s.apiAdminLogout)))
 	mux.Handle("GET /api/v1/admin/dashboard", s.requireAdminAPI(http.HandlerFunc(s.apiDashboard)))
 	mux.Handle("GET /api/v1/admin/sales-report", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSalesReport)))
@@ -555,7 +555,12 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]any{"ok": true, "totp_required": true, "token": token})
 			return
 		}
-		if !security.VerifyTotp(totpSecret, input.Otp, time.Now()) {
+		decrypted, err := s.totpCipher.Decrypt(totpSecret)
+		if err != nil {
+			writeError(w, 500, "totp secret decrypt failed")
+			return
+		}
+		if !security.VerifyTotp(decrypted, input.Otp, time.Now()) {
 			writeError(w, 403, "invalid otp")
 			return
 		}
@@ -585,7 +590,12 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	var totpSecret string
 	_ = s.db.QueryRow(`SELECT totp_secret FROM admins WHERE id = ?`, info.AdminID).Scan(&totpSecret)
-	if !security.VerifyTotp(totpSecret, input.Otp, time.Now()) {
+	decrypted, err := s.totpCipher.Decrypt(totpSecret)
+	if err != nil {
+		writeError(w, 500, "totp secret decrypt failed")
+		return
+	}
+	if !security.VerifyTotp(decrypted, input.Otp, time.Now()) {
 		writeError(w, 403, "invalid otp")
 		return
 	}
@@ -617,9 +627,9 @@ func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// 今日毛利 = 今日营收 - 今日售出卡密的商品成本
 	var todayCost int64
-	_ = s.db.QueryRow(`SELECT COALESCE(SUM(p.cost_cents * o.qty), 0)
-		FROM orders o JOIN products p ON p.id = o.product_id
-		WHERE o.status IN ('paid','processing','delivered','completed') AND o.paid_at >= ?`, dayStart).Scan(&todayCost)
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(cost_cents * qty), 0)
+		FROM orders
+		WHERE status IN ('paid','processing','delivered','completed') AND paid_at >= ?`, dayStart).Scan(&todayCost)
 	todayProfit := todayRevenue - todayCost
 
 	// 商品/卡密库存（商品仓储）
@@ -1178,6 +1188,10 @@ func (s *Server) apiAdminOrdersBatchResend(w http.ResponseWriter, r *http.Reques
 		writeError(w, 400, "bad json")
 		return
 	}
+	if len(input.IDs) > 100 {
+		writeError(w, 400, "批量重发最多 100 单")
+		return
+	}
 	sent := 0
 	for _, id := range input.IDs {
 		o, err := s.orders.Repo().GetOrderByID(id)
@@ -1270,6 +1284,7 @@ func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 		"telegram_chat_id":   cfg.TelegramChatID,
 		"telegram_token_set": cfg.TelegramBotToken != "",
 		"webhook_url":        cfg.WebhookURL,
+		"webhook_secret_set": cfg.WebhookSecret != "",
 		"notify_events":      events,
 		"mail_paid_subject":  subject,
 		"mail_paid_body":     mailBody,
@@ -1305,6 +1320,9 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := strings.TrimSpace(str(input["telegram_bot_token"])); v != "" {
 		_ = db.SetSetting(s.db, "telegram_bot_token", v)
+	}
+	if v := strings.TrimSpace(str(input["webhook_secret"])); v != "" {
+		_ = db.SetSetting(s.db, "webhook_secret", v)
 	}
 	s.audit(r, "notify_update", "settings", "notify", "", "通知配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -1490,7 +1508,13 @@ func (s *Server) apiAdminTotpStatus(w http.ResponseWriter, r *http.Request) {
 	var enabled bool
 	var secret string
 	_ = s.db.QueryRow(`SELECT totp_enabled, totp_secret FROM admins WHERE id = ?`, id).Scan(&enabled, &secret)
-	writeJSON(w, 200, map[string]any{"enabled": enabled, "secret": secret, "issuer": s.siteSettings().Title})
+	resp := map[string]any{"enabled": enabled, "issuer": s.siteSettings().Title}
+	if !enabled && secret != "" {
+		if plain, err := s.totpCipher.Decrypt(secret); err == nil {
+			resp["secret"] = plain // 仅绑定时返回，用于扫码
+		}
+	}
+	writeJSON(w, 200, resp)
 }
 
 func (s *Server) apiAdminTotpEnable(w http.ResponseWriter, r *http.Request) {
@@ -1507,7 +1531,12 @@ func (s *Server) apiAdminTotpEnable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "invalid otp")
 		return
 	}
-	if _, err := s.db.Exec(`UPDATE admins SET totp_secret = ?, totp_enabled = 1 WHERE id = ?`, input.Secret, id); err != nil {
+	encrypted, err := s.totpCipher.Encrypt(input.Secret)
+	if err != nil {
+		writeError(w, 500, "totp secret encrypt failed")
+		return
+	}
+	if _, err := s.db.Exec(`UPDATE admins SET totp_secret = ?, totp_enabled = 1 WHERE id = ?`, encrypted, id); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
@@ -1523,7 +1552,12 @@ func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
 	var secret string
 	_ = s.db.QueryRow(`SELECT totp_secret FROM admins WHERE id = ?`, id).Scan(&secret)
-	if !security.VerifyTotp(secret, input.Otp, time.Now()) {
+	decrypted, err := s.totpCipher.Decrypt(secret)
+	if err != nil {
+		writeError(w, 500, "totp secret decrypt failed")
+		return
+	}
+	if !security.VerifyTotp(decrypted, input.Otp, time.Now()) {
 		writeError(w, 403, "invalid otp")
 		return
 	}
@@ -1700,7 +1734,7 @@ func couponFromJSON(input map[string]any) (models.Coupon, error) {
 	}
 	cType := strings.TrimSpace(str(input["type"]))
 	if cType != "fixed" && cType != "percent" {
-		cType = "fixed"
+		return models.Coupon{}, errString("type 必须为 fixed 或 percent")
 	}
 	value, _ := strconv.ParseInt(str(input["value_cents"]), 10, 64)
 	percent, _ := strconv.Atoi(str(input["percent"]))
@@ -1709,6 +1743,21 @@ func couponFromJSON(input map[string]any) (models.Coupon, error) {
 	productID, _ := strconv.ParseInt(str(input["product_id"]), 10, 64)
 	expiresAt, _ := strconv.ParseInt(str(input["expires_at"]), 10, 64)
 	active := str(input["active"]) != "false" && input["active"] != false
+	if cType == "fixed" && value <= 0 {
+		return models.Coupon{}, errString("fixed 券 value_cents 必须大于 0")
+	}
+	if cType == "percent" && (percent <= 0 || percent > 100) {
+		return models.Coupon{}, errString("percent 券 percent 必须在 1-100 之间")
+	}
+	if minAmount < 0 {
+		return models.Coupon{}, errString("min_amount_cents 不能为负数")
+	}
+	if maxUses < 0 {
+		return models.Coupon{}, errString("max_uses 不能为负数")
+	}
+	if expiresAt != 0 && expiresAt <= models.Now() {
+		return models.Coupon{}, errString("expires_at 必须是未来的时间")
+	}
 	return models.Coupon{
 		Code: code, Type: cType, ValueCents: value, Percent: percent,
 		MinAmountCents: minAmount, MaxUses: maxUses, ProductID: productID,

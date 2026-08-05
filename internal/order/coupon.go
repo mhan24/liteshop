@@ -73,11 +73,49 @@ func (r *Repository) UseCoupon(couponID int64, orderNo string, discountCents int
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE coupons SET used_count = used_count + 1, updated_at = ? WHERE id = ?`, models.Now(), couponID); err != nil {
+	// 原子校验 + 递增，防止并发超限
+	res, err := tx.Exec(`UPDATE coupons SET used_count = used_count + 1, updated_at = ? WHERE id = ? AND (max_uses = 0 OR used_count < max_uses)`, models.Now(), couponID)
+	if err != nil {
 		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ErrCouponUsedUp
 	}
 	if _, err := tx.Exec(`INSERT INTO coupon_usages(coupon_id, order_no, discount_cents, created_at) VALUES(?, ?, ?, ?)`, couponID, orderNo, discountCents, models.Now()); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+// RefundByOrderNo 按订单号回滚优惠券使用（支付失败/取消/过期时调用）。
+func (r *Repository) RefundByOrderNo(orderNo string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// 找到该订单使用的券
+	rows, err := tx.Query(`SELECT coupon_id FROM coupon_usages WHERE order_no = ?`, orderNo)
+	if err != nil {
+		return err
+	}
+	couponIDs := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		couponIDs = append(couponIDs, id)
+	}
+	rows.Close()
+	if _, err := tx.Exec(`DELETE FROM coupon_usages WHERE order_no = ?`, orderNo); err != nil {
+		return err
+	}
+	for _, cid := range couponIDs {
+		if _, err := tx.Exec(`UPDATE coupons SET used_count = used_count - 1 WHERE id = ? AND used_count > 0`, cid); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

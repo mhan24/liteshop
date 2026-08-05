@@ -126,6 +126,9 @@ func (n *Notifier) CurrentConfig() config.Config {
 	if v := get("webhook_url"); v != "" {
 		cfg.WebhookURL = v
 	}
+	if v := get("webhook_secret"); v != "" {
+		cfg.WebhookSecret = v
+	}
 	return cfg
 }
 
