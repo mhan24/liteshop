@@ -388,7 +388,7 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	if err := s.verifyTurnstileToken(input.TurnstileResponse, clientIP(r)); err != nil {
+	if err := s.verifyTurnstileToken(input.TurnstileResponse, clientIP(r), r.Host); err != nil {
 		writeError(w, 403, "turnstile failed")
 		return
 	}
@@ -454,7 +454,7 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 	}
 	// 已配置 Turnstile 时，邮箱查询同样要求人机验证（防枚举/防刷）。
 	if s.turnstileSecret() != "" {
-		if err := s.verifyTurnstileToken(strings.TrimSpace(r.URL.Query().Get("cf-turnstile-response")), clientIP(r)); err != nil {
+		if err := s.verifyTurnstileToken(strings.TrimSpace(r.Header.Get("X-Turnstile-Response")), clientIP(r), r.Host); err != nil {
 			writeError(w, 403, "turnstile failed")
 			return
 		}
@@ -519,6 +519,18 @@ func (s *Server) apiSendOrderLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "contact mismatch")
 		return
 	}
+	// 按邮箱冷却（5 分钟/邮箱，跨订单共享），防止向受害者邮箱轰炸。
+	now := time.Now().Unix()
+	key := strings.ToLower(contact)
+	s.linkMu.Lock()
+	last := s.linkSent[key]
+	if now-last < 300 {
+		s.linkMu.Unlock()
+		writeError(w, 429, "发送过于频繁，请稍后再试")
+		return
+	}
+	s.linkSent[key] = now
+	s.linkMu.Unlock()
 	if s.notifier.CurrentConfig().SMTPHost == "" {
 		writeError(w, 400, "SMTP 未配置")
 		return
@@ -1396,7 +1408,7 @@ func (s *Server) apiAdminOrdersBatchResend(w http.ResponseWriter, r *http.Reques
 		if len(cards) == 0 {
 			continue
 		}
-		s.notifier.SendPaid(o, cards)
+		go s.notifier.SendPaid(o, cards)
 		_ = s.orders.Repo().AddLog(o.ID, "resend", "批量重发卡密", o.Status, o.Status, 0)
 		sent++
 	}

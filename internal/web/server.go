@@ -47,6 +47,9 @@ type Server struct {
 	limitersMu sync.Mutex
 	limiters   map[string]*RateLimiter
 
+	linkMu   sync.Mutex
+	linkSent map[string]int64 // 订单查看链接邮件冷却（按邮箱）
+
 	totpCipher *security.Cipher
 }
 
@@ -82,6 +85,7 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		startTime: time.Now(),
 		sessions:  make(map[string]sessionInfo),
 		limiters:  make(map[string]*RateLimiter),
+		linkSent:  make(map[string]int64),
 	}
 	s.totpCipher = security.NewCipher(s.sessionSecret())
 	s.orders = order.NewService(
@@ -112,6 +116,15 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 			if _, err := s.db.Exec(`DELETE FROM sessions WHERE expires_at < ?`, time.Now().Unix()); err != nil {
 				log.Printf("cleanup sessions: %v", err)
 			}
+			// 清理链接邮件冷却记录
+			cutoff := time.Now().Add(-10 * time.Minute).Unix()
+			s.linkMu.Lock()
+			for k, v := range s.linkSent {
+				if v < cutoff {
+					delete(s.linkSent, k)
+				}
+			}
+			s.linkMu.Unlock()
 			s.sessMu.Lock()
 			now := time.Now()
 			for k, v := range s.sessions {
@@ -364,11 +377,7 @@ func normalizeTradeTypes(v string) (string, error) {
 
 var turnstileHTTP = &http.Client{Timeout: 10 * time.Second}
 
-func (s *Server) verifyTurnstile(r *http.Request) error {
-	return s.verifyTurnstileToken(strings.TrimSpace(r.FormValue("cf-turnstile-response")), clientIP(r))
-}
-
-func (s *Server) verifyTurnstileToken(token, remoteIP string) error {
+func (s *Server) verifyTurnstileToken(token, remoteIP, host string) error {
 	secret := s.turnstileSecret()
 	if secret == "" {
 		return errors.New("TURNSTILE_SECRET is not configured")
@@ -395,12 +404,23 @@ func (s *Server) verifyTurnstileToken(token, remoteIP string) error {
 	var result struct {
 		Success    bool     `json:"success"`
 		ErrorCodes []string `json:"error-codes"`
+		Hostname   string   `json:"hostname"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
 		return err
 	}
 	if !result.Success {
 		return fmt.Errorf("siteverify rejected token: %s", strings.Join(result.ErrorCodes, ","))
+	}
+	// hostname 校验：令牌必须签发自当前请求的主机，防止跨站复用。
+	if result.Hostname != "" && host != "" {
+		reqHost := host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			reqHost = h
+		}
+		if !strings.EqualFold(result.Hostname, reqHost) {
+			return fmt.Errorf("turnstile hostname mismatch: %s != %s", result.Hostname, reqHost)
+		}
 	}
 	return nil
 }
@@ -671,8 +691,10 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
 		return 0, "", false
 	}
-	// 滑动续期
-	_, _ = s.db.Exec(`UPDATE sessions SET expires_at = ? WHERE id = ?`, time.Now().Add(12*time.Hour).Unix(), id)
+	// 滑动续期：仅在剩余不足 1 小时时刷新，减少每次请求的写放大。
+	if expiresAt-time.Now().Unix() < 3600 {
+		_, _ = s.db.Exec(`UPDATE sessions SET expires_at = ? WHERE id = ?`, time.Now().Add(12*time.Hour).Unix(), id)
+	}
 	var role string
 	err = s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, adminID).Scan(&role)
 	if err != nil {

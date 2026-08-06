@@ -107,8 +107,7 @@ async function doLookup(token: string) {
   try {
     const data: any = await api.get('/orders', {
       contact: form.contact,
-      'cf-turnstile-response': token || undefined,
-    })
+    }, token ? { 'X-Turnstile-Response': token } : undefined)
     orders.value = data.orders || []
   } catch (e: any) {
     alert(e?.data?.error || e?.message || t('queryFail'))
