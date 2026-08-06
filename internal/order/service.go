@@ -37,6 +37,17 @@ func newBusinessErrorf(format string, args ...any) error {
 	return &BusinessError{msg: fmt.Sprintf(format, args...)}
 }
 
+// wrapCouponError 仅将已知优惠券业务错误转为可回显的业务错误；
+// 数据库等系统错误透传，由上层统一脱敏。
+func wrapCouponError(err error) error {
+	switch {
+	case errors.Is(err, ErrCouponNotFound), errors.Is(err, ErrCouponExpired),
+		errors.Is(err, ErrCouponUsedUp), errors.Is(err, ErrCouponNotApplicable):
+		return newBusinessErrorf("%s", err.Error())
+	}
+	return err
+}
+
 func NewService(repo *Repository, payFn func() *bepusdt.Client, cfgFn func() PaymentConfig) *Service {
 	return &Service{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
@@ -114,11 +125,11 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		var cidErr error
 		couponID, cidErr = s.repo.GetCouponIDByCode(couponCode)
 		if cidErr != nil {
-			return "", "", 0, 0, newBusinessErrorf("%s", cidErr.Error())
+			return "", "", 0, 0, wrapCouponError(cidErr)
 		}
 		d, err := s.repo.ApplyCoupon(couponCode, amountCents, p.ID)
 		if err != nil {
-			return "", "", 0, 0, newBusinessErrorf("%s", err.Error())
+			return "", "", 0, 0, wrapCouponError(err)
 		}
 		discount = d
 		amountCents -= discount
@@ -155,7 +166,7 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 			_ = s.repo.ReleaseLockedCards(order.ID)
 			_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
 			_ = s.repo.AddLog(order.ID, "coupon_failed", "优惠券占用失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
-			return order.OrderNo, "", 0, 0, newBusinessErrorf("%s", err.Error())
+			return order.OrderNo, "", 0, 0, wrapCouponError(err)
 		}
 		_ = s.repo.AddLog(order.ID, "coupon_used", fmt.Sprintf("优惠券抵扣 %d 分", discount), "", models.OrderCreated, 0)
 	}
