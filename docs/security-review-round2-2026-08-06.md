@@ -104,3 +104,25 @@ http.SetCookie(w, &http.Cookie{Name: "__Host-shop_session", ..., Secure: secure,
 
 **审查人**：AI Assistant
 **审查时间**：2026-08-06
+
+---
+
+## 六、修复记录（2026-08-06 同轮修复，commit `45d93d6`）
+
+| 编号 | 问题 | 修复内容 |
+| --- | --- | --- |
+| P1-1 | 查看令牌经邮箱查询泄露 | 邮箱查询不再返回带令牌的 URL；新增 `POST /api/v1/orders/{orderNo}/link`（限流 10/分），把带令牌链接发送到**订单登记邮箱**；前台订单查询页改为"发送查看链接"按钮 |
+| P1-2 | `__Host-` Cookie 纯 HTTP 失效 | HTTPS 用 `__Host-shop_session`，纯 HTTP 回退 `shop_session`；读取/登出同时兼容两种名称 |
+| P2-1 | 优惠券大小写不一致 | `CreateOrder` 对券码统一 `ToUpper` + Trim |
+| P2-2 | `SetStatus('expired')` 静默成功 | `Expire` 对不允许的状态返回错误，与 `Cancel` 行为一致（API 400） |
+| P2-3 | 邮箱枚举 | 邮箱查询接入 Turnstile（已配置 secret 时强制人机验证）；前端订单查询页加验证组件 |
+| P2-4 | `/docs` 公开 | `/docs` 与 `/docs/openapi.json` 改为仅管理员可见 |
+| P2-5 | 备份含 session_secret | 备份导出时剔除 `session_secret`（恢复端本就跳过，导出无意义且增泄露面） |
+| P2-6 | 密码策略 | 新增 `ValidatePasswordStrength`：≥8 位且含字母+数字，应用于 setup/新建管理员/修改密码 |
+| P2-7 | 维护密码明文不升级 | 存量明文在解锁成功后自动回写为 SHA-256 |
+| P2-8 | `/setup` 并发竞态 | `SeedAdmin` 返回是否实际插入，并发第二次初始化返回 400 不再双写 settings |
+| P3-1 | 环境变量形同虚设 | `main.go` 新增 `applyEnv`：`SHOP_LISTEN_ADDR`/`SHOP_DATABASE_PATH`/`SHOP_PUBLIC_BASE_URL`/`BEPUSDT_NOTIFY_URL`/`SHOP_SETUP_TOKEN` 生效 |
+
+**验证**：服务器已更新至 `45d93d6`，`go build`/`vet`/`test` 全绿，三服务 active，`/health` 正常，`/docs` 匿名访问 303 跳登录，`/link` 对不存在订单返回 404，`/api/v1/site` 已含 `turnstile_site_key`。
+
+**仍未处理（低危观察项）**：sitemap origin 依赖 Host、默认商品图第三方 CDN、`/docs` 外链 Swagger CDN（已加 SRI）、通知同步阻塞回调、会话内存态重启下线、服务端早期 DB 备份归档。
