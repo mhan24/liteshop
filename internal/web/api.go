@@ -45,7 +45,7 @@ func writeInternalError(w http.ResponseWriter, err error) {
 func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/maintenance/unlock", s.rateLimitMiddleware("maintenance_unlock", 10, s.apiMaintenanceUnlock))
 	mux.HandleFunc("GET /api/v1/setup", s.apiSetupStatus)
-	mux.HandleFunc("POST /api/v1/setup", s.apiSetup)
+	mux.HandleFunc("POST /api/v1/setup", s.rateLimitMiddleware("setup", 10, s.apiSetup))
 	mux.HandleFunc("GET /api/v1/site", s.apiSite)
 	mux.HandleFunc("GET /api/v1/products", s.apiProducts)
 	mux.HandleFunc("GET /api/v1/products/{id}", s.apiProduct)

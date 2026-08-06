@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"shop/internal/config"
 	"shop/internal/db"
@@ -39,7 +40,16 @@ func main() {
 	log.Printf("shop listening on %s", cfg.ListenAddr)
 	log.Printf("admin entry: %s/admin", cfg.PublicBaseURL)
 	log.Printf("bepusdt notify url: %s", cfg.NotifyURL)
-	log.Fatal(http.ListenAndServe(cfg.ListenAddr, handler))
+	// 显式超时，防止慢速请求（slowloris 等）长期占用连接。
+	srv := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 // applyEnv 用环境变量覆盖默认配置（与 docker-compose / systemd 中声明的变量一致）。

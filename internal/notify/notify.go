@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"net/smtp"
 	"net/url"
@@ -241,7 +242,6 @@ func (n *Notifier) sendMailWithConfig(cfg config.Config, to, subject, body strin
 		from = cfg.SMTPUsername
 	}
 	addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
-	auth := smtp.PlainAuth("", cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPHost)
 	domain := "localhost"
 	if at := strings.LastIndex(from, "@"); at >= 0 && at < len(from)-1 {
 		domain = from[at+1:]
@@ -256,38 +256,56 @@ func (n *Notifier) sendMailWithConfig(cfg config.Config, to, subject, body strin
 		"Content-Type: text/plain; charset=utf-8",
 	}
 	msg := []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + body)
+	// 显式拨号超时 + 整段 SMTP 会话 30s 期限，避免慢/挂死 SMTP 长期占用 goroutine。
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	var conn net.Conn
+	var err error
 	if cfg.SMTPPort == 465 {
-		conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.SMTPHost})
-		if err != nil {
-			return err
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: cfg.SMTPHost})
+	} else {
+		conn, err = dialer.Dial("tcp", addr)
+	}
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	client, err := smtp.NewClient(conn, cfg.SMTPHost)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	// 非隐式 TLS 端口：若服务器支持 STARTTLS 则升级。
+	if cfg.SMTPPort != 465 {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			if err := client.StartTLS(&tls.Config{ServerName: cfg.SMTPHost}); err != nil {
+				return err
+			}
 		}
-		client, err := smtp.NewClient(conn, cfg.SMTPHost)
-		if err != nil {
-			return err
-		}
-		defer client.Close()
+	}
+	if cfg.SMTPUsername != "" {
+		auth := smtp.PlainAuth("", cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPHost)
 		if err := client.Auth(auth); err != nil {
 			return err
 		}
-		if err := client.Mail(from); err != nil {
-			return err
-		}
-		if err := client.Rcpt(to); err != nil {
-			return err
-		}
-		w, err := client.Data()
-		if err != nil {
-			return err
-		}
-		if _, err := w.Write(msg); err != nil {
-			return err
-		}
-		if err := w.Close(); err != nil {
-			return err
-		}
-		return client.Quit()
 	}
-	return smtp.SendMail(addr, auth, from, []string{to}, msg)
+	if err := client.Mail(from); err != nil {
+		return err
+	}
+	if err := client.Rcpt(to); err != nil {
+		return err
+	}
+	w, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(msg); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return client.Quit()
 }
 
 func (n *Notifier) sendTelegramWithConfig(cfg config.Config, text string) error {
