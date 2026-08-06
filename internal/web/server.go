@@ -163,7 +163,16 @@ func (s *Server) tradeTypeAllowed(v string) bool {
 func (s *Server) tradeTypes() []string {
 	value, err := db.GetSetting(s.db, "bepusdt_trade_types")
 	if err == nil && strings.TrimSpace(value) != "" {
-		return config.ParseTradeTypes(value)
+		// 过滤历史遗留的非法值（旧版本可绕过校验保存），避免前台选项与接口校验不一致。
+		var out []string
+		for _, t := range config.ParseTradeTypes(value) {
+			if validTradeType(t) {
+				out = append(out, t)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
 	}
 	return s.cfg.BepusdtTradeTypes
 }
@@ -173,24 +182,34 @@ func (s *Server) fiat() string {
 	if err == nil && strings.TrimSpace(value) != "" {
 		return strings.ToUpper(strings.TrimSpace(value))
 	}
+	// 兼容旧版本误存到 "fiat" 键的配置（此前保存键名错误导致不生效）。
+	if legacy, err := db.GetSetting(s.db, "fiat"); err == nil && strings.TrimSpace(legacy) != "" {
+		return strings.ToUpper(strings.TrimSpace(legacy))
+	}
 	return s.cfg.BepusdtFiat
 }
 
 // bepusdtNotifyPath 返回 BEpusdt 回调路径（可配置，默认 /notify/bepusdt）。
-// 仅接受安全字符，非法配置回退默认路径，防止 ServeMux panic。
+// 仅接受安全字符且不与已有路由冲突，非法配置回退默认路径，防止 ServeMux panic。
 func (s *Server) bepusdtNotifyPath() string {
 	if v := strings.TrimSpace(mustGetSetting(s, "bepusdt_notify_path")); v != "" {
 		if !strings.HasPrefix(v, "/") {
 			v = "/" + v
 		}
-		if reNotifyPath.MatchString(v) {
+		if reNotifyPath.MatchString(v) && !notifyPathConflicts(v) {
 			return v
 		}
 	}
 	return "/notify/bepusdt"
 }
 
-var reNotifyPath = regexp.MustCompile(`^/[a-zA-Z0-9/_-]+$`)
+var reNotifyPath = regexp.MustCompile(`^/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$`)
+
+// notifyPathConflicts 拒绝与已注册路由冲突的路径（避免 ServeMux 注册 panic）。
+func notifyPathConflicts(v string) bool {
+	return v == "/health" || v == "/docs" || v == "/setup" ||
+		strings.HasPrefix(v, "/api") || strings.HasPrefix(v, "/admin")
+}
 
 func (s *Server) paymentConfig() config.Config {
 	cfg := s.cfg
@@ -466,13 +485,19 @@ func (s *Server) verifyTurnstileToken(token, remoteIP string) error {
 }
 
 func clientIP(r *http.Request) string {
-	if ip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); ip != "" {
+	// 优先信任 CF-Connecting-IP（由 Cloudflare 设置，站点经 CF 时不可伪造）。
+	if ip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); ip != "" && net.ParseIP(ip) != nil {
 		return ip
 	}
+	// 否则取 X-Forwarded-For 最右侧的合法 IP：该条目由离服务最近的代理（如 Caddy）追加，
+	// 客户端无法通过伪造头部改变已存在条目的位置，避免"取第一个值"导致的限流绕过。
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
-		if ip := strings.TrimSpace(parts[0]); ip != "" {
-			return ip
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := strings.TrimSpace(parts[i])
+			if ip != "" && net.ParseIP(ip) != nil {
+				return ip
+			}
 		}
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
@@ -539,7 +564,7 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	params, err := bepusdt.ParseAndVerifyCallback(body, payCfg.BepusdtToken)
 	if err != nil {
-		log.Printf("bepusdt notify verify failed: %v; body=%s", err, string(body))
+		log.Printf("bepusdt notify verify failed: %v (body %d bytes)", err, len(body))
 		http.Error(w, "invalid signature", 400)
 		return
 	}
@@ -609,7 +634,10 @@ func (s *Server) audit(r *http.Request, action, targetType, targetID, before, af
 	_ = db.AddAuditLog(s.db, s.currentAdminID(r), s.currentAdminName(r), action, targetType, targetID, before, after)
 }
 
-func (s *Server) startSession(w http.ResponseWriter, adminID int64, secure bool) {
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID int64) {
+	// 生产部署由 Caddy/Cloudflare 终止 TLS，Go 侧 r.TLS 恒为 nil，
+	// 需根据 X-Forwarded-Proto 判断客户端是否为 HTTPS，否则 Cookie 不带 Secure。
+	secure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 	id := models.RandomToken(24)
 	s.sessMu.Lock()
 	s.sessions[id] = sessionInfo{AdminID: adminID, Expiry: time.Now().Add(12 * time.Hour)}

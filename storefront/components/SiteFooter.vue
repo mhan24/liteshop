@@ -50,7 +50,9 @@ function href(url: string) {
   if (/^https?:\/\//i.test(url)) return url
   if (/^www\./i.test(url)) return 'https://' + url
   if (/^@/.test(url)) return 'https://t.me/' + url.slice(1)
+  if (/^mailto:/i.test(url)) return url
   if (url.includes('@')) return 'mailto:' + url
-  return url
+  // 仅允许站内相对链接；拒绝 javascript: 等危险协议
+  return url.startsWith('/') || url.startsWith('#') ? url : '#'
 }
 </script>

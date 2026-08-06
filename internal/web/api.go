@@ -36,7 +36,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func (s *Server) registerAPI(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/maintenance/unlock", s.apiMaintenanceUnlock)
+	mux.HandleFunc("POST /api/v1/maintenance/unlock", s.rateLimitMiddleware("maintenance_unlock", 10, s.apiMaintenanceUnlock))
 	mux.HandleFunc("GET /api/v1/setup", s.apiSetupStatus)
 	mux.HandleFunc("POST /api/v1/setup", s.apiSetup)
 	mux.HandleFunc("GET /api/v1/site", s.apiSite)
@@ -469,6 +469,13 @@ func (s *Server) apiCancelOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "订单不存在")
 		return
 	}
+	// 订单号会出现在支付跳转/查询 URL 中，不能作为唯一凭证：
+	// 取消操作要求提供与订单一致的下单邮箱，防止他人取消订单。
+	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
+	if contact == "" || contact != o.BuyerContact {
+		writeError(w, 403, "contact mismatch")
+		return
+	}
 	if o.Status != models.OrderWaitingPayment {
 		writeError(w, 400, "当前状态不可取消")
 		return
@@ -494,8 +501,16 @@ func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
-	resp := map[string]any{"order": orderJSON(order)}
-	if contact != "" && contact == order.BuyerContact {
+	owned := contact != "" && contact == order.BuyerContact
+	item := orderJSON(order)
+	if !owned {
+		// 未验证归属时不下发买家邮箱、支付地址等敏感字段。
+		delete(item, "buyer_contact")
+		delete(item, "payment_url")
+		delete(item, "trade_id")
+	}
+	resp := map[string]any{"order": item}
+	if owned {
 		switch order.Status {
 		case models.OrderPaid, models.OrderProcessing, models.OrderDelivered, models.OrderCompleted:
 			cards, _ := s.orders.Repo().GetOrderCards(order.ID)
@@ -590,7 +605,7 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	s.startSession(w, adminID, r.TLS != nil)
+	s.startSession(w, r, adminID)
 	writeJSON(w, 200, map[string]any{"ok": true, "totp_required": false})
 }
 
@@ -637,7 +652,7 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.startSession(w, info.AdminID, r.TLS != nil)
+	s.startSession(w, r, info.AdminID)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1327,15 +1342,48 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 			_ = db.SetSetting(s.db, key, strings.TrimSpace(str(v)))
 		}
 	}
-	setIfPresent("bepusdt_base_url", "bepusdt_base_url")
-	setIfPresent("fiat", "fiat")
-	setIfPresent("bepusdt_trade_types", "trade_types")
 	setIfPresent("bepusdt_timeout_sec", "bepusdt_timeout_sec")
-	setIfPresent("shop_public_base_url", "shop_public_base_url")
-	setIfPresent("bepusdt_notify_url", "bepusdt_notify_url")
-	// 回调路径需字符校验，非法值回退默认（不保存）
+	if v, ok := input["bepusdt_base_url"]; ok {
+		u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		_ = db.SetSetting(s.db, "bepusdt_base_url", u)
+	}
+	if v, ok := input["fiat"]; ok {
+		f, err := normalizeFiat(strings.TrimSpace(str(v)))
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		// 注意键名为 bepusdt_fiat（读取方），旧代码误写 "fiat" 导致配置不生效。
+		_ = db.SetSetting(s.db, "bepusdt_fiat", f)
+	}
+	if v, ok := input["trade_types"]; ok {
+		tt, err := normalizeTradeTypes(strings.TrimSpace(str(v)))
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		_ = db.SetSetting(s.db, "bepusdt_trade_types", tt)
+	}
+	for _, field := range []string{"shop_public_base_url", "bepusdt_notify_url"} {
+		if v, ok := input[field]; ok {
+			u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)
+			if err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+			_ = db.SetSetting(s.db, field, u)
+		}
+	}
+	// 回调路径需字符校验且不得与已有路由冲突，非法值回退默认（不保存）
 	if v := strings.TrimSpace(str(input["bepusdt_notify_path"])); v != "" {
-		if reNotifyPath.MatchString(v) {
+		if !strings.HasPrefix(v, "/") {
+			v = "/" + v
+		}
+		if reNotifyPath.MatchString(v) && !notifyPathConflicts(v) {
 			_ = db.SetSetting(s.db, "bepusdt_notify_path", v)
 		}
 	}
@@ -1451,7 +1499,6 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		"turnstile_secret_set":  s.turnstileSecret() != "",
 		"maintenance_enabled":   mustGetSetting(s, "maintenance_enabled"),
 		"maintenance_message":   mustGetSetting(s, "maintenance_message"),
-		"maintenance_password":  mustGetSetting(s, "maintenance_password"),
 		"maintenance_pass_set":  mustGetSetting(s, "maintenance_password") != "",
 		"site_links":            parseSiteLinks(mustGetSetting(s, "site_links")),
 		"default_product_image": s.defaultProductImage(),
@@ -1951,6 +1998,7 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 	s.limitersMu.Lock()
 	s.limiters = make(map[string]*RateLimiter)
 	s.limitersMu.Unlock()
+	s.audit(r, "system_restore", "settings", "system", "", fmt.Sprintf("restored %d settings", count))
 	writeJSON(w, 200, map[string]any{"ok": true, "count": count})
 }
 
@@ -2029,19 +2077,39 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 		"bepusdt_timeout_sec": "1200",
 	}
 	if input.Fiat != "" {
-		settings["bepusdt_fiat"] = strings.TrimSpace(input.Fiat)
+		f, err := normalizeFiat(strings.TrimSpace(input.Fiat))
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		settings["bepusdt_fiat"] = f
 	}
 	if strings.TrimSpace(input.PublicBaseURL) != "" {
-		settings["shop_public_base_url"] = strings.TrimSpace(input.PublicBaseURL)
+		u, err := normalizeHTTPURL(strings.TrimSpace(input.PublicBaseURL), false)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		settings["shop_public_base_url"] = u
 	}
 	if strings.TrimSpace(input.BepusdtBaseURL) != "" {
-		settings["bepusdt_base_url"] = strings.TrimSpace(input.BepusdtBaseURL)
+		u, err := normalizeHTTPURL(strings.TrimSpace(input.BepusdtBaseURL), false)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		settings["bepusdt_base_url"] = u
 	}
 	if strings.TrimSpace(input.BepusdtAPIToken) != "" {
 		settings["bepusdt_api_token"] = strings.TrimSpace(input.BepusdtAPIToken)
 	}
 	if strings.TrimSpace(input.TradeTypes) != "" {
-		settings["bepusdt_trade_types"] = strings.TrimSpace(input.TradeTypes)
+		tt, err := normalizeTradeTypes(strings.TrimSpace(input.TradeTypes))
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		settings["bepusdt_trade_types"] = tt
 	}
 	if strings.TrimSpace(input.TurnstileSite) != "" {
 		settings["turnstile_site_key"] = strings.TrimSpace(input.TurnstileSite)

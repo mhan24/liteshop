@@ -474,6 +474,7 @@ func renderContactHTML(contact string) template.HTML {
 			href = friendHref(line)
 		}
 		escapedText := html.EscapeString(text)
+		href = safeHref(href)
 		if href == "" {
 			b.WriteString("<p>")
 			b.WriteString(escapedText)
@@ -487,6 +488,18 @@ func renderContactHTML(contact string) template.HTML {
 		b.WriteString("</a></p>\n")
 	}
 	return template.HTML(b.String())
+}
+
+// safeHref 仅允许 http/https/mailto/tel 与站内相对链接，防止 javascript: 等协议注入。
+func safeHref(href string) string {
+	href = strings.TrimSpace(href)
+	switch {
+	case strings.HasPrefix(href, "http://"), strings.HasPrefix(href, "https://"),
+		strings.HasPrefix(href, "mailto:"), strings.HasPrefix(href, "tel:"),
+		strings.HasPrefix(href, "/"), strings.HasPrefix(href, "#"):
+		return href
+	}
+	return ""
 }
 
 func friendHref(line string) string {

@@ -53,7 +53,8 @@ let timer: any = null
 async function cancel() {
   if (!confirm(t('cancelConfirm'))) return
   try {
-    await api.post('/orders/' + route.params.orderNo + '/cancel')
+    const contact = encodeURIComponent(String(route.query.contact || ''))
+    await api.post('/orders/' + route.params.orderNo + '/cancel?contact=' + contact)
     await refresh()
   } catch (e: any) {
     alert(e?.data?.error || e?.message || t('cancelFail'))

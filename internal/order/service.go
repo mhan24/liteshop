@@ -1,6 +1,7 @@
 package order
 
 import (
+	"errors"
 	"fmt"
 
 	"shop/internal/bepusdt"
@@ -189,7 +190,8 @@ func (s *Service) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (models.O
 		return o, nil, false, nil
 	}
 	now := models.Now()
-	if err := s.repo.MarkPaid(o.ID, tradeID, blockTx, now); err != nil {
+	delivered, err := s.repo.MarkPaidAndDeliver(o.ID, tradeID, blockTx, now)
+	if err != nil {
 		return o, nil, false, err
 	}
 	o.Status = models.OrderPaid
@@ -197,15 +199,11 @@ func (s *Service) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (models.O
 	o.BlockTransactionID = blockTx
 	o.PaidAt = now
 	_ = s.repo.AddLog(o.ID, "payment_success", "支付成功", models.OrderWaitingPayment, models.OrderPaid, 0)
-	// 发卡
-	if err := s.repo.DeliverCards(o.ID); err != nil {
-		return o, nil, false, err
-	}
 	cards, _ := s.repo.GetOrderCards(o.ID)
-	if len(cards) == 0 {
+	if delivered == 0 || len(cards) == 0 {
 		_ = s.repo.SetOrderStatus(o.ID, models.OrderDeliveryFailed)
 		_ = s.repo.AddLog(o.ID, "delivery_failed", "发卡失败：无可用卡密", models.OrderPaid, models.OrderDeliveryFailed, 0)
-		return o, nil, false, nil
+		return o, nil, false, ErrNoCards
 	}
 	_ = s.repo.SetOrderStatus(o.ID, models.OrderDelivered)
 	_ = s.repo.AddLog(o.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
@@ -215,24 +213,21 @@ func (s *Service) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (models.O
 	return o, cards, true, nil
 }
 
+// ErrNoCards 表示订单已支付但发卡数量为 0（需管理员处理）。
+var ErrNoCards = errors.New("order paid but no cards delivered")
+
 // Cancel 取消订单（释放卡密）。
 func (s *Service) Cancel(orderID int64) error {
 	o, err := s.repo.GetOrderByID(orderID)
 	if err != nil {
 		return err
 	}
-	if o.Status != models.OrderWaitingPayment && o.Status != models.OrderCreated {
+	if _, changed, err := s.repo.CancelOrder(orderID); err != nil {
+		return err
+	} else if !changed {
 		return fmt.Errorf("invalid order state for cancel: %s", o.Status)
 	}
-	if err := s.repo.ReleaseLockedCards(orderID); err != nil {
-		return err
-	}
-	_ = s.repo.SetOrderStatus(orderID, models.OrderCancelled)
 	_ = s.repo.AddLog(orderID, "cancelled", "订单已取消", o.Status, models.OrderCancelled, 0)
-	// 取消订单回滚优惠券用量
-	if _, err := s.repo.RefundByOrderNo(o.OrderNo); err != nil {
-		_ = s.repo.AddLog(orderID, "coupon_refund_failed", "取消回滚优惠券失败: "+err.Error(), models.OrderCancelled, models.OrderCancelled, 0)
-	}
 	return nil
 }
 
@@ -242,18 +237,12 @@ func (s *Service) Expire(orderID int64) error {
 	if err != nil {
 		return err
 	}
-	if o.Status != models.OrderWaitingPayment && o.Status != models.OrderCreated {
+	if _, changed, err := s.repo.ExpireOrder(orderID); err != nil {
+		return err
+	} else if !changed {
 		return nil
 	}
-	if err := s.repo.ReleaseLockedCards(orderID); err != nil {
-		return err
-	}
-	_ = s.repo.SetOrderStatus(orderID, models.OrderExpired)
 	_ = s.repo.AddLog(orderID, "expired", "订单已过期", o.Status, models.OrderExpired, 0)
-	// 过期订单回滚优惠券用量
-	if _, err := s.repo.RefundByOrderNo(o.OrderNo); err != nil {
-		_ = s.repo.AddLog(orderID, "coupon_refund_failed", "过期回滚优惠券失败: "+err.Error(), models.OrderExpired, models.OrderExpired, 0)
-	}
 	return nil
 }
 

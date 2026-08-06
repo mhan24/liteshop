@@ -95,6 +95,18 @@ func (r *Repository) RefundByOrderNo(orderNo string) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback()
+	refunded, err := refundCouponTx(tx, orderNo)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return refunded, nil
+}
+
+// refundCouponTx 在既有事务内回滚优惠券用量并清理使用记录。
+func refundCouponTx(tx *sql.Tx, orderNo string) (bool, error) {
 	// 找到该订单使用的券
 	rows, err := tx.Query(`SELECT coupon_id FROM coupon_usages WHERE order_no = ?`, orderNo)
 	if err != nil {
@@ -120,9 +132,6 @@ func (r *Repository) RefundByOrderNo(orderNo string) (bool, error) {
 		if _, err := tx.Exec(`UPDATE coupons SET used_count = used_count - 1 WHERE id = ? AND used_count > 0`, cid); err != nil {
 			return false, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
 	}
 	return true, nil
 }
