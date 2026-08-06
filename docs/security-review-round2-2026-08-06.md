@@ -125,4 +125,10 @@ http.SetCookie(w, &http.Cookie{Name: "__Host-shop_session", ..., Secure: secure,
 
 **验证**：服务器已更新至 `45d93d6`，`go build`/`vet`/`test` 全绿，三服务 active，`/health` 正常，`/docs` 匿名访问 303 跳登录，`/link` 对不存在订单返回 404，`/api/v1/site` 已含 `turnstile_site_key`。
 
-**仍未处理（低危观察项）**：sitemap origin 依赖 Host、默认商品图第三方 CDN、`/docs` 外链 Swagger CDN（已加 SRI）、通知同步阻塞回调、会话内存态重启下线、服务端早期 DB 备份归档。
+**低危观察项已全部处理（commit `2b1245a`）**：
+- sitemap/robots/canonical/og 统一改用 `NUXT_PUBLIC_SITE_URL`（未配置时回退请求源），不再信任 Host；
+- 默认商品图改为站内 `/default-product.svg`，移除第三方 CDN 图；后台 ECharts 改为 npm 依赖本地打包，移除 jsdelivr 运行时加载；
+- `/docs` 移除 Swagger CDN，改为纯本地文档页（无外链、无内联脚本）；
+- 支付回调通知异步化（`go s.SendPaid`），不再阻塞 BEpusdt 应答；
+- 会话持久化到 `sessions` 表（迁移 010），服务重启不再全员下线（首次部署后需重新登录一次）；
+- 服务器早期 DB 备份归档到 `/opt/cardshop/backups`（root-only 700 / 600）。
