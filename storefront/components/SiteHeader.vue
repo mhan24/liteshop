@@ -1,7 +1,10 @@
 <template>
   <header class="bg-white border-b sticky top-0 z-10">
     <div class="max-w-6xl mx-auto px-4 h-16 flex items-center gap-6">
-      <NuxtLink to="/" class="text-lg font-extrabold text-gray-900">{{ site?.title || 'LiteShop' }}</NuxtLink>
+      <NuxtLink to="/" class="flex items-center gap-2 text-lg font-extrabold text-gray-900">
+        <img v-if="site?.logo_url" :src="site.logo_url" alt="logo" class="h-8 w-auto" />
+        <span v-else>{{ site?.title || 'LiteShop' }}</span>
+      </NuxtLink>
       <nav class="flex gap-4 text-sm font-semibold text-gray-600">
         <NuxtLink to="/" class="hover:text-brand">{{ t('products') }}</NuxtLink>
         <NuxtLink to="/order" class="hover:text-brand">{{ t('orderQuery') }}</NuxtLink>

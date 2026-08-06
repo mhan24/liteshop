@@ -6,6 +6,18 @@
       <el-form-item :label="t('site.announcement')">
         <MdEditor v-model="form.site_announcement" :language="editorLang" :preview="false" style="height:300px;width:100%" />
       </el-form-item>
+      <el-form-item :label="t('site.logo')">
+        <el-input v-model="form.site_logo" :placeholder="t('site.logoPlaceholder')" />
+        <el-image v-if="form.site_logo" :src="form.site_logo" fit="contain" style="width:160px;height:64px;margin-top:8px;border:1px solid #eee;border-radius:8px">
+          <template #error>.</template>
+        </el-image>
+      </el-form-item>
+      <el-form-item :label="t('site.favicon')">
+        <el-input v-model="form.site_favicon" :placeholder="t('site.faviconPlaceholder')" />
+        <el-image v-if="form.site_favicon" :src="form.site_favicon" fit="contain" style="width:48px;height:48px;margin-top:8px;border:1px solid #eee;border-radius:8px">
+          <template #error>.</template>
+        </el-image>
+      </el-form-item>
       <el-form-item :label="t('site.defaultProductImage')">
         <el-input v-model="form.default_product_image" :placeholder="t('site.defaultProductImagePlaceholder')" />
         <el-image :src="form.default_product_image" fit="contain" style="width:120px;height:120px;margin-top:8px;border:1px solid #eee;border-radius:8px">

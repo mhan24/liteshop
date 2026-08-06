@@ -213,6 +213,8 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"timezone":              st.Timezone,
 		"stock_display_mode":    st.StockDisplay,
 		"default_product_image": s.defaultProductImage(),
+		"logo_url":              s.siteLogoURL(),
+		"favicon_url":           s.siteFaviconURL(),
 		"maintenance": map[string]any{
 			"enabled": enabled,
 			"message": maintenanceMessage,
@@ -259,6 +261,16 @@ func (s *Server) defaultProductImage() string {
 		return v
 	}
 	return DefaultProductImage
+}
+
+// siteLogoURL 返回站点 logo URL（后台可配置，空则用默认占位）。
+func (s *Server) siteLogoURL() string {
+	return strings.TrimSpace(mustGetSetting(s, "site_logo"))
+}
+
+// siteFaviconURL 返回站点 favicon URL（后台可配置）。
+func (s *Server) siteFaviconURL() string {
+	return strings.TrimSpace(mustGetSetting(s, "site_favicon"))
 }
 
 func (s *Server) maintenanceUnlocked(r *http.Request, password string) bool {
@@ -1443,6 +1455,8 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		"maintenance_pass_set":  mustGetSetting(s, "maintenance_password") != "",
 		"site_links":            parseSiteLinks(mustGetSetting(s, "site_links")),
 		"default_product_image": s.defaultProductImage(),
+		"site_logo":             s.siteLogoURL(),
+		"site_favicon":          s.siteFaviconURL(),
 		"site_locale":           st.Locale,
 		"site_currency":         st.Currency,
 		"site_timezone":         st.Timezone,
@@ -1472,6 +1486,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 		"site_friend_links": "site_friend_links", "site_copyright": "site_copyright",
 		"privacy_policy": "privacy_policy", "terms_of_service": "terms_of_service", "turnstile_site_key": "turnstile_site_key",
 		"maintenance_message": "maintenance_message", "default_product_image": "default_product_image",
+		"site_logo": "site_logo", "site_favicon": "site_favicon",
 		"site_locale": "site_locale", "site_currency": "site_currency", "site_timezone": "site_timezone",
 		"stock_display_mode": "stock_display_mode",
 	} {

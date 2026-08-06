@@ -31,9 +31,23 @@
       <form class="mt-4 grid gap-3" @submit.prevent="submit">
         <div v-if="tradeTypes.length > 1">
           <label class="text-sm font-semibold">{{ t('network') }}</label>
-          <select v-model="form.trade_type" class="w-full border rounded px-3 py-2">
-            <option v-for="t in tradeTypes" :key="t" :value="t">{{ t }}</option>
-          </select>
+          <div class="grid grid-cols-2 gap-2 mt-1">
+            <button
+              type="button"
+              v-for="t in tradeTypes"
+              :key="t"
+              :class="[
+                'border rounded-lg px-3 py-2.5 text-left transition',
+                form.trade_type === t
+                  ? 'border-brand bg-brand/5 ring-1 ring-brand'
+                  : 'border-gray-200 hover:border-gray-400',
+              ]"
+              @click="form.trade_type = t"
+            >
+              <span class="block font-semibold text-sm">{{ networkName(t) }}</span>
+              <span class="block text-xs text-gray-500 mt-0.5">{{ networkCoin(t) }}</span>
+            </button>
+          </div>
         </div>
         <div>
           <label class="text-sm font-semibold">{{ t('quantity') }} ({{ minQty }}-{{ maxQty }})</label>
@@ -107,6 +121,15 @@ function wholesalePrice(minQtyNum: number) {
   return Math.round((base * discount) / 100)
 }
 const tradeTypes = computed(() => (data.value as any)?.trade_types || [])
+// trade_type 形如 usdt.trc20 → 币种 USDT / 网络 TRC20；未知格式原样展示
+const networkCoin = computed(() => (t: string) => {
+  const coin = t.split('.')[0]
+  return coin ? coin.toUpperCase() : t
+})
+const networkName = computed(() => (t: string) => {
+  const net = t.split('.')[1]
+  return net ? net.toUpperCase() : t
+})
 const turnstileSiteKey = computed(() => (data.value as any)?.turnstile_site_key || '')
 const form = reactive({ trade_type: '', qty: 1, contact: '', coupon_code: '' })
 const loading = ref(false)

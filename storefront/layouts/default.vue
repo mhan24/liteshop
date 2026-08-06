@@ -99,7 +99,20 @@ useHead(() => {
       { name: 'twitter:description', content: desc },
       { name: 'twitter:image', content: ogImage },
     ],
-    link: [{ rel: 'canonical', href: req.origin + route.path }],
+    link: [
+      { rel: 'canonical', href: req.origin + route.path },
+      ...(st.favicon_url
+        ? [{ rel: 'icon', type: faviconType(st.favicon_url), href: st.favicon_url }]
+        : []),
+    ],
   }
 })
+
+function faviconType(url: string) {
+  const u = url.toLowerCase()
+  if (u.endsWith('.png')) return 'image/png'
+  if (u.endsWith('.ico')) return 'image/x-icon'
+  if (u.endsWith('.jpg') || u.endsWith('.jpeg')) return 'image/jpeg'
+  return 'image/svg+xml'
+}
 </script>
