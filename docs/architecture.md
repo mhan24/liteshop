@@ -86,10 +86,10 @@ s.orders.SendPaid = s.notifier.SendPaid
 ## 推广路径（下一步）
 
 1. **商品领域**：✅ 已完成（internal/product）
-2. **设置领域**：轻量方案（db.GetSetting/SetSetting 即 repository），如需聚合可在 `internal/settings` 抽 siteSettings/paymentConfig
+2. **设置领域**：轻量方案（db.GetSetting/SetSetting 即 repository，配置读取集中在 web 层 siteSettings/paymentConfig）
 3. **管理员/审计**：轻量方案（db.AddAuditLog/AuditLogs 即 repository），如需可抽 `internal/admin`
 4. **清理 web 层遗留旧 HTML handler**：✅ 已删除 34 个 + 25 个辅助函数
-5. **config 聚合**：将 `siteSettings` / `paymentConfig` / `notifyConfig` 的 db 读取抽到 `internal/settings`（可选，边际价值较低）
+5. **config 聚合**：将 `siteSettings` / `paymentConfig` / `notifyConfig` 的 db 读取抽成独立包（可选，边际价值较低）
 
 ## 约定
 

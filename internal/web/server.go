@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"log"
 	"net"
@@ -35,7 +34,6 @@ type Server struct {
 	mux       *http.ServeMux
 	db        *sql.DB
 	cfg       config.Config
-	tpl       *template.Template
 	pay       *bepusdt.Client
 	notifier  *notify.Notifier
 	orders    *order.Service
@@ -74,20 +72,10 @@ type SiteSettings struct {
 	StockDisplay   string
 }
 
-type FooterLink struct {
-	Name string
-	URL  string
-}
-
 func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
-	tpl, err := loadTemplates()
-	if err != nil {
-		return nil, err
-	}
 	s := &Server{
 		db:        db,
 		cfg:       cfg,
-		tpl:       tpl,
 		pay:       bepusdt.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
 		notifier:  notify.New(cfg, db),
 		dbPath:    cfg.DatabasePath,
@@ -328,87 +316,10 @@ func (s *Server) siteSettings() SiteSettings {
 	return st
 }
 
-func friendLinkURL(line string) string {
-	switch {
-	case strings.HasPrefix(line, "http://"), strings.HasPrefix(line, "https://"):
-		return line
-	case strings.HasPrefix(line, "www."):
-		return "https://" + line
-	case strings.HasPrefix(line, "@"):
-		return "https://t.me/" + strings.TrimPrefix(line, "@")
-	case strings.Contains(line, "@"):
-		return "mailto:" + line
-	}
-	return ""
-}
-
-func friendLinkName(line, url string) string {
-	if url == "" {
-		return line
-	}
-	name := strings.TrimPrefix(line, "https://")
-	name = strings.TrimPrefix(name, "http://")
-	name = strings.TrimPrefix(name, "www.")
-	name = strings.TrimPrefix(name, "mailto:")
-	name = strings.TrimPrefix(name, "https://t.me/")
-	if i := strings.Index(name, "/"); i > 0 {
-		name = name[:i]
-	}
-	if name == "" {
-		return line
-	}
-	return name
-}
-
-func parseFriendLinks(raw string) []FooterLink {
-	var out []FooterLink
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		name, url, hasSep := strings.Cut(line, "|")
-		name = strings.TrimSpace(name)
-		url = strings.TrimSpace(url)
-		if !hasSep {
-			url = friendLinkURL(line)
-			name = ""
-		}
-		if name == "" {
-			name = friendLinkName(line, url)
-		}
-		if name == "" {
-			continue
-		}
-		out = append(out, FooterLink{Name: name, URL: url})
-		if len(out) >= 30 {
-			break
-		}
-	}
-	return out
-}
-
 func renderSiteVars(text, siteTitle string) string {
 	text = strings.ReplaceAll(text, "{{site_title}}", siteTitle)
 	text = strings.ReplaceAll(text, "{{year}}", fmt.Sprintf("%d", time.Now().Year()))
 	return text
-}
-
-func truncateString(v string, n int) string {
-	v = strings.TrimSpace(v)
-	r := []rune(v)
-	if len(r) <= n {
-		return v
-	}
-	return string(r[:n]) + "…"
-}
-
-func (s *Server) adminNotifyRedirect(w http.ResponseWriter, r *http.Request, ok bool, notice string) {
-	okValue := "0"
-	if ok {
-		okValue = "1"
-	}
-	http.Redirect(w, r, "/admin/notify?ok="+okValue+"&notice="+url.QueryEscape(notice), http.StatusSeeOther)
 }
 
 func normalizeFiat(v string) (string, error) {
@@ -803,29 +714,4 @@ func roleRank(role string) int {
 		return 1
 	}
 	return 0
-}
-
-func (s *Server) productFromForm(r *http.Request) (models.Product, error) {
-	if err := r.ParseForm(); err != nil {
-		return models.Product{}, err
-	}
-	name := strings.TrimSpace(r.FormValue("name"))
-	if name == "" {
-		return models.Product{}, errors.New(tr(chooseLang(r), "product_name_empty"))
-	}
-	price, err := models.CentsFromYuan(strings.TrimSpace(r.FormValue("price")))
-	if err != nil || price <= 0 {
-		return models.Product{}, errors.New(tr(chooseLang(r), "price_invalid"))
-	}
-	status := r.FormValue("status")
-	if status != "active" {
-		status = "disabled"
-	}
-	category := strings.TrimSpace(r.FormValue("category"))
-	sortOrder, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("sort_order")))
-	if sortOrder < 0 {
-		sortOrder = 0
-	}
-	isPinned := r.FormValue("is_pinned") == "1"
-	return models.Product{Name: name, Description: strings.TrimSpace(r.FormValue("description")), PriceCents: price, Status: status, Category: category, SortOrder: sortOrder, IsPinned: isPinned}, nil
 }
