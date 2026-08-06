@@ -139,7 +139,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 	// 管理后台 SPA 的 CSP（/docs 依赖 CDN 脚本，不在此范围）。
 	if strings.HasPrefix(r.URL.Path, "/admin") {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+		// script-src 需 'unsafe-eval'：vue-i18n 消息编译在运行时使用 new Function。
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 	}
 	s.mux.ServeHTTP(w, r)
 }
