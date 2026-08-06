@@ -13,7 +13,7 @@ func TestAdminRolesAndAudit(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	if err := db.SeedAdmin(d, "admin1", "password123"); err != nil {
+	if _, err := db.SeedAdmin(d, "admin1", "password123"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 

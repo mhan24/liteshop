@@ -558,12 +558,21 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 	s.sessMu.Lock()
 	s.sessions[id] = sessionInfo{AdminID: adminID, Expiry: time.Now().Add(12 * time.Hour)}
 	s.sessMu.Unlock()
-	// __Host- 前缀：强制 Secure + Path=/ + 无 Domain，降低 Cookie 被降级/串站风险。
-	http.SetCookie(w, &http.Cookie{Name: "__Host-shop_session", Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
+	// HTTPS 下使用 __Host- 前缀（强制 Secure + Path=/ + 无 Domain）；
+	// 纯 HTTP 部署（SKIP_SSL / 本地开发）下 __Host- 前缀会被浏览器拒绝，
+	// 此时回退为普通 Cookie 名，保证登录可用。
+	name := "shop_session"
+	if secure {
+		name = "__Host-shop_session"
+	}
+	http.SetCookie(w, &http.Cookie{Name: name, Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
 }
 
 func (s *Server) sessionID(r *http.Request) (string, bool) {
 	c, err := r.Cookie("__Host-shop_session")
+	if err != nil {
+		c, err = r.Cookie("shop_session")
+	}
 	if err != nil {
 		return "", false
 	}

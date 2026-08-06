@@ -295,12 +295,21 @@ func HasAdmin(db *sql.DB) bool {
 	return count > 0
 }
 
-func SeedAdmin(db *sql.DB, username, password string) error {
+// SeedAdmin 创建初始管理员；已存在管理员时返回 (false, nil)。
+// 返回是否实际插入，供调用方处理并发初始化。
+func SeedAdmin(db *sql.DB, username, password string) (bool, error) {
 	if HasAdmin(db) {
-		return nil
+		return false, nil
 	}
 	_, err := db.Exec(`INSERT INTO admins(id, username, password_hash, role, created_at) VALUES(1, ?, ?, 'admin', ?)`, username, models.HashPassword(password), models.Now())
-	return err
+	if err != nil {
+		// 并发下可能已由另一请求插入，视为已初始化。
+		if HasAdmin(db) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func GetSetting(db *sql.DB, key string) (string, error) {

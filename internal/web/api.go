@@ -51,6 +51,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/orders", s.rateLimitMiddleware("orders_lookup", 20, s.apiOrdersByContact))
 	mux.HandleFunc("GET /api/v1/orders/{orderNo}", s.apiOrder)
 	mux.HandleFunc("POST /api/v1/orders/{orderNo}/cancel", s.apiCancelOrder)
+	mux.HandleFunc("POST /api/v1/orders/{orderNo}/link", s.rateLimitMiddleware("order_link", 10, s.apiSendOrderLink))
 	mux.HandleFunc("GET /api/v1/pages/{slug}", s.apiPage)
 	mux.HandleFunc("POST /api/v1/lang", s.apiSetLang)
 
@@ -225,6 +226,7 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"timezone":              st.Timezone,
 		"stock_display_mode":    st.StockDisplay,
 		"default_product_image": s.defaultProductImage(),
+		"turnstile_site_key":    s.turnstileSiteKey(),
 		"logo_url":              s.siteLogoURL(),
 		"favicon_url":           s.siteFaviconURL(),
 		"maintenance": map[string]any{
@@ -311,6 +313,11 @@ func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
 		!hmacEqual(hashMaintenancePassword(strings.TrimSpace(input.Password)), normalizeMaintenanceHash(maintenancePassword)) {
 		writeError(w, 403, "密码错误")
 		return
+	}
+	// 存量明文在解锁成功后升级为哈希存储。
+	if normalized := normalizeMaintenanceHash(maintenancePassword); normalized != maintenancePassword {
+		_ = db.SetSetting(s.db, "maintenance_password", normalized)
+		maintenancePassword = normalized
 	}
 	secure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 	http.SetCookie(w, &http.Cookie{Name: "maint_unlock", Value: s.maintToken(normalizeMaintenanceHash(maintenancePassword)), Path: "/", MaxAge: 43200, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
@@ -445,6 +452,13 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid email")
 		return
 	}
+	// 已配置 Turnstile 时，邮箱查询同样要求人机验证（防枚举/防刷）。
+	if s.turnstileSecret() != "" {
+		if err := s.verifyTurnstileToken(strings.TrimSpace(r.URL.Query().Get("cf-turnstile-response")), clientIP(r)); err != nil {
+			writeError(w, 403, "turnstile failed")
+			return
+		}
+	}
 	orders, err := s.orders.Repo().OrdersByContact(contact, 10)
 	if err != nil {
 		writeInternalError(w, err)
@@ -462,23 +476,65 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 			"created_at":   o.CreatedAt,
 			"paid_at":      o.PaidAt,
 		}
-		viewURL := "/order/" + o.OrderNo
-		if o.ViewToken != "" {
-			viewURL += "?token=" + o.ViewToken
-		} else {
-			viewURL += "?contact=" + url.QueryEscape(contact)
+		// 新订单（有查看令牌）不在查询响应中下发令牌 URL，避免"知道邮箱即可取卡密"；
+		// 买家可通过"发送查看链接"接口让链接发往订单登记邮箱。
+		viewURL := ""
+		if o.ViewToken == "" {
+			viewURL = "/order/" + o.OrderNo + "?contact=" + url.QueryEscape(contact)
 		}
 		if o.Status == models.OrderWaitingPayment {
 			item["order_no"] = o.OrderNo
-			item["url"] = viewURL
+			if viewURL != "" {
+				item["url"] = viewURL
+			}
 			item["payment_url"] = o.PaymentURL
 		} else if o.Status != models.OrderPaid {
 			item["order_no"] = o.OrderNo
-			item["url"] = viewURL
+			if viewURL != "" {
+				item["url"] = viewURL
+			}
 		}
 		out = append(out, item)
 	}
 	writeJSON(w, 200, map[string]any{"orders": out})
+}
+
+// apiSendOrderLink 把订单查看链接发送到订单登记邮箱（链接仅发往该邮箱，替代接口直接下发令牌）。
+func (s *Server) apiSendOrderLink(w http.ResponseWriter, r *http.Request) {
+	orderNo := r.PathValue("orderNo")
+	o, err := s.orders.Repo().GetOrderByNo(orderNo)
+	if err != nil {
+		writeError(w, 404, "订单不存在")
+		return
+	}
+	var input struct {
+		Contact string `json:"contact"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	contact := strings.TrimSpace(input.Contact)
+	if contact == "" || contact != o.BuyerContact {
+		writeError(w, 403, "contact mismatch")
+		return
+	}
+	if s.notifier.CurrentConfig().SMTPHost == "" {
+		writeError(w, 400, "SMTP 未配置")
+		return
+	}
+	base := strings.TrimRight(s.paymentConfig().PublicBaseURL, "/")
+	link := base + "/order/" + o.OrderNo
+	if o.ViewToken != "" {
+		link += "?token=" + o.ViewToken
+	} else {
+		link += "?contact=" + url.QueryEscape(contact)
+	}
+	if err := s.notifier.SendOrderLink(o, link); err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func (s *Server) apiCancelOrder(w http.ResponseWriter, r *http.Request) {
@@ -708,7 +764,9 @@ func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
 		delete(s.sessions, id)
 		s.sessMu.Unlock()
 	}
+	// 同时清除两种名称（HTTPS 的 __Host- 与纯 HTTP 的普通名）。
 	http.SetCookie(w, &http.Cookie{Name: "__Host-shop_session", Value: "", Path: "/", MaxAge: -1, Secure: true})
+	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: "", Path: "/", MaxAge: -1})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1658,8 +1716,8 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 	var oldUsername string
 	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&oldUsername)
 	if input.NewPassword != "" {
-		if len(input.NewPassword) < 8 {
-			writeError(w, 400, "password too short")
+		if err := models.ValidatePasswordStrength(input.NewPassword); err != nil {
+			writeError(w, 400, err.Error())
 			return
 		}
 		if input.NewPassword != input.ConfirmPassword {
@@ -1778,8 +1836,12 @@ func (s *Server) apiAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	username := strings.TrimSpace(input.Username)
-	if username == "" || len(input.Password) < 8 {
-		writeError(w, 400, "username/password invalid")
+	if username == "" {
+		writeError(w, 400, "username required")
+		return
+	}
+	if err := models.ValidatePasswordStrength(input.Password); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
 	role := strings.TrimSpace(input.Role)
@@ -2018,6 +2080,8 @@ func (s *Server) apiAdminSystemBackup(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
+	// session_secret 恢复时被跳过（防止会话/TOTP 密钥失配），导出它没有意义且增加泄露面。
+	delete(settings, "session_secret")
 	w.Header().Set("Content-Disposition", "attachment; filename=liteshop-settings.json")
 	writeJSON(w, 200, map[string]any{"app": "liteshop", "settings": settings})
 }
@@ -2123,8 +2187,8 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 	if username == "" {
 		username = "admin"
 	}
-	if len(input.Password) < 8 {
-		writeError(w, 400, "密码至少 8 位")
+	if err := models.ValidatePasswordStrength(input.Password); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
 	if input.Password != input.Confirm {
@@ -2135,8 +2199,13 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 	if siteTitle == "" {
 		siteTitle = "LiteShop"
 	}
-	if err := db.SeedAdmin(s.db, username, input.Password); err != nil {
+	inserted, err := db.SeedAdmin(s.db, username, input.Password)
+	if err != nil {
 		writeInternalError(w, err)
+		return
+	}
+	if !inserted {
+		writeError(w, 400, "already initialized")
 		return
 	}
 	settings := map[string]string{

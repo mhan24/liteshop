@@ -28,10 +28,12 @@
         </div>
         <div class="flex gap-2">
           <NuxtLink v-if="item.url" :to="item.url.replace(/^https?:\/\/[^/]+/, '')" class="text-brand font-semibold">{{ t('viewOrder') }}</NuxtLink>
+          <button v-else-if="item.order_no" class="text-brand font-semibold" @click="sendLink(item)">{{ t('sendLink') }}</button>
           <a v-if="item.payment_url" :href="item.payment_url" class="text-brand font-semibold">{{ t('continuePay') }}</a>
         </div>
       </div>
     </div>
+    <div ref="turnstileContainer" v-if="turnstilePending" class="mt-3"></div>
     <div v-else-if="searched && !loading" class="text-gray-500 mt-5">{{ t('noOrders') }}</div>
   </div>
 </template>
@@ -44,8 +46,57 @@ const form = reactive({ contact: '', order_no: '' })
 const orders = ref<any[]>([])
 const loading = ref(false)
 const searched = ref(false)
+const turnstileSiteKey = ref('')
+const turnstileWidget = ref<any>(null)
+const turnstileContainer = ref<HTMLElement | null>(null)
+const turnstilePending = ref(false)
+
+const { data: site } = await useAsyncData('order-site', () => api.get('/site').catch(() => null))
+turnstileSiteKey.value = (site.value as any)?.turnstile_site_key || ''
+
+function ensureTurnstileScript() {
+  if (!turnstileSiteKey.value) return
+  if (!document.getElementById('turnstile-api')) {
+    const s = document.createElement('script')
+    s.id = 'turnstile-api'
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
+    s.async = true
+    s.defer = true
+    document.head.appendChild(s)
+  }
+}
+
+function renderTurnstile() {
+  const poll = () => {
+    if (window.turnstile && turnstileContainer.value) {
+      turnstileWidget.value = window.turnstile.render(turnstileContainer.value, {
+        sitekey: turnstileSiteKey.value,
+        action: 'order-lookup',
+        callback: (token: string) => {
+          turnstilePending.value = false
+          doLookup(token)
+        },
+      })
+    } else {
+      setTimeout(poll, 200)
+    }
+  }
+  poll()
+}
 
 async function submit() {
+  if (!form.contact) return
+  if (turnstileSiteKey.value) {
+    turnstilePending.value = true
+    ensureTurnstileScript()
+    await nextTick()
+    renderTurnstile()
+    return
+  }
+  await doLookup('')
+}
+
+async function doLookup(token: string) {
   if (form.order_no) {
     await navigateTo({ path: `/order/${form.order_no}`, query: { contact: form.contact } })
     return
@@ -54,12 +105,23 @@ async function submit() {
   searched.value = true
   orders.value = []
   try {
-    const data: any = await api.get('/orders', { contact: form.contact })
+    const data: any = await api.get('/orders', {
+      contact: form.contact,
+      'cf-turnstile-response': token || undefined,
+    })
     orders.value = data.orders || []
   } catch (e: any) {
     alert(e?.data?.error || e?.message || t('queryFail'))
   } finally {
     loading.value = false
+  }
+}
+async function sendLink(item: any) {
+  try {
+    await api.post('/orders/' + item.order_no + '/link', { contact: form.contact })
+    alert(t('linkSent'))
+  } catch (e: any) {
+    alert(e?.data?.error || e?.message || t('linkFail'))
   }
 }
 function date(ts: number) {

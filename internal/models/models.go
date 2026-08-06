@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"hash"
 	"strconv"
@@ -287,6 +288,26 @@ func CentsFromYuan(s string) (int64, error) {
 		return 0, fmt.Errorf("price must be positive")
 	}
 	return int64(f*100 + 0.5), nil
+}
+
+// ValidatePasswordStrength 校验密码强度：至少 8 位且同时包含字母和数字。
+func ValidatePasswordStrength(pw string) error {
+	if len(pw) < 8 {
+		return errors.New("密码至少 8 位")
+	}
+	hasLetter, hasDigit := false, false
+	for _, r := range pw {
+		if unicode.IsLetter(r) {
+			hasLetter = true
+		}
+		if unicode.IsDigit(r) {
+			hasDigit = true
+		}
+	}
+	if !hasLetter || !hasDigit {
+		return errors.New("密码需同时包含字母和数字")
+	}
+	return nil
 }
 
 func pbkdf2(password, salt []byte, iter, keyLen int, h func() hash.Hash) []byte {

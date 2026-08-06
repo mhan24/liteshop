@@ -3,6 +3,7 @@ package order
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"shop/internal/bepusdt"
 	"shop/internal/models"
@@ -95,6 +96,8 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		amountCents = baseCents * int64(qty) * int64(bestDiscount) / 100
 	}
 	// 优惠券
+	// 券码统一大写（创建时已大写存储），避免大小写不匹配。
+	couponCode = strings.ToUpper(strings.TrimSpace(couponCode))
 	discount := int64(0)
 	couponID := int64(0)
 	if couponCode != "" {
@@ -242,7 +245,7 @@ func (s *Service) Expire(orderID int64) error {
 	if _, changed, err := s.repo.ExpireOrder(orderID); err != nil {
 		return err
 	} else if !changed {
-		return nil
+		return fmt.Errorf("invalid order state for expire: %s", o.Status)
 	}
 	_ = s.repo.AddLog(orderID, "expired", "订单已过期", o.Status, models.OrderExpired, 0)
 	return nil

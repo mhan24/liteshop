@@ -10,7 +10,8 @@ var openapiFS embed.FS
 
 // registerDocs 注册 /docs 与 /docs/openapi.json。
 func (s *Server) registerDocs(mux *http.ServeMux) {
-	mux.HandleFunc("GET /docs/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+	// API 文档仅管理员可见，避免公开暴露完整接口面。
+	mux.Handle("GET /docs/openapi.json", s.requireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, err := openapiFS.ReadFile("api_docs/openapi.json")
 		if err != nil {
 			http.Error(w, "openapi not found", 404)
@@ -19,11 +20,11 @@ func (s *Server) registerDocs(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 		_, _ = w.Write(data)
-	})
-	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	mux.Handle("GET /docs", s.requireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(docsHTML))
-	})
+	})))
 }
 
 const docsHTML = `<!DOCTYPE html>
