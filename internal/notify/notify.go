@@ -241,7 +241,8 @@ func (n *Notifier) sendMailWithConfig(cfg config.Config, to, subject, body strin
 	if from == "" {
 		from = cfg.SMTPUsername
 	}
-	addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
+	// JoinHostPort 兼容 IPv6 字面量（[::1]:465）。
+	addr := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
 	domain := "localhost"
 	if at := strings.LastIndex(from, "@"); at >= 0 && at < len(from)-1 {
 		domain = from[at+1:]
