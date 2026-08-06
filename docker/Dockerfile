@@ -19,7 +19,7 @@ RUN cd admin-ui && npm run build
 RUN cd storefront && npm run build
 
 # ===== Go 构建阶段 =====
-FROM golang:1.22-bookworm AS gobuild
+FROM golang:1.26-bookworm AS gobuild
 ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
 WORKDIR /src

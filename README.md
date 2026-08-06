@@ -21,7 +21,7 @@ Caddy (反向代理 :443)
 
 | 进程 | 技术 | 端口 |
 | --- | --- | --- |
-| Go API | Go 1.22 + SQLite (modernc) | 8080 |
+| Go API | Go 1.25+ + SQLite (modernc) | 8080 |
 | 前台 SSR | Nuxt 3 + Tailwind | 3001 |
 | 后台 SPA | Vue 3 + TS + Element Plus + Pinia | 内嵌进 Go |
 
@@ -78,7 +78,7 @@ Caddy (反向代理 :443)
 | --- | --- |
 | 前台 | Nuxt 3 SSR + Tailwind CSS |
 | 后台 | Vue 3 + Vite + TypeScript + Element Plus + Pinia |
-| 后端 | Go 1.22+ |
+| 后端 | Go 1.25+ |
 | 数据库 | SQLite (modernc.org/sqlite) |
 | 反向代理 | Caddy |
 | 支付 | BEpusdt |
@@ -102,7 +102,7 @@ storefront/          Nuxt 3 SSR 前台（Tailwind）
 
 ### 前置要求
 
-- Go 1.22+
+- Go 1.25+
 - Node.js 18+ / npm
 - BEpusdt 实例
 
