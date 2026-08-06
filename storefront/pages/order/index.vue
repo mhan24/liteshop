@@ -15,13 +15,14 @@
         {{ form.order_no ? t('queryOrder') : t('recoverByEmail') }}
       </button>
     </form>
+    <p class="text-xs text-gray-400 mt-2">{{ t('orderLinkHint') }}</p>
 
     <div v-if="orders.length" class="mt-5 divide-y">
       <div v-for="(item, idx) in orders" :key="idx" class="py-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div class="font-semibold">{{ item.product_name }} x{{ item.qty }}</div>
           <div class="text-sm text-gray-500">
-            <span>{{ t('paidOrderSent') }} · {{ date(item.paid_at || item.created_at) }}</span>
+            <span>{{ orderSub(item) }} · {{ date(item.paid_at || item.created_at) }}</span>
           </div>
           <span class="text-xs px-2 py-0.5 rounded-full" :class="badgeClass(item.status)">{{ statusText(item.status) }}</span>
         </div>
@@ -50,6 +51,7 @@ const turnstileSiteKey = ref('')
 const turnstileWidget = ref<any>(null)
 const turnstileContainer = ref<HTMLElement | null>(null)
 const turnstilePending = ref(false)
+const pendingAction = ref<'lookup' | 'links'>('lookup')
 
 const { data: site } = await useAsyncData('order-site', () => api.get('/site').catch(() => null))
 turnstileSiteKey.value = (site.value as any)?.turnstile_site_key || ''
@@ -74,7 +76,11 @@ function renderTurnstile() {
         action: 'order-lookup',
         callback: (token: string) => {
           turnstilePending.value = false
-          doLookup(token)
+          if (pendingAction.value === 'links') {
+            doSendAllLinks(token)
+          } else {
+            doLookup(token)
+          }
         },
       })
     } else {
@@ -87,6 +93,7 @@ function renderTurnstile() {
 async function submit() {
   if (!form.contact) return
   if (turnstileSiteKey.value) {
+    pendingAction.value = 'lookup'
     turnstilePending.value = true
     ensureTurnstileScript()
     await nextTick()
@@ -116,12 +123,29 @@ async function doLookup(token: string) {
   }
 }
 async function sendAllLinks() {
+  if (turnstileSiteKey.value) {
+    pendingAction.value = 'links'
+    turnstilePending.value = true
+    ensureTurnstileScript()
+    await nextTick()
+    renderTurnstile()
+    return
+  }
+  await doSendAllLinks('')
+}
+
+async function doSendAllLinks(token: string) {
   try {
-    await api.post('/orders/links', { contact: form.contact })
+    await api.post('/orders/links', { contact: form.contact }, token ? { 'X-Turnstile-Response': token } : undefined)
     alert(t('linkSent'))
   } catch (e: any) {
     alert(e?.data?.error || e?.message || t('linkFail'))
   }
+}
+function orderSub(item: any) {
+  return ['paid', 'processing', 'delivered', 'completed'].includes(item.status)
+    ? t('paidOrderSent')
+    : t('orderSubPending')
 }
 function date(ts: number) {
   return siteDate(ts)

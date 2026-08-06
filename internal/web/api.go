@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"shop/internal/db"
 	"shop/internal/models"
 	"shop/internal/notify"
+	"shop/internal/order"
 	"shop/internal/product"
 	"shop/internal/security"
 	"strconv"
@@ -421,12 +423,16 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	orderNo, paymentURL, _, _, err := s.orders.CreateOrder(p, input.Qty, input.Contact, tradeType, input.CouponCode)
 	if err != nil {
 		go s.notifier.NotifySystemError("创建支付交易失败: " + err.Error())
-		// 若订单已创建（orderNo 非空）但支付网关失败，返回订单号供重试
-		// 错误细节只写日志/通知管理员，不向客户端回显（避免泄露网关/内部信息）。
+		// 业务错误（券码/库存/数量）可回显给买家；系统错误（网关/DB）只写日志并返回通用文案。
+		msg := "下单失败，请重试或联系客服"
+		var biz *order.BusinessError
+		if errors.As(err, &biz) {
+			msg = biz.Error()
+		}
 		if orderNo != "" {
-			writeJSON(w, 502, map[string]any{"error": "下单失败，请重试或联系客服", "order_no": orderNo})
+			writeJSON(w, 502, map[string]any{"error": msg, "order_no": orderNo})
 		} else {
-			writeError(w, 502, "下单失败，请重试或联系客服")
+			writeError(w, 502, msg)
 		}
 		return
 	}
@@ -502,6 +508,13 @@ func (s *Server) apiSendOrderLinks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid email")
 		return
 	}
+	// 已配置 Turnstile 时同样要求人机验证。
+	if s.turnstileSecret() != "" {
+		if err := s.verifyTurnstileToken(strings.TrimSpace(r.Header.Get("X-Turnstile-Response")), clientIP(r), r.Host); err != nil {
+			writeError(w, 403, "turnstile failed")
+			return
+		}
+	}
 	// 按邮箱冷却（5 分钟/邮箱，跨订单共享），防止向受害者邮箱轰炸。
 	now := time.Now().Unix()
 	key := strings.ToLower(contact)
@@ -514,10 +527,6 @@ func (s *Server) apiSendOrderLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	s.linkSent[key] = now
 	s.linkMu.Unlock()
-	if s.notifier.CurrentConfig().SMTPHost == "" {
-		writeError(w, 400, "SMTP 未配置")
-		return
-	}
 	orders, err := s.orders.Repo().OrdersByContact(contact, 10)
 	if err != nil {
 		writeInternalError(w, err)

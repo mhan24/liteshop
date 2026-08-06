@@ -27,6 +27,16 @@ type Service struct {
 	SendPaid func(order models.Order, cards []models.Card)
 }
 
+// BusinessError 表示可安全展示给买家的业务错误（如券码无效、库存不足）。
+// 其余错误视为系统错误，由上层统一脱敏。
+type BusinessError struct{ msg string }
+
+func (e *BusinessError) Error() string { return e.msg }
+
+func newBusinessErrorf(format string, args ...any) error {
+	return &BusinessError{msg: fmt.Sprintf(format, args...)}
+}
+
 func NewService(repo *Repository, payFn func() *bepusdt.Client, cfgFn func() PaymentConfig) *Service {
 	return &Service{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
@@ -75,10 +85,10 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		p.MinQty = 1
 	}
 	if qty < p.MinQty {
-		return "", "", 0, 0, fmt.Errorf("最少购买 %d 件", p.MinQty)
+		return "", "", 0, 0, newBusinessErrorf("最少购买 %d 件", p.MinQty)
 	}
 	if p.MaxQty > 0 && qty > p.MaxQty {
-		return "", "", 0, 0, fmt.Errorf("最多购买 %d 件", p.MaxQty)
+		return "", "", 0, 0, newBusinessErrorf("最多购买 %d 件", p.MaxQty)
 	}
 	amountCents := baseCents * int64(qty)
 	bestMinQty := 0
@@ -104,16 +114,16 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		var cidErr error
 		couponID, cidErr = s.repo.GetCouponIDByCode(couponCode)
 		if cidErr != nil {
-			return "", "", 0, 0, cidErr
+			return "", "", 0, 0, newBusinessErrorf("%s", cidErr.Error())
 		}
 		d, err := s.repo.ApplyCoupon(couponCode, amountCents, p.ID)
 		if err != nil {
-			return "", "", 0, 0, err
+			return "", "", 0, 0, newBusinessErrorf("%s", err.Error())
 		}
 		discount = d
 		amountCents -= discount
 		if amountCents <= 0 {
-			return "", "", 0, 0, fmt.Errorf("订单金额需大于 0（抵扣后金额为 0）")
+			return "", "", 0, 0, newBusinessErrorf("订单金额需大于 0（抵扣后金额为 0）")
 		}
 	}
 	now := models.Now()
@@ -134,6 +144,9 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		UpdatedAt:          now,
 	}
 	if err := s.repo.CreatePendingOrder(&order); err != nil {
+		if errors.Is(err, errInsufficient) {
+			return "", "", 0, 0, newBusinessErrorf("库存不足，请刷新后重试")
+		}
 		return "", "", 0, 0, err
 	}
 	_ = s.repo.AddLog(order.ID, "order_created", "订单已创建", "", models.OrderCreated, 0)
@@ -142,7 +155,7 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 			_ = s.repo.ReleaseLockedCards(order.ID)
 			_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
 			_ = s.repo.AddLog(order.ID, "coupon_failed", "优惠券占用失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
-			return order.OrderNo, "", 0, 0, err
+			return order.OrderNo, "", 0, 0, newBusinessErrorf("%s", err.Error())
 		}
 		_ = s.repo.AddLog(order.ID, "coupon_used", fmt.Sprintf("优惠券抵扣 %d 分", discount), "", models.OrderCreated, 0)
 	}

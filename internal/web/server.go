@@ -116,6 +116,14 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 			if _, err := s.db.Exec(`DELETE FROM sessions WHERE expires_at < ?`, time.Now().Unix()); err != nil {
 				log.Printf("cleanup sessions: %v", err)
 			}
+			// 日志保留 180 天，防止无限增长
+			retention := time.Now().Add(-180 * 24 * time.Hour).Unix()
+			if _, err := s.db.Exec(`DELETE FROM audit_logs WHERE created_at < ?`, retention); err != nil {
+				log.Printf("cleanup audit_logs: %v", err)
+			}
+			if _, err := s.db.Exec(`DELETE FROM order_logs WHERE created_at < ?`, retention); err != nil {
+				log.Printf("cleanup order_logs: %v", err)
+			}
 			// 清理链接邮件冷却记录
 			cutoff := time.Now().Add(-10 * time.Minute).Unix()
 			s.linkMu.Lock()
