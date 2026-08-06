@@ -95,11 +95,11 @@ const route = useRoute()
 const { t } = useI18n()
 const { money: siteMoney, currency: siteCurrency, stockText } = useSiteConfig()
 const api = useApi()
-const req = useRequestURL()
+const origin = useSiteOrigin()
 
 // URL 形如 /product/{slug} 或 /product/{id}，直接传给 API 由后端按 slug/id 查找
 const productKey = computed(() => String(route.params.id || ''))
-const pageUrl = computed(() => req.origin + route.path)
+const pageUrl = computed(() => origin.value + route.path)
 const { data, pending } = await useAsyncData(() => api.get('/products/' + productKey.value).catch(() => null))
 const product = computed(() => (data.value as any)?.product)
 const faqItems = computed(() => (product.value?.faq || []) as any[])
@@ -211,7 +211,7 @@ function money(c?: number) {
   return ((c || 0) / 100).toFixed(2)
 }
 function imgSrc(url: string) {
-  return url || (data.value as any)?.default_product_image || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
+  return url || (data.value as any)?.default_product_image || '/default-product.svg'
 }
 async function submit() {
   if (loading.value) return
@@ -253,7 +253,7 @@ useHead(() => {
   const desc = markdownText(p?.description).slice(0, 160)
   const img = imgSrc(p?.image_url)
   const canonicalSlug = p?.slug && p.slug !== 'p' ? encodeURIComponent(p.slug) : (p?.id ?? '')
-  const canonical = req.origin + '/product/' + canonicalSlug
+  const canonical = origin.value + '/product/' + canonicalSlug
   const url = pageUrl.value
   return {
     title: p?.name || t('product'),

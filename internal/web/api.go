@@ -267,8 +267,8 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// DefaultProductImage 是内置默认占位图。
-const DefaultProductImage = "https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png"
+// DefaultProductImage 是内置默认占位图（站内资源，前端兜底 /default-product.svg）。
+const DefaultProductImage = ""
 
 func (s *Server) defaultProductImage() string {
 	if v := strings.TrimSpace(mustGetSetting(s, "default_product_image")); v != "" {
@@ -760,6 +760,7 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
 	if id, ok := s.sessionID(r); ok {
+		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
 		s.sessMu.Lock()
 		delete(s.sessions, id)
 		s.sessMu.Unlock()
@@ -2122,6 +2123,7 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 	s.sessMu.Lock()
 	s.sessions = make(map[string]sessionInfo)
 	s.sessMu.Unlock()
+	_, _ = s.db.Exec(`DELETE FROM sessions`)
 	// 配置恢复后清空限流器，避免旧 IP 限制残留影响管理员操作
 	s.limitersMu.Lock()
 	s.limiters = make(map[string]*RateLimiter)
@@ -2146,6 +2148,7 @@ func (s *Server) apiAdminSystemReset(w http.ResponseWriter, r *http.Request) {
 	s.sessMu.Lock()
 	s.sessions = make(map[string]sessionInfo)
 	s.sessMu.Unlock()
+	_, _ = s.db.Exec(`DELETE FROM sessions`)
 	s.audit(r, "system_reset", "system", "all", "all data", "reset")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }

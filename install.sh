@@ -24,6 +24,8 @@ DOMAIN="${DOMAIN:-}"
 EMAIL="${EMAIL:-}"
 BRANCH="${BRANCH:-main}"
 SKIP_SSL="${SKIP_SSL:-0}"
+SITE_SCHEME="https"
+[ "$SKIP_SSL" = "1" ] && SITE_SCHEME="http"
 # SHOP_SETUP_TOKEN: 可选, 设置后 /setup 必须携带该令牌才能初始化
 SHOP_SETUP_TOKEN="${SHOP_SETUP_TOKEN:-}"
 # BUILD_ARTIFACT: 预构建产物 tgz (含 shop 二进制 + storefront/.output), 提供则跳过源码构建, 加速部署
@@ -210,6 +212,7 @@ ExecStart=/usr/bin/node /opt/liteshop-storefront/server/index.mjs
 UMask=0077
 Environment=NODE_ENV=production
 Environment=PORT=3001
+Environment=NUXT_PUBLIC_SITE_URL=${SITE_SCHEME}://${DOMAIN}
 Restart=always
 RestartSec=2
 

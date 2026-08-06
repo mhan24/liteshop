@@ -1,5 +1,6 @@
 export default defineEventHandler(async (event) => {
-  const origin = getRequestURL(event).origin
+  const config = useRuntimeConfig(event)
+  const origin = String(config.public.siteUrl || getRequestURL(event).origin).replace(/\/+$/, '')
   let urls: string[] = []
   try {
     const data: any = await $fetch(origin + '/api/v1/products')

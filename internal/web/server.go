@@ -108,6 +108,10 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
+			// 清理持久化会话
+			if _, err := s.db.Exec(`DELETE FROM sessions WHERE expires_at < ?`, time.Now().Unix()); err != nil {
+				log.Printf("cleanup sessions: %v", err)
+			}
 			s.sessMu.Lock()
 			now := time.Now()
 			for k, v := range s.sessions {
@@ -555,9 +559,11 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 	// 需根据 X-Forwarded-Proto 判断客户端是否为 HTTPS，否则 Cookie 不带 Secure。
 	secure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 	id := models.RandomToken(24)
-	s.sessMu.Lock()
-	s.sessions[id] = sessionInfo{AdminID: adminID, Expiry: time.Now().Add(12 * time.Hour)}
-	s.sessMu.Unlock()
+	expiry := time.Now().Add(12 * time.Hour)
+	// 会话持久化到数据库，服务重启不丢登录态。
+	if _, err := s.db.Exec(`INSERT INTO sessions(id, admin_id, expires_at) VALUES(?, ?, ?)`, id, adminID, expiry.Unix()); err != nil {
+		log.Printf("create session: %v", err)
+	}
 	// HTTPS 下使用 __Host- 前缀（强制 Secure + Path=/ + 无 Domain）；
 	// 纯 HTTP 部署（SKIP_SSL / 本地开发）下 __Host- 前缀会被浏览器拒绝，
 	// 此时回退为普通 Cookie 名，保证登录可用。
@@ -565,7 +571,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 	if secure {
 		name = "__Host-shop_session"
 	}
-	http.SetCookie(w, &http.Cookie{Name: name, Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
+	http.SetCookie(w, &http.Cookie{Name: name, Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, Expires: expiry})
 }
 
 func (s *Server) sessionID(r *http.Request) (string, bool) {
@@ -651,39 +657,34 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 	if !ok {
 		return 0, "", false
 	}
-	s.sessMu.Lock()
-	info, ok := s.sessions[id]
-	if ok && time.Now().Before(info.Expiry) {
-		s.sessions[id] = sessionInfo{AdminID: info.AdminID, Expiry: time.Now().Add(12 * time.Hour)}
-	} else {
-		delete(s.sessions, id)
-		ok = false
-	}
-	s.sessMu.Unlock()
-	if !ok {
+	var adminID int64
+	var expiresAt int64
+	err := s.db.QueryRow(`SELECT admin_id, expires_at FROM sessions WHERE id = ?`, id).Scan(&adminID, &expiresAt)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("session lookup: %v", err)
+		}
 		return 0, "", false
 	}
+	if time.Now().Unix() >= expiresAt {
+		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
+		return 0, "", false
+	}
+	// 滑动续期
+	_, _ = s.db.Exec(`UPDATE sessions SET expires_at = ? WHERE id = ?`, time.Now().Add(12*time.Hour).Unix(), id)
 	var role string
-	err := s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, info.AdminID).Scan(&role)
+	err = s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, adminID).Scan(&role)
 	if err != nil {
 		// 管理员已被删除：吊销其会话，避免降级为 viewer 继续访问。
-		s.sessMu.Lock()
-		delete(s.sessions, id)
-		s.sessMu.Unlock()
+		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
 		return 0, "", false
 	}
-	return info.AdminID, role, true
+	return adminID, role, true
 }
 
 // purgeAdminSessions 删除某管理员的全部会话（删除账号时调用）。
 func (s *Server) purgeAdminSessions(adminID int64) {
-	s.sessMu.Lock()
-	defer s.sessMu.Unlock()
-	for k, v := range s.sessions {
-		if v.AdminID == adminID {
-			delete(s.sessions, k)
-		}
-	}
+	_, _ = s.db.Exec(`DELETE FROM sessions WHERE admin_id = ?`, adminID)
 }
 
 // currentAdminID 返回当前管理员 ID。

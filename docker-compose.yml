@@ -44,6 +44,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      NUXT_PUBLIC_SITE_URL: ${SHOP_PUBLIC_BASE_URL:-https://${DOMAIN:-localhost}}
     depends_on:
       - liteshop
     networks:

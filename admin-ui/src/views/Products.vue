@@ -40,7 +40,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 
 const { t } = useI18n()
-const DEFAULT_IMAGE = ref('https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png')
+const DEFAULT_IMAGE = ref('/default-product.svg')
 const products = ref<any[]>([])
 const loading = ref(false)
 const currentPage = ref(1)

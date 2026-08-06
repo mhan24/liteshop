@@ -77,8 +77,8 @@ import { reactive, computed } from 'vue'
 const { t } = useI18n()
 const { money, stockText } = useSiteConfig()
 const api = useApi()
-const req = useRequestURL()
-const siteUrl = computed(() => req.origin + '/')
+const origin = useSiteOrigin()
+const siteUrl = computed(() => origin.value + '/')
 const { data: site } = await useAsyncData('site', () => api.get('/site'))
 
 const filters = reactive({ q: '', category: 'all', min_price: '', max_price: '' })
@@ -108,7 +108,7 @@ function reset() {
   refresh()
 }
 function imgSrc(url: string) {
-  return url || site.value?.default_product_image || 'https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png'
+  return url || site.value?.default_product_image || '/default-product.svg'
 }
 function productUrl(p: any) {
   const id = p.product?.id || p.id

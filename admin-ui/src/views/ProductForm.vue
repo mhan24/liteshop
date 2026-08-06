@@ -82,7 +82,7 @@ const pinned = ref(false)
 const active = ref(true)
 const form = reactive({ name: '', price: 0.01, description: '', image_url: '', category: '', sort_order: 0, faq: [] as { q: string; a: string }[], min_qty: 1, max_qty: 100, cost: 0, wholesale: [] as { min_qty: number; discount: number }[] })
 
-const DEFAULT_IMAGE = ref('https://storage.moegirl.org.cn/moegirl/commons/0/0d/%E8%B1%86%E5%8C%85AI.png')
+const DEFAULT_IMAGE = ref('/default-product.svg')
 const previewImg = computed(() => form.image_url.trim() || DEFAULT_IMAGE.value)
 function addFaq() {
   form.faq.push({ q: '', a: '' })

@@ -152,6 +152,7 @@
 </template>
 
 <script setup lang="ts">
+import * as echarts from 'echarts'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Clock, Warning, Failed } from '@element-plus/icons-vue'
@@ -206,34 +207,9 @@ onMounted(async () => {
 
 const trendChart = ref<HTMLElement | null>(null)
 const shareChart = ref<HTMLElement | null>(null)
-let echartsRef: any = null
-
-function loadEcharts(): Promise<any> {
-  return new Promise((resolve) => {
-    if (echartsRef) return resolve(echartsRef)
-    const id = 'echarts-script'
-    const done = () => {
-      echartsRef = (window as any).echarts
-      resolve(echartsRef)
-    }
-    if ((window as any).echarts) return done()
-    if (document.getElementById(id)) {
-      const check = setInterval(() => {
-        if ((window as any).echarts) { clearInterval(check); done() }
-      }, 200)
-      return
-    }
-    const s = document.createElement('script')
-    s.id = id
-    s.src = 'https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js'
-    s.onload = done
-    document.head.appendChild(s)
-  })
-}
 
 async function loadCharts() {
-  const echarts = await loadEcharts()
-  if (!echarts || !trendChart.value || !shareChart.value) return
+  if (!trendChart.value || !shareChart.value) return
   let report: any = {}
   try {
     report = await api.get('/admin/sales-report?days=14')

@@ -27,26 +27,22 @@ func (s *Server) registerDocs(mux *http.ServeMux) {
 	})))
 }
 
+// docsHTML 为纯本地文档页（无外部 CDN 依赖，避免供应链风险）。
 const docsHTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LiteShop API Docs</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css" integrity="sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn" crossorigin="anonymous" />
+  <title>LiteShop API 文档</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #111; }
+    a { color: #0f6b53; }
+    pre { background: #f5f5f5; padding: 12px; border-radius: 8px; overflow: auto; }
+  </style>
 </head>
 <body>
-  <div id="swagger-ui"></div>
-  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" integrity="sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep" crossorigin="anonymous"></script>
-  <script>
-    window.onload = function () {
-      window.ui = SwaggerUIBundle({
-        url: '/docs/openapi.json',
-        dom_id: '#swagger-ui',
-        deepLinking: true,
-        presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
-      })
-    }
-  </script>
+  <h1>LiteShop API 文档</h1>
+  <p>OpenAPI 3.0 规范：<a href="/docs/openapi.json">openapi.json</a></p>
+  <p>可使用任意 OpenAPI 工具（如 Swagger UI / Postman）导入上述 JSON。</p>
 </body>
 </html>`

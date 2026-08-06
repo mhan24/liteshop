@@ -33,7 +33,7 @@
 
 <script setup lang="ts">
 const route = useRoute()
-const req = useRequestURL()
+const origin = useSiteOrigin()
 const { t } = useI18n()
 const site = ref<any>({})
 try {
@@ -92,7 +92,7 @@ useHead(() => {
       { property: 'og:site_name', content: title },
       { property: 'og:title', content: maintenance.value ? mt : title },
       { property: 'og:description', content: desc },
-      { property: 'og:url', content: req.origin + route.path },
+      { property: 'og:url', content: origin.value + route.path },
       { property: 'og:image', content: ogImage },
       { name: 'twitter:card', content: 'summary_large_image' },
       { name: 'twitter:title', content: maintenance.value ? mt : title },
@@ -100,7 +100,7 @@ useHead(() => {
       { name: 'twitter:image', content: ogImage },
     ],
     link: [
-      { rel: 'canonical', href: req.origin + route.path },
+      { rel: 'canonical', href: origin.value + route.path },
       ...(st.favicon_url
         ? [{ rel: 'icon', type: faviconType(st.favicon_url), href: st.favicon_url }]
         : []),

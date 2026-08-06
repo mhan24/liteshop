@@ -213,7 +213,8 @@ func (s *Service) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (models.O
 	_ = s.repo.SetOrderStatus(o.ID, models.OrderDelivered)
 	_ = s.repo.AddLog(o.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
 	if s.SendPaid != nil {
-		s.SendPaid(o, cards)
+		// 异步发送，避免支付回调被 SMTP/Telegram 网络耗时阻塞（BEpusdt 应答超时重试）。
+		go s.SendPaid(o, cards)
 	}
 	return o, cards, true, nil
 }
@@ -271,7 +272,7 @@ func (s *Service) Redeliver(orderID int64) error {
 			_ = s.repo.AddLog(o.ID, "delivered", "管理员手动确认发卡", o.Status, models.OrderDelivered, 0)
 		}
 		if s.SendPaid != nil {
-			s.SendPaid(o, cards)
+			go s.SendPaid(o, cards)
 		}
 		return nil
 	}
@@ -296,7 +297,7 @@ func (s *Service) Redeliver(orderID int64) error {
 	_ = s.repo.SetOrderStatus(o.ID, models.OrderDelivered)
 	_ = s.repo.AddLog(o.ID, "delivered", "管理员补发卡密", o.Status, models.OrderDelivered, 0)
 	if s.SendPaid != nil {
-		s.SendPaid(o, cards)
+		go s.SendPaid(o, cards)
 	}
 	return nil
 }

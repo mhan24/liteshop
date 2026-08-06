@@ -1,7 +1,7 @@
 export default defineNuxtConfig({
   devServer: { port: 3001, host: '127.0.0.1' },
   runtimeConfig: {
-    public: { apiBase: '/api/v1' },
+    public: { apiBase: '/api/v1', siteUrl: '' },
   },
   nitro: {
     devProxy: {
