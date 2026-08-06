@@ -67,3 +67,20 @@
 
 **审查人**：AI Assistant
 **审查时间**：2026-08-06
+
+---
+
+## 六、修复记录（2026-08-06 同轮修复）
+
+| 编号 | 问题 | 修复内容 |
+| --- | --- | --- |
+| P2-1 | `/link` 邮箱轰炸 | 按**邮箱**冷却（5 分钟/邮箱，跨订单共享，内存态随清理任务回收），超限返回 429 |
+| P3-2 | 批量重发同步阻塞 | `apiAdminOrdersBatchResend` 改为异步发送 |
+| P3-3 | 会话每次请求写放大 | 滑动续期仅在剩余 <1 小时时刷新 |
+| P3-4 | Turnstile 未校验 hostname | siteverify 响应增加 hostname 与请求 Host 比对（跨站复用拒绝） |
+| P3-5 | modernc sqlite 过旧 | 升级 `modernc.org/sqlite` v1.34.4 → **v1.36.0**（SQLite 3.46 → 3.48，兼容 Go 1.22，`go build`/`vet`/`test` 全绿） |
+| P3-6 | 线上 storefront 缺站点源配置 | systemd 单元补齐 `NUXT_PUBLIC_SITE_URL` 与 `SHOP_SETUP_TOKEN` |
+| P3-7 | Turnstile 令牌走 GET query | 邮箱查询改从 `X-Turnstile-Response` 请求头读取，不再进 URL/日志 |
+| P3-1 | 旧订单兼容 | README 补充兼容说明（存量订单仍可用邮箱+订单号；新订单走令牌） |
+
+**验证**：服务器已更新至 `7817bf9`，三服务 active，`/health`/后台/公网均正常，systemd 环境变量已生效，`go vet`/`go test` 全绿，storefront 构建通过。
