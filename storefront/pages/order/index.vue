@@ -17,21 +17,21 @@
     </form>
 
     <div v-if="orders.length" class="mt-5 divide-y">
-      <div v-for="item in orders" :key="item.order_no || item.created_at" class="py-3 flex flex-wrap items-center justify-between gap-2">
+      <div v-for="(item, idx) in orders" :key="idx" class="py-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div class="font-semibold">{{ item.product_name }} x{{ item.qty }}</div>
           <div class="text-sm text-gray-500">
-            <span v-if="item.order_no">{{ t('orderNo') }}：{{ item.order_no }} · {{ date(item.created_at) }}</span>
-            <span v-else>{{ t('paidOrderSent') }} · {{ date(item.paid_at || item.created_at) }}</span>
+            <span>{{ t('paidOrderSent') }} · {{ date(item.paid_at || item.created_at) }}</span>
           </div>
           <span class="text-xs px-2 py-0.5 rounded-full" :class="badgeClass(item.status)">{{ statusText(item.status) }}</span>
         </div>
         <div class="flex gap-2">
-          <NuxtLink v-if="item.url" :to="item.url.replace(/^https?:\/\/[^/]+/, '')" class="text-brand font-semibold">{{ t('viewOrder') }}</NuxtLink>
-          <button v-else-if="item.order_no" class="text-brand font-semibold" @click="sendLink(item)">{{ t('sendLink') }}</button>
           <a v-if="item.payment_url" :href="item.payment_url" class="text-brand font-semibold">{{ t('continuePay') }}</a>
         </div>
       </div>
+    </div>
+    <div v-if="searched" class="mt-4">
+      <button class="text-sm text-brand font-semibold" @click="sendAllLinks">{{ t('sendAllLinks') }}</button>
     </div>
     <div ref="turnstileContainer" v-if="turnstilePending" class="mt-3"></div>
     <div v-else-if="searched && !loading" class="text-gray-500 mt-5">{{ t('noOrders') }}</div>
@@ -115,9 +115,9 @@ async function doLookup(token: string) {
     loading.value = false
   }
 }
-async function sendLink(item: any) {
+async function sendAllLinks() {
   try {
-    await api.post('/orders/' + item.order_no + '/link', { contact: form.contact })
+    await api.post('/orders/links', { contact: form.contact })
     alert(t('linkSent'))
   } catch (e: any) {
     alert(e?.data?.error || e?.message || t('linkFail'))

@@ -51,7 +51,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/orders", s.rateLimitMiddleware("orders_lookup", 20, s.apiOrdersByContact))
 	mux.HandleFunc("GET /api/v1/orders/{orderNo}", s.apiOrder)
 	mux.HandleFunc("POST /api/v1/orders/{orderNo}/cancel", s.apiCancelOrder)
-	mux.HandleFunc("POST /api/v1/orders/{orderNo}/link", s.rateLimitMiddleware("order_link", 10, s.apiSendOrderLink))
+	mux.HandleFunc("POST /api/v1/orders/links", s.rateLimitMiddleware("order_links", 10, s.apiSendOrderLinks))
 	mux.HandleFunc("GET /api/v1/pages/{slug}", s.apiPage)
 	mux.HandleFunc("POST /api/v1/lang", s.apiSetLang)
 
@@ -422,10 +422,11 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		go s.notifier.NotifySystemError("创建支付交易失败: " + err.Error())
 		// 若订单已创建（orderNo 非空）但支付网关失败，返回订单号供重试
+		// 错误细节只写日志/通知管理员，不向客户端回显（避免泄露网关/内部信息）。
 		if orderNo != "" {
-			writeJSON(w, 502, map[string]any{"error": err.Error(), "order_no": orderNo})
+			writeJSON(w, 502, map[string]any{"error": "下单失败，请重试或联系客服", "order_no": orderNo})
 		} else {
-			writeError(w, 502, err.Error())
+			writeError(w, 502, "下单失败，请重试或联系客服")
 		}
 		return
 	}
@@ -476,37 +477,19 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 			"created_at":   o.CreatedAt,
 			"paid_at":      o.PaidAt,
 		}
-		// 新订单（有查看令牌）不在查询响应中下发令牌 URL，避免"知道邮箱即可取卡密"；
-		// 买家可通过"发送查看链接"接口让链接发往订单登记邮箱。
-		viewURL := ""
-		if o.ViewToken == "" {
-			viewURL = "/order/" + o.OrderNo + "?contact=" + url.QueryEscape(contact)
-		}
+		// 不返回订单号/查看 URL（避免邮箱枚举与令牌外泄）：
+		// 买家通过"发送查看链接到邮箱"接口获取访问链接（只发往登记邮箱）。
 		if o.Status == models.OrderWaitingPayment {
-			item["order_no"] = o.OrderNo
-			if viewURL != "" {
-				item["url"] = viewURL
-			}
 			item["payment_url"] = o.PaymentURL
-		} else if o.Status != models.OrderPaid {
-			item["order_no"] = o.OrderNo
-			if viewURL != "" {
-				item["url"] = viewURL
-			}
 		}
 		out = append(out, item)
 	}
 	writeJSON(w, 200, map[string]any{"orders": out})
 }
 
-// apiSendOrderLink 把订单查看链接发送到订单登记邮箱（链接仅发往该邮箱，替代接口直接下发令牌）。
-func (s *Server) apiSendOrderLink(w http.ResponseWriter, r *http.Request) {
-	orderNo := r.PathValue("orderNo")
-	o, err := s.orders.Repo().GetOrderByNo(orderNo)
-	if err != nil {
-		writeError(w, 404, "订单不存在")
-		return
-	}
+// apiSendOrderLinks 把该邮箱下全部订单的查看链接发送到登记邮箱。
+// 无订单也返回 ok（模糊响应，不泄露邮箱是否在本站下过单）。
+func (s *Server) apiSendOrderLinks(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Contact string `json:"contact"`
 	}
@@ -515,8 +498,8 @@ func (s *Server) apiSendOrderLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	contact := strings.TrimSpace(input.Contact)
-	if contact == "" || contact != o.BuyerContact {
-		writeError(w, 403, "contact mismatch")
+	if !validEmail(contact) {
+		writeError(w, 400, "invalid email")
 		return
 	}
 	// 按邮箱冷却（5 分钟/邮箱，跨订单共享），防止向受害者邮箱轰炸。
@@ -535,14 +518,27 @@ func (s *Server) apiSendOrderLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "SMTP 未配置")
 		return
 	}
-	base := strings.TrimRight(s.paymentConfig().PublicBaseURL, "/")
-	link := base + "/order/" + o.OrderNo
-	if o.ViewToken != "" {
-		link += "?token=" + o.ViewToken
-	} else {
-		link += "?contact=" + url.QueryEscape(contact)
+	orders, err := s.orders.Repo().OrdersByContact(contact, 10)
+	if err != nil {
+		writeInternalError(w, err)
+		return
 	}
-	if err := s.notifier.SendOrderLink(o, link); err != nil {
+	base := strings.TrimRight(s.paymentConfig().PublicBaseURL, "/")
+	links := []string{}
+	for _, o := range orders {
+		link := base + "/order/" + o.OrderNo
+		if o.ViewToken != "" {
+			link += "?token=" + o.ViewToken
+		} else {
+			link += "?contact=" + url.QueryEscape(contact)
+		}
+		links = append(links, o.ProductName+" x"+strconv.Itoa(o.Qty)+": "+link)
+	}
+	if len(links) == 0 {
+		writeJSON(w, 200, map[string]any{"ok": true})
+		return
+	}
+	if err := s.notifier.SendOrderLinks(contact, links); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -719,7 +715,10 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	s.startSession(w, r, adminID)
+	if err := s.startSession(w, r, adminID); err != nil {
+		writeInternalError(w, err)
+		return
+	}
 	writeJSON(w, 200, map[string]any{"ok": true, "totp_required": false})
 }
 
@@ -766,7 +765,10 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.startSession(w, r, info.AdminID)
+	if err := s.startSession(w, r, info.AdminID); err != nil {
+		writeInternalError(w, err)
+		return
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1298,7 +1300,10 @@ func (s *Server) apiAdminOrderExpire(w http.ResponseWriter, r *http.Request) {
 			_ = s.payClient().CancelTransaction(tradeID)
 		}(o.TradeID)
 	}
-	_ = s.orders.Expire(id)
+	if err := s.orders.Expire(id); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
 	s.audit(r, "order_expire", "order", fmt.Sprintf("%d", id), "", "")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -1649,12 +1654,22 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 		"seo_description": "seo_description", "seo_keywords": "seo_keywords", "site_contact": "site_contact",
 		"site_friend_links": "site_friend_links", "site_copyright": "site_copyright",
 		"privacy_policy": "privacy_policy", "terms_of_service": "terms_of_service", "turnstile_site_key": "turnstile_site_key",
-		"maintenance_message": "maintenance_message", "default_product_image": "default_product_image",
-		"site_logo": "site_logo", "site_favicon": "site_favicon",
+		"maintenance_message": "maintenance_message",
 		"site_locale": "site_locale", "site_currency": "site_currency", "site_timezone": "site_timezone",
 		"stock_display_mode": "stock_display_mode",
 	} {
 		setIfPresent(key, field)
+	}
+	// 图片类 URL 仅接受 http/https 绝对地址（空值表示使用默认占位图）。
+	for _, f := range []string{"default_product_image", "site_logo", "site_favicon"} {
+		if v, ok := input[f]; ok {
+			u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)
+			if err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+			_ = db.SetSetting(s.db, f, u)
+		}
 	}
 	if v, ok := input["site_links"]; ok {
 		if items, ok := v.([]any); ok {
@@ -1673,6 +1688,9 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 					category = "contact"
 				}
 				clean = append(clean, map[string]string{"name": name, "url": strings.TrimSpace(str(m["url"])), "category": category})
+			}
+			if len(clean) > 50 {
+				clean = clean[:50]
 			}
 			if raw, err := json.Marshal(clean); err == nil {
 				_ = db.SetSetting(s.db, "site_links", string(raw))
@@ -1738,6 +1756,10 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		hash = models.HashPassword(input.NewPassword)
+	}
+	if len(username) > 64 {
+		writeError(w, 400, "username too long")
+		return
 	}
 	if _, err := s.db.Exec(`UPDATE admins SET username = ?, password_hash = ? WHERE id = ?`, username, hash, id); err != nil {
 		writeInternalError(w, err)
@@ -1851,6 +1873,10 @@ func (s *Server) apiAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(input.Username)
 	if username == "" {
 		writeError(w, 400, "username required")
+		return
+	}
+	if len(username) > 64 {
+		writeError(w, 400, "username too long")
 		return
 	}
 	if err := models.ValidatePasswordStrength(input.Password); err != nil {
@@ -2201,6 +2227,10 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(input.Username)
 	if username == "" {
 		username = "admin"
+	}
+	if len(username) > 64 {
+		writeError(w, 400, "用户名过长")
+		return
 	}
 	if err := models.ValidatePasswordStrength(input.Password); err != nil {
 		writeError(w, 400, err.Error())

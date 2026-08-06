@@ -86,8 +86,8 @@ install_go() {
     info "Go 已安装: $GOVER"
     return
   fi
-  info "安装 Go 1.22..."
-  local tarball="go1.22.12.linux-${GOARCH}.tar.gz"
+  info "安装 Go 1.26..."
+  local tarball="go1.26.5.linux-${GOARCH}.tar.gz"
   local url="https://go.dev/dl/${tarball}"
   curl -fsSL "$url" -o "/tmp/${tarball}"
   rm -rf /usr/local/go

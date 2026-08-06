@@ -3,6 +3,7 @@
     <el-card>
       <template #header><h2>{{ t('system.backup') }}</h2></template>
       <p class="muted">{{ t('system.backupNote') }}</p>
+      <p class="muted" style="color:#b45309">{{ t('system.backupWarning') }}</p>
       <el-space>
         <el-button type="primary" @click="download">{{ t('system.downloadBackup') }}</el-button>
         <el-upload :before-upload="handleUpload" :show-file-list="false" accept=".json,application/json">

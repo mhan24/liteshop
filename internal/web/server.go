@@ -412,13 +412,14 @@ func (s *Server) verifyTurnstileToken(token, remoteIP, host string) error {
 	if !result.Success {
 		return fmt.Errorf("siteverify rejected token: %s", strings.Join(result.ErrorCodes, ","))
 	}
-	// hostname 校验：令牌必须签发自当前请求的主机，防止跨站复用。
+	// hostname 校验：令牌必须签发自当前请求的主机，防止跨站复用；
+	// 以 IP 直连/本地开发时不强制（避免非域名部署被误拒）。
 	if result.Hostname != "" && host != "" {
 		reqHost := host
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			reqHost = h
 		}
-		if !strings.EqualFold(result.Hostname, reqHost) {
+		if net.ParseIP(reqHost) == nil && !strings.EqualFold(result.Hostname, reqHost) {
 			return fmt.Errorf("turnstile hostname mismatch: %s != %s", result.Hostname, reqHost)
 		}
 	}
@@ -518,8 +519,10 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 		}
 		if changed {
 			payPayload := s.notifier.OrderPayload(notify.EventPaymentSuccess, order, nil, nil)
+			delete(payPayload, "contact") // 买家邮件由 SendPaid 发送，避免重复
 			go s.notifier.Notify(notify.EventPaymentSuccess, payPayload)
 			deliverPayload := s.notifier.OrderPayload(notify.EventDelivered, order, cards, nil)
+			delete(deliverPayload, "contact") // 同上
 			go s.notifier.Notify(notify.EventDelivered, deliverPayload)
 		}
 	case "3":
@@ -575,7 +578,7 @@ func (s *Server) audit(r *http.Request, action, targetType, targetID, before, af
 	_ = db.AddAuditLog(s.db, s.currentAdminID(r), s.currentAdminName(r), action, targetType, targetID, before, after)
 }
 
-func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID int64) {
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID int64) error {
 	// 生产部署由 Caddy/Cloudflare 终止 TLS，Go 侧 r.TLS 恒为 nil，
 	// 需根据 X-Forwarded-Proto 判断客户端是否为 HTTPS，否则 Cookie 不带 Secure。
 	secure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
@@ -583,7 +586,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 	expiry := time.Now().Add(12 * time.Hour)
 	// 会话持久化到数据库，服务重启不丢登录态。
 	if _, err := s.db.Exec(`INSERT INTO sessions(id, admin_id, expires_at) VALUES(?, ?, ?)`, id, adminID, expiry.Unix()); err != nil {
-		log.Printf("create session: %v", err)
+		return fmt.Errorf("create session: %w", err)
 	}
 	// HTTPS 下使用 __Host- 前缀（强制 Secure + Path=/ + 无 Domain）；
 	// 纯 HTTP 部署（SKIP_SSL / 本地开发）下 __Host- 前缀会被浏览器拒绝，
@@ -593,6 +596,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 		name = "__Host-shop_session"
 	}
 	http.SetCookie(w, &http.Cookie{Name: name, Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, Expires: expiry})
+	return nil
 }
 
 func (s *Server) sessionID(r *http.Request) (string, bool) {

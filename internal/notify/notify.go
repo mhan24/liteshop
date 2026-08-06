@@ -216,16 +216,15 @@ func (n *Notifier) SendTestEmail(to string) error {
 	return n.sendMailWithConfig(cfg, to, "发卡系统 SMTP 测试", "SMTP OK")
 }
 
-// SendOrderLink 向订单登记邮箱发送查看链接（令牌只发往该邮箱）。
-func (n *Notifier) SendOrderLink(order models.Order, link string) error {
+// SendOrderLinks 向订单登记邮箱发送该邮箱下全部订单的查看链接（单封邮件，令牌只发往该邮箱）。
+func (n *Notifier) SendOrderLinks(to string, links []string) error {
 	cfg := n.CurrentConfig()
 	if cfg.SMTPHost == "" {
 		return errors.New("SMTP 未配置")
 	}
-	subject := "订单查看链接 - " + order.OrderNo
-	body := "您的订单 " + order.OrderNo + " 查看链接：\n\n" + link +
-		"\n\n请妥善保管此链接，不要转发给他人。"
-	return n.sendMailWithConfig(cfg, order.BuyerContact, subject, body)
+	body := "您的订单查看链接：\n\n" + strings.Join(links, "\n\n") +
+		"\n\n请妥善保管这些链接，不要转发给他人。"
+	return n.sendMailWithConfig(cfg, to, "订单查看链接", body)
 }
 
 func (n *Notifier) SendTestTelegram() error {
