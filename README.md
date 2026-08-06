@@ -179,7 +179,7 @@ curl -sSL https://raw.githubusercontent.com/mhan24/liteshop/main/install.sh | \
 
 脚本自动完成：系统检测 → 安装依赖/Go/Node/Caddy → 构建或解压产物 → 创建运行用户与目录 → 写入 systemd 单元 → 生成 Caddyfile 并自动签发 HTTPS 证书 → 启动服务。
 
-可用环境变量：`DOMAIN`（必填）、`EMAIL`（Let's Encrypt 邮箱）、`BRANCH`、`SKIP_SSL=1`（纯 http）、`BUILD_ARTIFACT`（预构建 tgz URL/路径）、`SHOP_USER`。
+可用环境变量：`DOMAIN`（必填）、`EMAIL`（Let's Encrypt 邮箱）、`BRANCH`、`SKIP_SSL=1`（纯 http）、`BUILD_ARTIFACT`（预构建 tgz URL/路径）、`SHOP_USER`、`SHOP_SETUP_TOKEN`（可选初始化令牌，防止 `/setup` 被抢占）。
 
 ### 手动部署
 

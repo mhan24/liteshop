@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -144,6 +145,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 	w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+	// 管理后台 SPA 的 CSP（/docs 依赖 CDN 脚本，不在此范围）。
+	if strings.HasPrefix(r.URL.Path, "/admin") {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -642,11 +647,12 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 	s.sessMu.Lock()
 	s.sessions[id] = sessionInfo{AdminID: adminID, Expiry: time.Now().Add(12 * time.Hour)}
 	s.sessMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "shop_session", Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
+	// __Host- 前缀：强制 Secure + Path=/ + 无 Domain，降低 Cookie 被降级/串站风险。
+	http.SetCookie(w, &http.Cookie{Name: "__Host-shop_session", Value: id + "." + s.signSession(id), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(12 * time.Hour)})
 }
 
 func (s *Server) sessionID(r *http.Request) (string, bool) {
-	c, err := r.Cookie("shop_session")
+	c, err := r.Cookie("__Host-shop_session")
 	if err != nil {
 		return "", false
 	}
@@ -689,6 +695,31 @@ func (s *Server) signSession(id string) string {
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
 
+// hashMaintenancePassword 返回维护密码的 SHA-256 十六进制哈希（用于存储）。
+func hashMaintenancePassword(pw string) string {
+	sum := sha256.Sum256([]byte(pw))
+	return hex.EncodeToString(sum[:])
+}
+
+// normalizeMaintenanceHash 兼容存量明文：已是 64 位十六进制则原样返回，否则视为明文转哈希。
+func normalizeMaintenanceHash(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) == 64 {
+		if _, err := hex.DecodeString(v); err == nil {
+			return strings.ToLower(v)
+		}
+	}
+	return hashMaintenancePassword(v)
+}
+
+// maintToken 生成维护模式解锁 Cookie：HMAC(session_secret, "maint:"+hash)，
+// 服务端密钥参与，避免离线爆破裸 SHA-256。
+func (s *Server) maintToken(hash string) string {
+	mac := hmac.New(sha256.New, []byte(s.sessionSecret()))
+	_, _ = mac.Write([]byte("maint:" + hash))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 func (s *Server) isAdmin(r *http.Request) bool {
 	_, _, ok := s.currentSession(r)
 	return ok
@@ -713,11 +744,26 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 		return 0, "", false
 	}
 	var role string
-	_ = s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, info.AdminID).Scan(&role)
-	if role == "" {
-		role = models.RoleViewer
+	err := s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, info.AdminID).Scan(&role)
+	if err != nil {
+		// 管理员已被删除：吊销其会话，避免降级为 viewer 继续访问。
+		s.sessMu.Lock()
+		delete(s.sessions, id)
+		s.sessMu.Unlock()
+		return 0, "", false
 	}
 	return info.AdminID, role, true
+}
+
+// purgeAdminSessions 删除某管理员的全部会话（删除账号时调用）。
+func (s *Server) purgeAdminSessions(adminID int64) {
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	for k, v := range s.sessions {
+		if v.AdminID == adminID {
+			delete(s.sessions, k)
+		}
+	}
 }
 
 // currentAdminID 返回当前管理员 ID。

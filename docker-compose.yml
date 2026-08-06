@@ -27,6 +27,7 @@ services:
       SHOP_DATABASE_PATH: /app/data/shop.db
       SHOP_PUBLIC_BASE_URL: ${SHOP_PUBLIC_BASE_URL:-https://${DOMAIN:-localhost}}
       BEPUSDT_NOTIFY_URL: ${BEPUSDT_NOTIFY_URL:-https://${DOMAIN:-localhost}/notify/bepusdt}
+      SHOP_SETUP_TOKEN: ${SHOP_SETUP_TOKEN:-}
     volumes:
       - liteshop_data:/app/data
     networks:

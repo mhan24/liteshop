@@ -27,6 +27,7 @@ type Config struct {
 	TelegramChatID    string
 	WebhookURL        string
 	WebhookSecret     string
+	SetupToken        string
 }
 
 func ParseTradeTypes(list string) []string {

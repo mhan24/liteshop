@@ -92,6 +92,7 @@ type Order struct {
 	Fiat               string
 	TradeType          string
 	BuyerContact       string
+	ViewToken          string
 	Status             string
 	TradeID            string
 	PaymentURL         string
@@ -156,6 +157,17 @@ func IsValidOrderTransition(from, to string) bool {
 func IsOrderFinal(status string) bool {
 	switch status {
 	case OrderCompleted, OrderPaymentFailed, OrderDeliveryFailed, OrderCancelled, OrderExpired:
+		return true
+	}
+	return false
+}
+
+// IsValidOrderStatus 判断是否为已知订单状态值（防止任意字符串写入）。
+func IsValidOrderStatus(s string) bool {
+	switch s {
+	case OrderCreated, OrderWaitingPayment, OrderPaid, OrderProcessing,
+		OrderDelivered, OrderCompleted, OrderPaymentFailed,
+		OrderDeliveryFailed, OrderCancelled, OrderExpired:
 		return true
 	}
 	return false

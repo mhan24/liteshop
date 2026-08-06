@@ -38,7 +38,12 @@ const route = useRoute()
 const { t } = useI18n()
 const { date: siteDate } = useSiteConfig()
 const api = useApi()
-const { data } = await useAsyncData(() => api.get('/orders/' + route.params.orderNo, { contact: route.query.contact }))
+const { data } = await useAsyncData(() =>
+  api.get('/orders/' + route.params.orderNo, {
+    contact: route.query.contact || undefined,
+    token: route.query.token || undefined,
+  })
+)
 const order = computed(() => (data.value as any)?.order || {})
 const cards = computed(() => (data.value as any)?.cards || [])
 
@@ -53,8 +58,12 @@ let timer: any = null
 async function cancel() {
   if (!confirm(t('cancelConfirm'))) return
   try {
-    const contact = encodeURIComponent(String(route.query.contact || ''))
-    await api.post('/orders/' + route.params.orderNo + '/cancel?contact=' + contact)
+    const token = String(route.query.token || '')
+    const contact = String(route.query.contact || '')
+    const query = token
+      ? 'token=' + encodeURIComponent(token)
+      : 'contact=' + encodeURIComponent(contact)
+    await api.post('/orders/' + route.params.orderNo + '/cancel?' + query)
     await refresh()
   } catch (e: any) {
     alert(e?.data?.error || e?.message || t('cancelFail'))
@@ -62,7 +71,10 @@ async function cancel() {
 }
 async function refresh() {
   try {
-    const res: any = await api.get('/orders/' + route.params.orderNo, { contact: route.query.contact })
+    const res: any = await api.get('/orders/' + route.params.orderNo, {
+      contact: route.query.contact || undefined,
+      token: route.query.token || undefined,
+    })
     data.value = res
   } catch {
     // 忽略轮询错误，稍后重试

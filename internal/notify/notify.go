@@ -160,7 +160,7 @@ func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
 		"contact":      order.BuyerContact,
 		"paid_at":      models.FormatBeijing(paidAt),
 		"cards":        strings.Join(cardLines, "\n"),
-		"order_url":    strings.TrimRight(cfg.PublicBaseURL, "/") + "/order/" + order.OrderNo,
+		"order_url":    orderURL(cfg.PublicBaseURL, order),
 		"site_title":   n.siteTitle(),
 	}
 	subject := renderTemplate(subjectTpl, data)
@@ -194,6 +194,15 @@ func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
 		}
 		_ = db.AddOrderLog(n.db, order.ID, "notify_sent", "通知已发送 ("+strings.Join(channels, "+")+")", order.Status, order.Status, 0, "")
 	}
+}
+
+// orderURL 构造订单查看地址；新订单携带查看令牌，避免依赖邮箱弱凭证。
+func orderURL(publicBaseURL string, order models.Order) string {
+	u := strings.TrimRight(publicBaseURL, "/") + "/order/" + order.OrderNo
+	if order.ViewToken != "" {
+		u += "?token=" + order.ViewToken
+	}
+	return u
 }
 
 func (n *Notifier) SendTestEmail(to string) error {

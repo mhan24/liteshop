@@ -24,6 +24,8 @@ DOMAIN="${DOMAIN:-}"
 EMAIL="${EMAIL:-}"
 BRANCH="${BRANCH:-main}"
 SKIP_SSL="${SKIP_SSL:-0}"
+# SHOP_SETUP_TOKEN: 可选, 设置后 /setup 必须携带该令牌才能初始化
+SHOP_SETUP_TOKEN="${SHOP_SETUP_TOKEN:-}"
 # BUILD_ARTIFACT: 预构建产物 tgz (含 shop 二进制 + storefront/.output), 提供则跳过源码构建, 加速部署
 BUILD_ARTIFACT="${BUILD_ARTIFACT:-}"
 SRC_DIR="/opt/liteshop-src"
@@ -158,6 +160,9 @@ setup_dirs() {
   id -u "$SHOP_USER" >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin "$SHOP_USER" 2>/dev/null || useradd -r -s /bin/false "$SHOP_USER"
   install -o "$SHOP_USER" -g "$SHOP_USER" -m 0755 /tmp/shop "$APP_DIR/shop"
   chown -R "$SHOP_USER:$SHOP_USER" "$APP_DIR"
+  # 数据目录与数据库文件仅运行用户可读写
+  chmod 700 "$APP_DIR/data"
+  chmod 600 "$APP_DIR"/data/shop.db* 2>/dev/null || true
 
   # 前台产物 → /opt/liteshop-storefront, 复制 public 到 chunks
   rm -rf "$SF_DIR"
@@ -181,8 +186,10 @@ Wants=network-online.target
 Type=simple
 User=cardshop
 Group=cardshop
+UMask=0077
 WorkingDirectory=/opt/cardshop
 ExecStart=/opt/cardshop/shop
+Environment="SHOP_SETUP_TOKEN=${SHOP_SETUP_TOKEN}"
 Restart=always
 RestartSec=2
 
@@ -200,6 +207,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/liteshop-storefront
 ExecStart=/usr/bin/node /opt/liteshop-storefront/server/index.mjs
+UMask=0077
 Environment=NODE_ENV=production
 Environment=PORT=3001
 Restart=always
@@ -264,6 +272,7 @@ ${ADDR} {
 
 	header {
 		-Server
+		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"

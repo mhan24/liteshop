@@ -91,6 +91,11 @@ func ensureCostSnapshotSource(db *sql.DB) error {
 	return nil
 }
 
+// ensureOrderViewToken 补充 orders.view_token 列（订单查看令牌，空值表示旧订单走邮箱回退）。
+func ensureOrderViewToken(db *sql.DB) error {
+	return addColumnIfMissing(db, "orders", "view_token", "ALTER TABLE orders ADD COLUMN view_token TEXT NOT NULL DEFAULT ''")
+}
+
 // addColumnIfMissing 仅当列不存在时执行 ALTER，保证迁移幂等。
 func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
 	exists, err := columnExists(db, table, column)

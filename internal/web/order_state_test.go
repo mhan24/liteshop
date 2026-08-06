@@ -218,6 +218,9 @@ func TestRedeliverIdempotent(t *testing.T) {
 	if err := repo.CreatePendingOrder(&orderRec); err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	// 合法前置状态：支付后发卡失败（与 TestRedeliverFromStock 一致）
+	_ = repo.ReleaseLockedCards(orderRec.ID)
+	_ = repo.SetOrderStatus(orderRec.ID, models.OrderDeliveryFailed)
 	// 连续补发两次：第二次应在已 delivered 且卡密已售时无副作用
 	if err := svc.Redeliver(orderRec.ID); err != nil {
 		t.Fatalf("redeliver 1: %v", err)

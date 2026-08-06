@@ -149,7 +149,7 @@ func (n *Notifier) OrderPayload(event string, order models.Order, cards []models
 		"contact":      order.BuyerContact,
 		"paid_at":      models.FormatBeijing(order.PaidAt),
 		"cards":        strings.Join(cardLines, "\n"),
-		"order_url":    strings.TrimRight(n.CurrentConfig().PublicBaseURL, "/") + "/order/" + order.OrderNo,
+		"order_url":    orderURL(n.CurrentConfig().PublicBaseURL, order),
 	}
 	for k, v := range extra {
 		p[k] = v

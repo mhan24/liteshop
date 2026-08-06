@@ -231,7 +231,10 @@ async function createOrder(token: string) {
     })
     if (res.payment_url) {
       window.open(res.payment_url, '_blank', 'noopener')
-      window.location.href = '/order/' + res.order_no + '?contact=' + encodeURIComponent(form.contact)
+      const q = res.token
+        ? 'token=' + encodeURIComponent(res.token)
+        : 'contact=' + encodeURIComponent(form.contact)
+      window.location.href = '/order/' + res.order_no + '?' + q
     }
   } catch (e: any) {
     const msg = e?.data?.error || e?.message || ''

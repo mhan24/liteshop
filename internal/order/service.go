@@ -125,6 +125,7 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		Fiat:               s.cfg().Fiat,
 		TradeType:          tradeType,
 		BuyerContact:       contact,
+		ViewToken:          models.RandomToken(24),
 		Status:             models.OrderCreated,
 		CreatedAt:          now,
 		UpdatedAt:          now,
@@ -143,7 +144,8 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		_ = s.repo.AddLog(order.ID, "coupon_used", fmt.Sprintf("优惠券抵扣 %d 分", discount), "", models.OrderCreated, 0)
 	}
 	cfg := s.cfg()
-	redirectURL := cfg.PublicBaseURL + "/order/" + order.OrderNo + "?contact=" + contact
+	// 订单页凭查看令牌访问（不再把买家邮箱放进跳转 URL）。
+	redirectURL := cfg.PublicBaseURL + "/order/" + order.OrderNo + "?token=" + order.ViewToken
 	paymentURL, tradeID, err := s.payFn().CreateTransaction(bepusdt.CreateInput{
 		OrderID:     order.OrderNo,
 		AmountYuan:  float64(order.AmountCents) / 100,
@@ -252,8 +254,12 @@ func (s *Service) Redeliver(orderID int64) error {
 	if err != nil {
 		return err
 	}
-	if o.Status == models.OrderPaymentFailed {
-		return fmt.Errorf("订单未支付，无法重新发卡")
+	switch o.Status {
+	case models.OrderPaid, models.OrderProcessing, models.OrderDeliveryFailed,
+		models.OrderDelivered, models.OrderCompleted:
+		// 允许补发/确认
+	default:
+		return fmt.Errorf("订单状态 %s 不允许补发卡密", o.Status)
 	}
 	cards, _ := s.repo.GetOrderCards(o.ID)
 	if len(cards) > 0 {
@@ -301,8 +307,19 @@ func (s *Service) SetStatus(orderID int64, to, message string) error {
 	if o.Status == to {
 		return nil
 	}
-	if o.PaidAt > 0 && (to == models.OrderCreated || to == models.OrderWaitingPayment) {
-		return fmt.Errorf("已支付订单不可回退到未支付状态")
+	// 取消/过期必须走原子流程（释放卡密 + 回滚优惠券），不能直接改状态。
+	switch to {
+	case models.OrderCancelled:
+		return s.Cancel(orderID)
+	case models.OrderExpired:
+		return s.Expire(orderID)
+	}
+	// 发卡失败订单的"确认已发"应走补发流程（校验卡密）。
+	if o.Status == models.OrderDeliveryFailed && to == models.OrderDelivered {
+		return s.Redeliver(orderID)
+	}
+	if !models.IsValidOrderTransition(o.Status, to) {
+		return fmt.Errorf("invalid order transition %s -> %s", o.Status, to)
 	}
 	_ = s.repo.SetOrderStatus(orderID, to)
 	_ = s.repo.AddLog(orderID, "status_changed", message, o.Status, to, 0)

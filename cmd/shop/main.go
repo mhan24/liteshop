@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"shop/internal/config"
 	"shop/internal/db"
@@ -13,6 +14,8 @@ import (
 
 func main() {
 	cfg := config.Load()
+	// 可选初始化令牌：设置后 /setup 需要携带该令牌才能完成初始化，防止站点暴露期间被抢占。
+	cfg.SetupToken = strings.TrimSpace(os.Getenv("SHOP_SETUP_TOKEN"))
 	if err := os.MkdirAll(filepath.Dir(cfg.DatabasePath), 0o755); err != nil {
 		log.Fatal(err)
 	}
