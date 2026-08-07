@@ -179,15 +179,18 @@ func (n *Notifier) NotifyLowStock(productID int64, productName string, available
 	if available > threshold {
 		return
 	}
-	// 限频: 每商品 30 分钟内只提醒一次
-	key := fmt.Sprintf("low_stock_notified_%d", productID)
-	last, err := db.GetSetting(n.db, key)
-	if err == nil && last != "" {
-		if ts, err2 := strconv.ParseInt(last, 10, 64); err2 == nil && time.Now().Unix()-ts < 1800 {
-			return
-		}
+	// 限频: 每商品 30 分钟内只提醒一次（low_stock_reminders 表，替代 settings 键膨胀）。
+	now := time.Now().Unix()
+	res, err := n.db.Exec(`INSERT INTO low_stock_reminders(product_id, notified_at) VALUES(?, ?)
+		ON CONFLICT(product_id) DO UPDATE SET notified_at = excluded.notified_at
+		WHERE low_stock_reminders.notified_at < excluded.notified_at - 1800`, productID, now)
+	if err != nil {
+		log.Printf("low stock reminder: %v", err)
+		return
 	}
-	_ = db.SetSetting(n.db, key, strconv.FormatInt(time.Now().Unix(), 10))
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return // 30 分钟内已提醒过
+	}
 	payload := map[string]string{
 		"event":        EventLowStock,
 		"product_name": productName,

@@ -137,6 +137,8 @@ func (c *Client) CancelTransaction(tradeID string) error {
 }
 
 func Sign(params map[string]string, token string) string {
+	// MD5 签名是 BEpusdt 网关协议的固定要求，无法单方面更换为更强的算法；
+	// 安全性依赖于双方共享的 API Token 与校验端恒定时间比较。
 	keys := make([]string, 0, len(params))
 	for k := range params {
 		if k == "signature" || params[k] == "" {

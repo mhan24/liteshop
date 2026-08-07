@@ -268,7 +268,7 @@ func FormatBeijing(ts int64) string {
 }
 
 func NewOrderNo() string {
-	var b [6]byte
+	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return "S" + time.Now().Format("20060102150405") + "-" + base64.RawURLEncoding.EncodeToString(b[:])
 }

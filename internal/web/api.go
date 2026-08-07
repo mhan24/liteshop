@@ -23,6 +23,17 @@ import (
 	"time"
 )
 
+// secretSettings 备份不导出、恢复不覆盖的密钥类配置键。
+var secretSettings = map[string]bool{
+	"session_secret":      true,
+	"bepusdt_api_token":   true,
+	"smtp_password":       true,
+	"telegram_bot_token":  true,
+	"webhook_secret":      true,
+	"turnstile_secret":    true,
+	"maintenance_password": true,
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -2128,8 +2139,10 @@ func (s *Server) apiAdminSystemBackup(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	// session_secret 恢复时被跳过（防止会话/TOTP 密钥失配），导出它没有意义且增加泄露面。
-	delete(settings, "session_secret")
+	// 备份不包含密钥类配置：避免明文密钥随文件外泄；恢复后需在后台重新填写。
+	for k := range secretSettings {
+		delete(settings, k)
+	}
 	w.Header().Set("Content-Disposition", "attachment; filename=liteshop-settings.json")
 	writeJSON(w, 200, map[string]any{"app": "liteshop", "settings": settings})
 }
@@ -2157,8 +2170,8 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 		if len(k) > 80 || len(v) > 20000 {
 			continue
 		}
-		// session_secret 用于签名与 TOTP 加密派生，禁止被备份覆盖，防止会话/TOTP 密钥失配
-		if k == "session_secret" {
+		// 密钥类配置禁止被备份覆盖（恢复后需重新填写）。
+		if secretSettings[k] {
 			continue
 		}
 		if err := db.SetSetting(s.db, k, v); err != nil {
