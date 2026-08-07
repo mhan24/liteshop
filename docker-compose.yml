@@ -19,7 +19,7 @@ services:
       target: shop
       args:
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
-    image: liteshop/shop:${TAG:-latest}
+    image: liteshop/shop:${TAG:-0.1.0}
     container_name: liteshop
     restart: unless-stopped
     environment:
@@ -38,7 +38,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: storefront
-    image: liteshop/storefront:${TAG:-latest}
+    image: liteshop/storefront:${TAG:-0.1.0}
     container_name: liteshop-storefront
     restart: unless-stopped
     environment:

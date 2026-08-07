@@ -25,12 +25,12 @@ import (
 
 // secretSettings 备份不导出、恢复不覆盖的密钥类配置键。
 var secretSettings = map[string]bool{
-	"session_secret":      true,
-	"bepusdt_api_token":   true,
-	"smtp_password":       true,
-	"telegram_bot_token":  true,
-	"webhook_secret":      true,
-	"turnstile_secret":    true,
+	"session_secret":       true,
+	"bepusdt_api_token":    true,
+	"smtp_password":        true,
+	"telegram_bot_token":   true,
+	"webhook_secret":       true,
+	"turnstile_secret":     true,
 	"maintenance_password": true,
 }
 
@@ -1675,7 +1675,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 		"site_friend_links": "site_friend_links", "site_copyright": "site_copyright",
 		"privacy_policy": "privacy_policy", "terms_of_service": "terms_of_service", "turnstile_site_key": "turnstile_site_key",
 		"maintenance_message": "maintenance_message",
-		"site_locale": "site_locale", "site_currency": "site_currency", "site_timezone": "site_timezone",
+		"site_locale":         "site_locale", "site_currency": "site_currency", "site_timezone": "site_timezone",
 		"stock_display_mode": "stock_display_mode",
 	} {
 		setIfPresent(key, field)
@@ -2332,7 +2332,7 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 // Version 为构建版本号（可由 -ldflags 覆盖）。
-var Version = "v1.2.0"
+var Version = "0.1.0"
 
 // apiAdminVersion 返回当前版本并异步检查 GitHub 最新 release。
 func (s *Server) apiAdminVersion(w http.ResponseWriter, r *http.Request) {
