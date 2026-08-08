@@ -10,6 +10,7 @@ export default defineNuxtConfig({
   },
   routeRules: {
     // 动态页面不缓存，避免浏览器/CDN 端出旧页面（如订单/商品页的旧跳转逻辑）
+    '/': { headers: { 'cache-control': 'no-store' } },
     '/order/**': { headers: { 'cache-control': 'no-store' } },
     '/product/**': { headers: { 'cache-control': 'no-store' } },
     '/page/**': { headers: { 'cache-control': 'no-store' } },

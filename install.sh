@@ -265,7 +265,7 @@ ${ADDR} {
 	header /sitemap.xml Cache-Control "public, max-age=3600"
 	header /favicon.svg Cache-Control "public, max-age=86400"
 
-	@dynamic path /api/* /notify/* /admin/* /order* /product* /page* /setup /health
+	@dynamic path / /api/* /notify/* /admin/* /order* /product* /page* /setup /health
 	header @dynamic Cache-Control "no-store"
 	header @dynamic X-Robots-Tag "noindex, nofollow"
 
