@@ -54,7 +54,17 @@ type Server struct {
 	linkMu   sync.Mutex
 	linkSent map[string]int64 // 订单查看链接邮件冷却（按邮箱）
 
+	loginMu    sync.Mutex
+	loginFails map[string]loginGuard // 登录失败锁定（按用户名）
+
 	totpCipher *security.Cipher
+}
+
+// loginGuard 登录失败记录。
+type loginGuard struct {
+	fails       int
+	lockedUntil int64
+	lastAttempt int64
 }
 
 type sessionInfo struct {
@@ -92,6 +102,7 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 		sessions:  make(map[string]sessionInfo),
 		limiters:  make(map[string]*RateLimiter),
 		linkSent:  make(map[string]int64),
+		loginFails: make(map[string]loginGuard),
 	}
 	// 异步任务 worker：邮件 / Telegram / Webhook（HTTP 层只发布事件）。
 	bus.Start(context.Background(), 2, s.notifier.Handler())
@@ -142,6 +153,15 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 				}
 			}
 			s.linkMu.Unlock()
+			// 清理登录锁定记录（超过 10 分钟）
+			s.loginMu.Lock()
+			now := time.Now().Unix()
+			for k, v := range s.loginFails {
+				if now-v.lastAttempt > 600 {
+					delete(s.loginFails, k)
+				}
+			}
+			s.loginMu.Unlock()
 			s.sessMu.Lock()
 			now := time.Now()
 			for k, v := range s.sessions {
@@ -731,6 +751,35 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 // purgeAdminSessions 删除某管理员的全部会话（删除账号时调用）。
 func (s *Server) purgeAdminSessions(adminID int64) {
 	_ = db.DeleteSessionsByAdmin(s.db, adminID)
+}
+
+// loginLocked 判断用户名是否处于锁定状态。
+func (s *Server) loginLocked(username string) bool {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	return s.loginFails[username].lockedUntil > time.Now().Unix()
+}
+
+// recordLoginFail 记录一次登录失败；连续失败 5 次锁定 10 分钟。
+func (s *Server) recordLoginFail(username string) {
+	now := time.Now().Unix()
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	g := s.loginFails[username]
+	g.fails++
+	g.lastAttempt = now
+	if g.fails >= 5 {
+		g.lockedUntil = now + 600
+		g.fails = 0
+	}
+	s.loginFails[username] = g
+}
+
+// clearLoginFails 登录成功后清除失败记录。
+func (s *Server) clearLoginFails(username string) {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	delete(s.loginFails, username)
 }
 
 // currentAdminID 返回当前管理员 ID。

@@ -674,7 +674,13 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	adminID, hash, totpSecret, totpEnabled, err := db.AdminByUsername(s.db, strings.TrimSpace(input.Username))
+	username := strings.TrimSpace(input.Username)
+	// 账号锁定：连续失败 5 次锁定 10 分钟。
+	if s.loginLocked(username) {
+		writeError(w, 403, "尝试次数过多，账号已锁定，请 10 分钟后再试")
+		return
+	}
+	adminID, hash, totpSecret, totpEnabled, err := db.AdminByUsername(s.db, username)
 	if err == db.ErrAdminNotFound {
 		// 恒定时间：对不存在用户也执行一次 PBKDF2，避免用户名枚举时间侧信道。
 		_ = models.HashPassword(input.Password)
@@ -686,9 +692,15 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !models.CheckPassword(input.Password, hash) {
-		writeError(w, 403, "invalid credentials")
+		s.recordLoginFail(username)
+		msg := "invalid credentials"
+		if s.loginLocked(username) {
+			msg = "尝试次数过多，账号已锁定，请 10 分钟后再试"
+		}
+		writeError(w, 403, msg)
 		return
 	}
+	s.clearLoginFails(username)
 	if totpEnabled {
 		if strings.TrimSpace(input.Otp) == "" {
 			// 未提供 OTP，返回待验证状态
