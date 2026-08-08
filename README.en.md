@@ -41,6 +41,7 @@ An automated digital-goods delivery (card / activation-code) shop built with **G
 - SQLite storage (pure Go, no CGO); no application-level environment variables — **all configuration is written to the database** during `/setup` and the admin panel
 - Config system: `settings` (system config) + `secrets` (AES-GCM encrypted: BEpusdt token / SMTP password / Telegram token / Webhook secret / Turnstile secret / maintenance password)
 - Task system: in-process goroutine + channel workers (mail / Telegram / Webhook); HTTP layer only publishes events
+- Background jobs (cron + worker): auto-expire unpaid orders, retry failed emails, session/log cleanup, daily database backup
 - BEpusdt integration: create / cancel transactions, callback verification (MD5), idempotent single-transaction delivery
 - Admin security: PBKDF2-SHA256 passwords, TOTP 2FA, **account lockout after 5 failed logins for 10 minutes**, timing-equalized login
 - Security: RBAC, audit logs, rate limiting across endpoints, Turnstile, CSP, HSTS, security headers, CSV injection guard, parameterized SQL
@@ -127,7 +128,7 @@ internal/db/            database layer: sqlite.go / postgres.go (future) / migra
 internal/models/        models & helpers
 internal/payment/       BEpusdt integration
 internal/notify/        notifications (event templates / mail / Telegram / Webhook)
-internal/jobs/          async task bus (goroutine + channel)
+internal/jobs/          background jobs: scheduler + order_expire / email_retry / cleanup / backup
 internal/security/      TOTP & AES-GCM cipher
 internal/config/        configuration defaults
 admin-ui/               Element Plus admin (src/api|views|stores|hooks|utils|components)

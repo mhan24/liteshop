@@ -41,6 +41,7 @@ English: [README.en.md](README.en.md)
 - SQLite 存储（纯 Go，无 CGO）；无应用级环境变量，**全部配置在初始化与管理后台写入数据库**
 - 配置系统：`settings`（系统配置）+ `secrets`（敏感配置，AES-GCM 加密：BEpusdt Token / SMTP 密码 / Telegram Token / Webhook Secret / Turnstile Secret / 维护密码）
 - 任务系统：进程内 goroutine + channel 异步 worker（邮件 / Telegram / Webhook），HTTP 层只发布事件
+- 后台任务（cron + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份
 - 支付对接：创建 / 取消交易、回调验签（MD5）、单事务幂等发卡
 - 管理员安全：PBKDF2-SHA256 密码、TOTP 2FA、**登录失败 5 次锁定 10 分钟**、登录时序均摊防枚举
 - 安全：RBAC、审计日志、全接口限流、Turnstile、CSP、HSTS、安全响应头、CSV 注入防护、SQL 全参数化
@@ -127,7 +128,7 @@ internal/db/            数据库层：sqlite.go / postgres.go（未来备用）
 internal/models/        模型与工具
 internal/payment/       BEpusdt 支付对接
 internal/notify/        通知（事件模板 / 邮件 / Telegram / Webhook）
-internal/jobs/          异步任务总线（goroutine + channel）
+internal/jobs/          后台任务：调度器 + order_expire / email_retry / cleanup / backup
 internal/security/      TOTP 与 AES-GCM 加密
 internal/config/        配置默认值
 admin-ui/               Element Plus 后台（src/api|views|stores|hooks|utils|components）

@@ -24,6 +24,7 @@ import (
 	"shop/internal/payment"
 	"shop/internal/config"
 	"shop/internal/db"
+	"shop/internal/jobs"
 	"shop/internal/repository"
 	"shop/internal/models"
 	"shop/internal/notify"
@@ -126,59 +127,45 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	mux.HandleFunc("GET /admin", s.adminIndex)
 	mux.HandleFunc("GET /admin/{path...}", s.adminIndex)
 	s.mux = mux
-	// 定期清理过期 session（含 2FA 待验证 token）与限流器，防止内存无限增长
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			// 清理持久化会话
-			if err := db.DeleteExpiredSessions(s.db, time.Now().Unix()); err != nil {
-				log.Printf("cleanup sessions: %v", err)
-			}
-			// 日志保留 180 天，防止无限增长
-			retention := time.Now().Add(-180 * 24 * time.Hour).Unix()
-			if err := db.DeleteOldAuditLogs(s.db, retention); err != nil {
-				log.Printf("cleanup audit_logs: %v", err)
-			}
-			if err := db.DeleteOldOrderLogs(s.db, retention); err != nil {
-				log.Printf("cleanup order_logs: %v", err)
-			}
-			// 清理链接邮件冷却记录
-			cutoff := time.Now().Add(-10 * time.Minute).Unix()
-			s.linkMu.Lock()
-			for k, v := range s.linkSent {
-				if v < cutoff {
-					delete(s.linkSent, k)
-				}
-			}
-			s.linkMu.Unlock()
-			// 清理登录锁定记录（超过 10 分钟）
-			s.loginMu.Lock()
-			lnow := time.Now().Unix()
-			for k, v := range s.loginFails {
-				if lnow-v.lastAttempt > 600 {
-					delete(s.loginFails, k)
-				}
-			}
-			s.loginMu.Unlock()
-			s.sessMu.Lock()
-			now := time.Now()
-			for k, v := range s.sessions {
-				if now.After(v.Expiry) {
-					delete(s.sessions, k)
-				}
-			}
-			s.sessMu.Unlock()
-			s.cleanupLimiters()
-			// 补偿清理超时未支付的 created/waiting 订单（释放卡密+回滚券）
-			if n, err := s.orders.ExpireStale(s.paymentConfigForService().TimeoutSec); err != nil {
-				log.Printf("expire stale orders: %v", err)
-			} else if n > 0 {
-				log.Printf("expired %d stale orders", n)
-			}
-		}
-	}()
+	// 后台任务系统（cron + worker）：订单过期 / 邮件重试 / 清理 / 备份。
+	scheduler := jobs.NewScheduler()
+	scheduler.Add("order_expire", 5*time.Minute, jobs.OrderExpireJob(s.orders, func() int { return s.paymentConfigForService().TimeoutSec }))
+	scheduler.Add("email_retry", time.Minute, jobs.EmailRetryJob(s.db, s.notifier.SendRawMail))
+	scheduler.Add("cleanup", 5*time.Minute, jobs.CleanupJob(s.db, s.cleanupMemory))
+	scheduler.Add("backup", 24*time.Hour, jobs.BackupJob(s.dbPath, 7))
+	scheduler.Start(context.Background())
 	return s, nil
+}
+
+// cleanupMemory 清理进程内状态（2FA 令牌、登录锁定、链接冷却、限流器）。
+func (s *Server) cleanupMemory() {
+	cutoff := time.Now().Add(-10 * time.Minute).Unix()
+	s.linkMu.Lock()
+	for k, v := range s.linkSent {
+		if v < cutoff {
+			delete(s.linkSent, k)
+		}
+	}
+	s.linkMu.Unlock()
+
+	s.loginMu.Lock()
+	lnow := time.Now().Unix()
+	for k, v := range s.loginFails {
+		if lnow-v.lastAttempt > 600 {
+			delete(s.loginFails, k)
+		}
+	}
+	s.loginMu.Unlock()
+
+	s.sessMu.Lock()
+	now := time.Now()
+	for k, v := range s.sessions {
+		if now.After(v.Expiry) {
+			delete(s.sessions, k)
+		}
+	}
+	s.sessMu.Unlock()
+	s.cleanupLimiters()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

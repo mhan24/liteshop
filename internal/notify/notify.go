@@ -164,6 +164,7 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 	if cfg.SMTPHost != "" && strings.Contains(order.BuyerContact, "@") {
 		if err := n.sendMailWithConfig(cfg, order.BuyerContact, subject, mailBody); err != nil {
 			log.Printf("send paid mail failed: order=%s to=%s err=%v", order.OrderNo, order.BuyerContact, err)
+			n.enqueueFailedMail(order.BuyerContact, subject, mailBody, order.ID)
 			_ = db.AddOrderLog(n.db, order.ID, "notify_failed", "邮件通知发送失败: "+err.Error(), order.Status, order.Status, 0, "smtp")
 		} else {
 			mailSent = true
@@ -199,6 +200,7 @@ func (n *Notifier) Handler() func(jobs.Job) {
 			cfg := n.CurrentConfig()
 			if err := n.sendMailWithConfig(cfg, j.To, j.Subject, j.Body); err != nil {
 				log.Printf("notify mail failed to=%s err=%v", j.To, err)
+				n.enqueueFailedMail(j.To, j.Subject, j.Body, 0)
 			}
 		case jobs.KindTelegram:
 			cfg := n.CurrentConfig()
@@ -218,6 +220,23 @@ func (n *Notifier) publish(j jobs.Job) {
 		return
 	}
 	n.Handler()(j)
+}
+
+// SendRawMail 直接发送一封邮件（邮件重试任务使用）。
+func (n *Notifier) SendRawMail(to, subject, body string) error {
+	cfg := n.CurrentConfig()
+	if cfg.SMTPHost == "" {
+		return errors.New("SMTP 未配置")
+	}
+	return n.sendMailWithConfig(cfg, to, subject, body)
+}
+
+// enqueueFailedMail 邮件发送失败后写入重试队列。
+func (n *Notifier) enqueueFailedMail(to, subject, body string, orderID int64) {
+	if n.db == nil {
+		return
+	}
+	_ = db.EnqueueMail(n.db, to, subject, body, orderID, time.Now().Add(time.Minute).Unix())
 }
 
 // orderURL 构造订单查看地址；新订单携带查看令牌，避免依赖邮箱弱凭证。
