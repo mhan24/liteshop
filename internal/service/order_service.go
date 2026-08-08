@@ -1,12 +1,12 @@
-package order
+package service
 
 import (
 	"errors"
 	"fmt"
 	"strings"
 
-	"shop/internal/bepusdt"
-	"shop/internal/db/repository"
+	"shop/internal/payment"
+	"shop/internal/repository"
 	"shop/internal/models"
 )
 
@@ -20,9 +20,9 @@ type PaymentConfig struct {
 }
 
 // Service 订单业务逻辑。
-type Service struct {
+type OrderService struct {
 	repo  *repository.OrderRepository
-	payFn func() *bepusdt.Client
+	payFn func() *payment.Client
 	cfgFn func() PaymentConfig
 	// SendPaid 发卡通知回调（注入 web 层的 notifier）。
 	SendPaid func(order models.Order, cards []models.Card)
@@ -49,13 +49,13 @@ func wrapCouponError(err error) error {
 	return err
 }
 
-func NewService(repo *repository.OrderRepository, payFn func() *bepusdt.Client, cfgFn func() PaymentConfig) *Service {
-	return &Service{repo: repo, payFn: payFn, cfgFn: cfgFn}
+func NewOrderService(repo *repository.OrderRepository, payFn func() *payment.Client, cfgFn func() PaymentConfig) *Service {
+	return &OrderService{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
 
 // ExpireStale 清理长时间停留 created / waiting_payment 的订单（释放卡密并回滚优惠券）。
 // 用作进程崩溃/异常中断后的补偿清理。返回处理的订单数。
-func (s *Service) ExpireStale(timeoutSec int) (int, error) {
+func (s *OrderService) ExpireStale(timeoutSec int) (int, error) {
 	if timeoutSec <= 0 {
 		timeoutSec = 3600
 	}
@@ -77,7 +77,7 @@ func (s *Service) ExpireStale(timeoutSec int) (int, error) {
 	return expired, nil
 }
 
-func (s *Service) cfg() PaymentConfig {
+func (s *OrderService) cfg() PaymentConfig {
 	if s.cfgFn != nil {
 		return s.cfgFn()
 	}
@@ -87,7 +87,7 @@ func (s *Service) cfg() PaymentConfig {
 // CreateOrder 创建订单并生成 BEpusdt 交易。
 // 支持批发价（阶梯折扣）与优惠券（couponCode 可空）。
 // 返回订单号、支付地址、优惠券抵扣金额（分）、优惠券 ID（0=未用）、错误。
-func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, couponCode string) (string, string, int64, int64, error) {
+func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType, couponCode string) (string, string, int64, int64, error) {
 	if qty <= 0 {
 		qty = 1
 	}
@@ -163,45 +163,45 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		}
 		return "", "", 0, 0, err
 	}
-	_ = s.repo.AddLog(order.ID, "order_created", "订单已创建", "", models.OrderCreated, 0)
+	_ = s.repo.AddLog(service.ID, "order_created", "订单已创建", "", models.OrderCreated, 0)
 	if discount > 0 {
-		if err := s.repo.UseCoupon(couponID, order.OrderNo, discount); err != nil {
-			_ = s.repo.ReleaseLockedCards(order.ID)
-			_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
-			_ = s.repo.AddLog(order.ID, "coupon_failed", "优惠券占用失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
-			return order.OrderNo, "", 0, 0, wrapCouponError(err)
+		if err := s.repo.UseCoupon(couponID, service.OrderNo, discount); err != nil {
+			_ = s.repo.ReleaseLockedCards(service.ID)
+			_ = s.repo.SetOrderStatus(service.ID, models.OrderPaymentFailed)
+			_ = s.repo.AddLog(service.ID, "coupon_failed", "优惠券占用失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
+			return service.OrderNo, "", 0, 0, wrapCouponError(err)
 		}
-		_ = s.repo.AddLog(order.ID, "coupon_used", fmt.Sprintf("优惠券抵扣 %d 分", discount), "", models.OrderCreated, 0)
+		_ = s.repo.AddLog(service.ID, "coupon_used", fmt.Sprintf("优惠券抵扣 %d 分", discount), "", models.OrderCreated, 0)
 	}
 	// 零金额订单：跳过 BEpusdt 支付，直接置为已支付并发卡。
-	if order.AmountCents == 0 {
+	if service.AmountCents == 0 {
 		now := models.Now()
-		delivered, err := s.repo.CompleteFreeOrder(order.ID, now)
+		delivered, err := s.repo.CompleteFreeOrder(service.ID, now)
 		if err != nil {
-			return order.OrderNo, "", 0, 0, err
+			return service.OrderNo, "", 0, 0, err
 		}
-		order.Status = models.OrderPaid
-		order.PaidAt = now
-		_ = s.repo.AddLog(order.ID, "payment_success", "免费订单（100% 折扣）直接完成", models.OrderCreated, models.OrderPaid, 0)
-		cards, _ := s.repo.GetOrderCards(order.ID)
+		service.Status = models.OrderPaid
+		service.PaidAt = now
+		_ = s.repo.AddLog(service.ID, "payment_success", "免费订单（100% 折扣）直接完成", models.OrderCreated, models.OrderPaid, 0)
+		cards, _ := s.repo.GetOrderCards(service.ID)
 		if delivered == 0 || len(cards) == 0 {
-			_ = s.repo.SetOrderStatus(order.ID, models.OrderDeliveryFailed)
-			_ = s.repo.AddLog(order.ID, "delivery_failed", "发卡失败：无可用卡密", models.OrderPaid, models.OrderDeliveryFailed, 0)
-			return order.OrderNo, "", discount, couponID, ErrNoCards
+			_ = s.repo.SetOrderStatus(service.ID, models.OrderDeliveryFailed)
+			_ = s.repo.AddLog(service.ID, "delivery_failed", "发卡失败：无可用卡密", models.OrderPaid, models.OrderDeliveryFailed, 0)
+			return service.OrderNo, "", discount, couponID, ErrNoCards
 		}
-		_ = s.repo.SetOrderStatus(order.ID, models.OrderDelivered)
-		_ = s.repo.AddLog(order.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
+		_ = s.repo.SetOrderStatus(service.ID, models.OrderDelivered)
+		_ = s.repo.AddLog(service.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
 		if s.SendPaid != nil {
 			go s.SendPaid(order, cards)
 		}
-		return order.OrderNo, "", discount, couponID, nil
+		return service.OrderNo, "", discount, couponID, nil
 	}
 	cfg := s.cfg()
 	// 订单页凭查看令牌访问（不再把买家邮箱放进跳转 URL）。
-	redirectURL := cfg.PublicBaseURL + "/order/" + order.OrderNo + "?token=" + order.ViewToken
-	paymentURL, tradeID, err := s.payFn().CreateTransaction(bepusdt.CreateInput{
-		OrderID:     order.OrderNo,
-		AmountYuan:  float64(order.AmountCents) / 100,
+	redirectURL := cfg.PublicBaseURL + "/order/" + service.OrderNo + "?token=" + service.ViewToken
+	paymentURL, tradeID, err := s.payFn().CreateTransaction(payment.CreateInput{
+		OrderID:     service.OrderNo,
+		AmountYuan:  float64(service.AmountCents) / 100,
 		Fiat:        cfg.Fiat,
 		TradeType:   tradeType,
 		Name:        p.Name,
@@ -210,27 +210,27 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		TimeoutSec:  cfg.TimeoutSec,
 	})
 	if err != nil {
-		_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
-		_ = s.repo.AddLog(order.ID, "payment_failed", "创建 BEpusdt 交易失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
+		_ = s.repo.SetOrderStatus(service.ID, models.OrderPaymentFailed)
+		_ = s.repo.AddLog(service.ID, "payment_failed", "创建 BEpusdt 交易失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
 		// 回滚优惠券用量（支付失败，券不应被消耗）
 		if discount > 0 {
-			if refunded, err := s.repo.RefundByOrderNo(order.OrderNo); err != nil {
-				_ = s.repo.AddLog(order.ID, "coupon_refund_failed", "优惠券回滚失败: "+err.Error(), models.OrderPaymentFailed, models.OrderPaymentFailed, 0)
+			if refunded, err := s.repo.RefundByOrderNo(service.OrderNo); err != nil {
+				_ = s.repo.AddLog(service.ID, "coupon_refund_failed", "优惠券回滚失败: "+err.Error(), models.OrderPaymentFailed, models.OrderPaymentFailed, 0)
 			} else if !refunded {
-				_ = s.repo.AddLog(order.ID, "coupon_refund_missing", "支付失败但未找到优惠券使用记录", models.OrderPaymentFailed, models.OrderPaymentFailed, 0)
+				_ = s.repo.AddLog(service.ID, "coupon_refund_missing", "支付失败但未找到优惠券使用记录", models.OrderPaymentFailed, models.OrderPaymentFailed, 0)
 			}
 		}
-		return order.OrderNo, "", discount, couponID, err
+		return service.OrderNo, "", discount, couponID, err
 	}
-	_ = s.repo.SetTradeInfo(order.ID, tradeID, paymentURL)
-	_ = s.repo.SetOrderStatus(order.ID, models.OrderWaitingPayment)
-	_ = s.repo.AddLog(order.ID, "transaction_created", "BEpusdt 交易已创建", models.OrderCreated, models.OrderWaitingPayment, 0)
-	return order.OrderNo, paymentURL, discount, couponID, nil
+	_ = s.repo.SetTradeInfo(service.ID, tradeID, paymentURL)
+	_ = s.repo.SetOrderStatus(service.ID, models.OrderWaitingPayment)
+	_ = s.repo.AddLog(service.ID, "transaction_created", "BEpusdt 交易已创建", models.OrderCreated, models.OrderWaitingPayment, 0)
+	return service.OrderNo, paymentURL, discount, couponID, nil
 }
 
 // MarkPaidAndDeliver 处理支付成功回调：置为 paid 并发卡。
 // 返回订单、卡密、是否发生变更。
-func (s *Service) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (models.Order, []models.Card, bool, error) {
+func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (models.Order, []models.Card, bool, error) {
 	o, err := s.repo.GetOrderByNo(orderNo)
 	if err != nil {
 		return models.Order{}, nil, false, err
@@ -273,7 +273,7 @@ func (s *Service) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (models.O
 var ErrNoCards = errors.New("order paid but no cards delivered")
 
 // Cancel 取消订单（释放卡密）。
-func (s *Service) Cancel(orderID int64) error {
+func (s *OrderService) Cancel(orderID int64) error {
 	o, err := s.repo.GetOrderByID(orderID)
 	if err != nil {
 		return err
@@ -288,7 +288,7 @@ func (s *Service) Cancel(orderID int64) error {
 }
 
 // Expire 过期订单（释放卡密）。
-func (s *Service) Expire(orderID int64) error {
+func (s *OrderService) Expire(orderID int64) error {
 	o, err := s.repo.GetOrderByID(orderID)
 	if err != nil {
 		return err
@@ -303,7 +303,7 @@ func (s *Service) Expire(orderID int64) error {
 }
 
 // Redeliver 补发卡密（发卡失败订单）。
-func (s *Service) Redeliver(orderID int64) error {
+func (s *OrderService) Redeliver(orderID int64) error {
 	o, err := s.repo.GetOrderByID(orderID)
 	if err != nil {
 		return err
@@ -353,7 +353,7 @@ func (s *Service) Redeliver(orderID int64) error {
 }
 
 // SetStatus 手动修改订单状态。
-func (s *Service) SetStatus(orderID int64, to, message string) error {
+func (s *OrderService) SetStatus(orderID int64, to, message string) error {
 	o, err := s.repo.GetOrderByID(orderID)
 	if err != nil {
 		return err
@@ -381,4 +381,4 @@ func (s *Service) SetStatus(orderID int64, to, message string) error {
 }
 
 // Repository 暴露给上层查询。
-func (s *Service) Repo() *repository.OrderRepository { return s.repo }
+func (s *OrderService) Repo() *repository.OrderRepository { return s.repo }

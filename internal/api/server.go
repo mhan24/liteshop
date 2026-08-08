@@ -1,4 +1,4 @@
-package web
+package api
 
 import (
 	"context"
@@ -21,26 +21,26 @@ import (
 	"sync"
 	"time"
 
-	"shop/internal/bepusdt"
+	"shop/internal/payment"
 	"shop/internal/config"
 	"shop/internal/db"
-	"shop/internal/db/repository"
+	"shop/internal/repository"
 	"shop/internal/models"
 	"shop/internal/notify"
-	"shop/internal/order"
-	"shop/internal/product"
+	"shop/internal/service"
+	"shop/internal/service"
 	"shop/internal/security"
-	"shop/internal/task"
+	"shop/internal/jobs"
 )
 
 type Server struct {
 	mux       *http.ServeMux
 	db        *sql.DB
 	cfg       config.Config
-	pay       *bepusdt.Client
+	pay       *payment.Client
 	notifier  *notify.Notifier
-	orders    *order.Service
-	products  *product.Service
+	orders    *service.OrderService
+	products  *service.ProductService
 	keys      *repository.KeyRepository
 	dbPath    string
 	startTime time.Time
@@ -90,12 +90,12 @@ type SiteSettings struct {
 }
 
 func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
-	bus := task.NewBus(1024)
+	bus := jobs.NewBus(1024)
 	cipher := security.NewCipher(db.EnsureSessionSecret(database))
 	s := &Server{
 		db:        database,
 		cfg:       cfg,
-		pay:       bepusdt.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
+		pay:       payment.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
 		notifier:  notify.New(cfg, database, bus, cipher),
 		dbPath:    cfg.DatabasePath,
 		startTime: time.Now(),
@@ -107,13 +107,13 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	// 异步任务 worker：邮件 / Telegram / Webhook（HTTP 层只发布事件）。
 	bus.Start(context.Background(), 2, s.notifier.Handler())
 	s.totpCipher = cipher
-	s.orders = order.NewService(
+	s.orders = service.NewOrderService(
 		repository.NewOrderRepositoryWithTZ(database, models.LocationFromTimezone(s.siteSettings().Timezone)),
 		s.payClient,
 		s.paymentConfigForService,
 	)
 	s.orders.SendPaid = s.notifier.SendPaid
-	s.products = product.NewService(repository.NewProductRepository(database))
+	s.products = service.NewProductService(repository.NewProductRepository(database))
 	s.keys = repository.NewKeyRepository(database)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -305,15 +305,15 @@ func (s *Server) paymentConfig() config.Config {
 	return cfg
 }
 
-func (s *Server) payClient() *bepusdt.Client {
+func (s *Server) payClient() *payment.Client {
 	cfg := s.paymentConfig()
-	return bepusdt.New(cfg.BepusdtBaseURL, cfg.BepusdtToken)
+	return payment.New(cfg.BepusdtBaseURL, cfg.BepusdtToken)
 }
 
-// paymentConfigForService 供 order.Service 读取支付配置。
-func (s *Server) paymentConfigForService() order.PaymentConfig {
+// paymentConfigForService 供 service.Service 读取支付配置。
+func (s *Server) paymentConfigForService() service.PaymentConfig {
 	cfg := s.paymentConfig()
-	return order.PaymentConfig{
+	return service.PaymentConfig{
 		PublicBaseURL: cfg.PublicBaseURL,
 		NotifyURL:     cfg.NotifyURL,
 		TimeoutSec:    cfg.BepusdtTimeoutSec,
@@ -548,7 +548,7 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", 400)
 		return
 	}
-	params, err := bepusdt.ParseAndVerifyCallback(body, payCfg.BepusdtToken)
+	params, err := payment.ParseAndVerifyCallback(body, payCfg.BepusdtToken)
 	if err != nil {
 		log.Printf("bepusdt notify verify failed: %v (body %d bytes)", err, len(body))
 		http.Error(w, "invalid signature", 400)

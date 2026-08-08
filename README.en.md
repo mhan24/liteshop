@@ -71,10 +71,10 @@ Caddy (reverse proxy :443)
 ### Layering & data access
 
 ```
-HTTP handler (internal/web)
-    → service (internal/order, internal/product)
-    → repository (internal/db/repository)
-    → database/sql (driver-agnostic: sqlite.go / postgres.go future)
+HTTP handler (internal/api)
+    → service (internal/service)
+    → repository (internal/repository)
+    → database/sql (internal/db: sqlite.go / postgres.go future)
 ```
 
 - `OrderRepository` / `ProductRepository` / `KeyRepository` (cards) own all SQL;
@@ -113,17 +113,16 @@ Cancel / expire: release stock and call BEpusdt `cancel-transaction`.
 
 ```
 cmd/shop/               Go entrypoint
-internal/config/        configuration defaults
+internal/api/           HTTP routes, JSON API, embedded admin (handler layer)
+internal/service/       business logic (OrderService / ProductService)
+internal/repository/    data access (OrderRepository / ProductRepository / KeyRepository)
 internal/db/            database layer: sqlite.go / postgres.go (future) / migrations / settings+secrets
-internal/db/repository/ repositories: OrderRepository / ProductRepository / KeyRepository
-internal/task/          async task bus (goroutine + channel)
 internal/models/        models & helpers
-internal/bepusdt/       BEpusdt integration
+internal/payment/       BEpusdt integration
 internal/notify/        notifications (event templates / mail / Telegram / Webhook)
-internal/order/         order business logic (service)
-internal/product/       product business logic (service)
+internal/jobs/          async task bus (goroutine + channel)
 internal/security/      TOTP & AES-GCM cipher
-internal/web/           HTTP routes, JSON API, embedded admin
+internal/config/        configuration defaults
 admin-ui/               Element Plus admin (src/api|views|stores|hooks|utils|components)
 storefront/             Nuxt 3 SSR storefront
 ```
@@ -161,7 +160,7 @@ cd storefront && npm install && npm run dev
 ### Build
 
 ```bash
-# Admin static assets → internal/web/admin-ui
+# Admin static assets → internal/api/admin-ui
 cd admin-ui && npm install && npm run build && cd ..
 
 # Storefront SSR output → storefront/.output
@@ -172,7 +171,7 @@ go build -o shop ./cmd/shop
 ./shop
 ```
 
-> `internal/web/admin-ui` is a build artifact, ignored by `.gitignore`, not committed.
+> `internal/api/admin-ui` is a build artifact, ignored by `.gitignore`, not committed.
 
 ---
 

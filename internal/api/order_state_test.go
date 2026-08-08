@@ -1,4 +1,4 @@
-package web
+package api
 
 import (
 	"fmt"
@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"shop/internal/bepusdt"
+	"shop/internal/payment"
 	"shop/internal/db"
-	"shop/internal/db/repository"
+	"shop/internal/repository"
 	"shop/internal/models"
-	"shop/internal/order"
+	"shop/internal/service"
 )
 
 // TestOrderStateMachineFlow 用临时 DB 验证完整状态机流程。
@@ -123,7 +123,7 @@ func TestOrderCancelFreesCards(t *testing.T) {
 	_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,'C1','available',?,?)`, productID, now, now)
 
 	repo := repository.NewOrderRepository(d)
-	svc := order.NewService(repo, func() *bepusdt.Client { return nil }, nil)
+	svc := service.NewOrderService(repo, func() *payment.Client { return nil }, nil)
 
 	orderRec := models.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreatePendingOrder(&orderRec); err != nil {
@@ -161,7 +161,7 @@ func TestFreeOrderWith100PercentCoupon(t *testing.T) {
 	_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,'C1','available',?,?)`, productID, now, now)
 
 	repo := repository.NewOrderRepository(d)
-	svc := order.NewService(repo, func() *bepusdt.Client {
+	svc := service.NewOrderService(repo, func() *payment.Client {
 		t.Fatal("payFn must not be called for a free order")
 		return nil
 	}, nil)
@@ -213,7 +213,7 @@ func TestRedeliverFromStock(t *testing.T) {
 	}
 
 	repo := repository.NewOrderRepository(d)
-	svc := order.NewService(repo, func() *bepusdt.Client { return nil }, nil)
+	svc := service.NewOrderService(repo, func() *payment.Client { return nil }, nil)
 
 	// 创建订单占用 1 张（模拟：直接建订单 + 锁定一张）
 	orderRec := models.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now}
@@ -262,7 +262,7 @@ func TestRedeliverIdempotent(t *testing.T) {
 		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,?, 'available', ?, ?)`, productID, "C"+string(rune('0'+i)), now, now)
 	}
 	repo := repository.NewOrderRepository(d)
-	svc := order.NewService(repo, func() *bepusdt.Client { return nil }, nil)
+	svc := service.NewOrderService(repo, func() *payment.Client { return nil }, nil)
 	orderRec := models.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreatePendingOrder(&orderRec); err != nil {
 		t.Fatalf("create: %v", err)
@@ -336,7 +336,7 @@ func TestCouponAndWholesale(t *testing.T) {
 		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,?, 'available', ?, ?)`, pid, "C"+string(rune('0'+i)), now, now)
 	}
 	repo := repository.NewOrderRepository(d)
-	svc := order.NewService(repo, func() *bepusdt.Client { return &bepusdt.Client{} }, func() order.PaymentConfig { return order.PaymentConfig{} })
+	svc := service.NewOrderService(repo, func() *payment.Client { return &payment.Client{} }, func() service.PaymentConfig { return service.PaymentConfig{} })
 
 	// 固定券：满 1 元减 10 元（用于 1.8 元订单，可抵扣到 0 为止）
 	if err := repo.CreateCoupon(models.Coupon{Code: "TEST10", Type: "fixed", ValueCents: 1000, MinAmountCents: 100, MaxUses: 0, ProductID: 0, Active: true}); err != nil {

@@ -16,7 +16,7 @@ import (
 
 	"shop/internal/db"
 	"shop/internal/models"
-	"shop/internal/task"
+	"shop/internal/jobs"
 )
 
 // 统一事件类型。
@@ -40,22 +40,22 @@ func (n *Notifier) Notify(event string, payload map[string]string) {
 
 	// Telegram
 	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
-		n.publish(task.Job{Kind: task.KindTelegram, Text: "[" + site + "] " + text})
+		n.publish(jobs.Job{Kind: jobs.KindTelegram, Text: "[" + site + "] " + text})
 	}
 	// Email：买家事件发给买家；无买家联系方式的系统事件发给管理员通知邮箱（若已配置）。
 	if cfg.SMTPHost != "" {
 		if contact := payload["contact"]; strings.Contains(contact, "@") {
 			subject := renderTemplate(n.eventTemplate(event, "mail_subject", "["+site+"] "+payload["title"]), payload)
 			body := renderTemplate(n.eventTemplate(event, "mail_body", n.eventText(event)), payload)
-			n.publish(task.Job{Kind: task.KindMail, To: contact, Subject: subject, Body: body})
+			n.publish(jobs.Job{Kind: jobs.KindMail, To: contact, Subject: subject, Body: body})
 		} else if adminEmail := n.adminEmail(); adminEmail != "" {
 			subject := renderTemplate(n.eventTemplate(event, "mail_subject", "["+site+"] "+eventTitle(event)), payload)
-			n.publish(task.Job{Kind: task.KindMail, To: adminEmail, Subject: subject, Body: text})
+			n.publish(jobs.Job{Kind: jobs.KindMail, To: adminEmail, Subject: subject, Body: text})
 		}
 	}
 	// Webhook
 	if cfg.WebhookURL != "" {
-		n.publish(task.Job{Kind: task.KindWebhook, Event: event, Payload: payload})
+		n.publish(jobs.Job{Kind: jobs.KindWebhook, Event: event, Payload: payload})
 	}
 }
 
@@ -257,13 +257,13 @@ func (n *Notifier) OrderPayload(event string, order models.Order, cards []models
 	p := map[string]string{
 		"event":        event,
 		"title":        eventTitle(event),
-		"order_no":     order.OrderNo,
-		"product_name": order.ProductName,
-		"qty":          strconv.Itoa(order.Qty),
-		"amount":       fmt.Sprintf("%.2f", float64(order.AmountCents)/100),
-		"fiat":         order.Fiat,
-		"contact":      order.BuyerContact,
-		"paid_at":      models.FormatBeijing(order.PaidAt),
+		"order_no":     service.OrderNo,
+		"product_name": service.ProductName,
+		"qty":          strconv.Itoa(service.Qty),
+		"amount":       fmt.Sprintf("%.2f", float64(service.AmountCents)/100),
+		"fiat":         service.Fiat,
+		"contact":      service.BuyerContact,
+		"paid_at":      models.FormatBeijing(service.PaidAt),
 		"cards":        strings.Join(cardLines, "\n"),
 		"order_url":    orderURL(n.CurrentConfig().PublicBaseURL, order),
 	}

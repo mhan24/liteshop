@@ -1,4 +1,4 @@
-package bepusdt
+package payment
 
 import (
 	"bytes"

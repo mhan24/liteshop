@@ -1,5 +1,5 @@
 // Package product 提供商品领域的仓储与业务逻辑。
-// 分层: web handler → product.Service → product.Repository → db
+// 分层: web handler → service.Service → service.Repository → db
 package repository
 
 import (

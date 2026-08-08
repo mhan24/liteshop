@@ -1,6 +1,6 @@
 // Package task 提供进程内异步任务系统（goroutine + channel，无 MQ）。
 // HTTP 层只发布事件，worker 消费执行（邮件/Telegram/Webhook 等）。
-package task
+package jobs
 
 import (
 	"context"

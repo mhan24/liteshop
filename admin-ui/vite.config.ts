@@ -24,7 +24,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../internal/web/admin-ui',
+    outDir: '../internal/api/admin-ui',
     emptyOutDir: true,
     chunkSizeWarningLimit: 900,
     rollupOptions: {

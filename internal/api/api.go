@@ -1,4 +1,4 @@
-package web
+package api
 
 import (
 	"crypto/hmac"
@@ -13,8 +13,8 @@ import (
 	"shop/internal/db"
 	"shop/internal/models"
 	"shop/internal/notify"
-	"shop/internal/order"
-	"shop/internal/product"
+	"shop/internal/service"
+	"shop/internal/service"
 	"shop/internal/security"
 	"strconv"
 	"strings"
@@ -283,7 +283,7 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// DefaultProductImage 是内置默认占位图（站内资源，前端兜底 /default-product.svg）。
+// DefaultProductImage 是内置默认占位图（站内资源，前端兜底 /default-service.svg）。
 const DefaultProductImage = ""
 
 func (s *Server) defaultProductImage() string {
@@ -368,7 +368,7 @@ func (s *Server) apiProducts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
 	param := r.PathValue("id")
 	var (
-		v   product.View
+		v   service.View
 		err error
 	)
 	// 支持 /products/{id} 或 /products/{slug}
@@ -439,7 +439,7 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		go s.notifier.NotifySystemError("创建支付交易失败: " + err.Error())
 		// 业务错误（券码/库存/数量）可回显给买家；系统错误（网关/DB）只写日志并返回通用文案。
 		msg := "下单失败，请重试或联系客服"
-		var biz *order.BusinessError
+		var biz *service.BusinessError
 		if errors.As(err, &biz) {
 			msg = biz.Error()
 		}
@@ -611,9 +611,9 @@ func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := map[string]any{"order": item}
 	if owned {
-		switch order.Status {
+		switch service.Status {
 		case models.OrderPaid, models.OrderProcessing, models.OrderDelivered, models.OrderCompleted:
-			cards, _ := s.orders.Repo().GetOrderCards(order.ID)
+			cards, _ := s.orders.Repo().GetOrderCards(service.ID)
 			list := []map[string]any{}
 			for _, c := range cards {
 				list = append(list, cardJSON(c))

@@ -9,7 +9,7 @@ import (
 
 	"shop/internal/config"
 	"shop/internal/db"
-	"shop/internal/web"
+	"shop/internal/api"
 )
 
 func main() {

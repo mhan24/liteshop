@@ -9,7 +9,7 @@ data/
 /cardshop
 /admin-ui/node_modules
 /admin-ui/dist
-/internal/web/admin-ui
+/internal/api/admin-ui
 /storefront/node_modules
 /storefront/.nuxt
 /storefront/.output

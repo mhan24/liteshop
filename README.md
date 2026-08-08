@@ -71,10 +71,10 @@ Caddy (反向代理 :443)
 ### 分层与数据访问
 
 ```
-HTTP handler (internal/web)
-    → service (internal/order, internal/product)
-    → repository (internal/db/repository)
-    → database/sql (驱动无关：sqlite.go / postgres.go 未来备用)
+HTTP handler (internal/api)
+    → service (internal/service)
+    → repository (internal/repository)
+    → database/sql (internal/db：sqlite.go / postgres.go 未来备用)
 ```
 
 - `OrderRepository` / `ProductRepository` / `KeyRepository`（卡密）集中所有 SQL；
@@ -113,17 +113,16 @@ HTTP handler (internal/web)
 
 ```
 cmd/shop/               Go 程序入口
-internal/config/        配置默认值
+internal/api/           HTTP 路由、JSON API、内嵌后台（handler 层）
+internal/service/       业务逻辑（OrderService / ProductService）
+internal/repository/    数据访问（OrderRepository / ProductRepository / KeyRepository）
 internal/db/            数据库层：sqlite.go / postgres.go（未来备用）/ migrations / settings+secrets
-internal/db/repository/ 仓库层：OrderRepository / ProductRepository / KeyRepository
-internal/task/          异步任务总线（goroutine + channel）
 internal/models/        模型与工具
-internal/bepusdt/       BEpusdt 对接
+internal/payment/       BEpusdt 支付对接
 internal/notify/        通知（事件模板 / 邮件 / Telegram / Webhook）
-internal/order/         订单业务逻辑（service）
-internal/product/       商品业务逻辑（service）
+internal/jobs/          异步任务总线（goroutine + channel）
 internal/security/      TOTP 与 AES-GCM 加密
-internal/web/           HTTP 路由、JSON API、内嵌后台
+internal/config/        配置默认值
 admin-ui/               Element Plus 后台（src/api|views|stores|hooks|utils|components）
 storefront/             Nuxt 3 SSR 前台
 ```
@@ -161,7 +160,7 @@ cd storefront && npm install && npm run dev
 ### 构建
 
 ```bash
-# 后台静态资源 → internal/web/admin-ui
+# 后台静态资源 → internal/api/admin-ui
 cd admin-ui && npm install && npm run build && cd ..
 
 # 前台 SSR 产物 → storefront/.output
@@ -172,7 +171,7 @@ go build -o shop ./cmd/shop
 ./shop
 ```
 
-> `internal/web/admin-ui` 是后台构建产物，已被 `.gitignore` 忽略，不提交。
+> `internal/api/admin-ui` 是后台构建产物，已被 `.gitignore` 忽略，不提交。
 
 ---
 

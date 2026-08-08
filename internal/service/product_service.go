@@ -1,9 +1,9 @@
-package product
+package service
 
 import (
 	"strings"
 
-	"shop/internal/db/repository"
+	"shop/internal/repository"
 	"shop/internal/models"
 )
 
@@ -18,17 +18,17 @@ type CategoryView struct {
 }
 
 // Service 商品业务逻辑。
-type Service struct {
+type ProductService struct {
 	repo *repository.ProductRepository
 }
 
-func NewService(repo *repository.ProductRepository) *Service {
-	return &Service{repo: repo}
+func NewProductService(repo *repository.ProductRepository) *Service {
+	return &ProductService{repo: repo}
 }
 
 // ListCategories 返回按分类分组的商品（可选筛选）。
 // q: 关键词（名称/描述）; category: 分类; minPrice/maxPrice: 价格范围（元）。
-func (s *Service) ListCategories(activeOnly bool, q, category string, minPrice, maxPrice float64) ([]CategoryView, error) {
+func (s *ProductService) ListCategories(activeOnly bool, q, category string, minPrice, maxPrice float64) ([]CategoryView, error) {
 	views, err := s.repo.ListViews(activeOnly)
 	if err != nil {
 		return nil, err
@@ -98,34 +98,34 @@ func Group(views []View) []CategoryView {
 }
 
 // Create 创建商品。
-func (s *Service) Create(p models.Product) error {
+func (s *ProductService) Create(p models.Product) error {
 	return s.repo.Create(p)
 }
 
 // Update 更新商品。
-func (s *Service) Update(p models.Product, id int64) error {
+func (s *ProductService) Update(p models.Product, id int64) error {
 	return s.repo.Update(p, id)
 }
 
 // GetView 按 ID 查商品视图（含库存）。
-func (s *Service) GetView(id int64) (View, error) {
+func (s *ProductService) GetView(id int64) (View, error) {
 	return s.repo.GetByID(id)
 }
 
 // GetActiveView 按 ID 查上架商品视图。
-func (s *Service) GetActiveView(id int64) (View, error) {
+func (s *ProductService) GetActiveView(id int64) (View, error) {
 	return s.repo.GetActiveByID(id)
 }
 
 // GetBySlug 按 slug 查上架商品。
-func (s *Service) GetBySlug(slug string) (View, error) {
+func (s *ProductService) GetBySlug(slug string) (View, error) {
 	return s.repo.GetBySlug(slug)
 }
 
 // AllCategories 返回上架商品分类。
-func (s *Service) AllCategories() ([]string, error) {
+func (s *ProductService) AllCategories() ([]string, error) {
 	return s.repo.AllCategories()
 }
 
 // Repo 暴露仓储给上层查询。
-func (s *Service) Repo() *repository.ProductRepository { return s.repo }
+func (s *ProductService) Repo() *repository.ProductRepository { return s.repo }

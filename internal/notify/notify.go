@@ -20,17 +20,17 @@ import (
 	"shop/internal/db"
 	"shop/internal/models"
 	"shop/internal/security"
-	"shop/internal/task"
+	"shop/internal/jobs"
 )
 
 type Notifier struct {
 	cfg config.Config
 	db  *sql.DB
-	bus *task.Bus
+	bus *jobs.Bus
 	cipher *security.Cipher
 }
 
-func New(cfg config.Config, database *sql.DB, bus *task.Bus, cipher *security.Cipher) *Notifier {
+func New(cfg config.Config, database *sql.DB, bus *jobs.Bus, cipher *security.Cipher) *Notifier {
 	return &Notifier{cfg: cfg, db: database, bus: bus, cipher: cipher}
 }
 
@@ -127,7 +127,7 @@ func (n *Notifier) siteTitle() string {
 
 func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
 	// 异步任务：HTTP 回调只入队，由 worker 执行邮件/Telegram。
-	n.publish(task.Job{Kind: task.KindPaid, Order: order, Cards: cards})
+	n.publish(jobs.Job{Kind: jobs.KindPaid, Order: order, Cards: cards})
 }
 
 // sendPaidJob 发卡通知执行体（worker 内运行）。
@@ -139,18 +139,18 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 	for _, c := range cards {
 		cardLines = append(cardLines, c.Content)
 	}
-	paidAt := order.PaidAt
+	paidAt := service.PaidAt
 	if paidAt <= 0 {
 		paidAt = models.Now()
 	}
 	data := map[string]string{
-		"order_no":     order.OrderNo,
-		"product_name": order.ProductName,
-		"qty":          strconv.Itoa(order.Qty),
-		"amount":       fmt.Sprintf("%.2f", float64(order.AmountCents)/100),
-		"fiat":         order.Fiat,
-		"trade_type":   order.TradeType,
-		"contact":      order.BuyerContact,
+		"order_no":     service.OrderNo,
+		"product_name": service.ProductName,
+		"qty":          strconv.Itoa(service.Qty),
+		"amount":       fmt.Sprintf("%.2f", float64(service.AmountCents)/100),
+		"fiat":         service.Fiat,
+		"trade_type":   service.TradeType,
+		"contact":      service.BuyerContact,
 		"paid_at":      models.FormatBeijing(paidAt),
 		"cards":        strings.Join(cardLines, "\n"),
 		"order_url":    orderURL(cfg.PublicBaseURL, order),
@@ -161,18 +161,18 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 	telegramBody := renderTemplate(tpls["telegram"], data)
 	mailSent := false
 	telegramSent := false
-	if cfg.SMTPHost != "" && strings.Contains(order.BuyerContact, "@") {
-		if err := n.sendMailWithConfig(cfg, order.BuyerContact, subject, mailBody); err != nil {
-			log.Printf("send paid mail failed: order=%s to=%s err=%v", order.OrderNo, order.BuyerContact, err)
-			_ = db.AddOrderLog(n.db, order.ID, "notify_failed", "邮件通知发送失败: "+err.Error(), order.Status, order.Status, 0, "smtp")
+	if cfg.SMTPHost != "" && strings.Contains(service.BuyerContact, "@") {
+		if err := n.sendMailWithConfig(cfg, service.BuyerContact, subject, mailBody); err != nil {
+			log.Printf("send paid mail failed: order=%s to=%s err=%v", service.OrderNo, service.BuyerContact, err)
+			_ = db.AddOrderLog(n.db, service.ID, "notify_failed", "邮件通知发送失败: "+err.Error(), service.Status, service.Status, 0, "smtp")
 		} else {
 			mailSent = true
 		}
 	}
 	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
 		if err := n.sendTelegramWithConfig(cfg, telegramBody); err != nil {
-			log.Printf("send paid telegram failed: order=%s err=%v", order.OrderNo, err)
-			_ = db.AddOrderLog(n.db, order.ID, "notify_failed", "Telegram 通知发送失败: "+err.Error(), order.Status, order.Status, 0, "telegram")
+			log.Printf("send paid telegram failed: order=%s err=%v", service.OrderNo, err)
+			_ = db.AddOrderLog(n.db, service.ID, "notify_failed", "Telegram 通知发送失败: "+err.Error(), service.Status, service.Status, 0, "telegram")
 		} else {
 			telegramSent = true
 		}
@@ -185,34 +185,34 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 		if telegramSent {
 			channels = append(channels, "Telegram")
 		}
-		_ = db.AddOrderLog(n.db, order.ID, "notify_sent", "通知已发送 ("+strings.Join(channels, "+")+")", order.Status, order.Status, 0, "")
+		_ = db.AddOrderLog(n.db, service.ID, "notify_sent", "通知已发送 ("+strings.Join(channels, "+")+")", service.Status, service.Status, 0, "")
 	}
 }
 
 // Handler 返回任务分发函数（供 worker 消费）。
-func (n *Notifier) Handler() func(task.Job) {
-	return func(j task.Job) {
+func (n *Notifier) Handler() func(jobs.Job) {
+	return func(j jobs.Job) {
 		switch j.Kind {
-		case task.KindPaid:
+		case jobs.KindPaid:
 			n.sendPaidJob(j.Order, j.Cards)
-		case task.KindMail:
+		case jobs.KindMail:
 			cfg := n.CurrentConfig()
 			if err := n.sendMailWithConfig(cfg, j.To, j.Subject, j.Body); err != nil {
 				log.Printf("notify mail failed to=%s err=%v", j.To, err)
 			}
-		case task.KindTelegram:
+		case jobs.KindTelegram:
 			cfg := n.CurrentConfig()
 			if err := n.sendTelegramWithConfig(cfg, j.Text); err != nil {
 				log.Printf("notify telegram failed err=%v", err)
 			}
-		case task.KindWebhook:
+		case jobs.KindWebhook:
 			n.sendWebhook(j.Event, j.Payload, n.siteTitle())
 		}
 	}
 }
 
 // publish 发布任务；未配置总线时同步执行（测试/降级）。
-func (n *Notifier) publish(j task.Job) {
+func (n *Notifier) publish(j jobs.Job) {
 	if n.bus != nil {
 		n.bus.Publish(j)
 		return
@@ -222,9 +222,9 @@ func (n *Notifier) publish(j task.Job) {
 
 // orderURL 构造订单查看地址；新订单携带查看令牌，避免依赖邮箱弱凭证。
 func orderURL(publicBaseURL string, order models.Order) string {
-	u := strings.TrimRight(publicBaseURL, "/") + "/order/" + order.OrderNo
-	if order.ViewToken != "" {
-		u += "?token=" + order.ViewToken
+	u := strings.TrimRight(publicBaseURL, "/") + "/order/" + service.OrderNo
+	if service.ViewToken != "" {
+		u += "?token=" + service.ViewToken
 	}
 	return u
 }
