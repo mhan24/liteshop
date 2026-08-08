@@ -104,6 +104,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/admin/account", s.requireAdminAPI(http.HandlerFunc(s.apiAdminAccount)))
 	mux.Handle("POST /api/v1/admin/account", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminAccountSave)))
 	mux.Handle("GET /api/v1/admin/totp", s.requireAdminAPI(http.HandlerFunc(s.apiAdminTotpStatus)))
+	mux.Handle("POST /api/v1/admin/totp/generate", s.requireAdminAPI(http.HandlerFunc(s.apiAdminTotpGenerate)))
 	mux.Handle("POST /api/v1/admin/totp/enable", s.requireAdminAPI(http.HandlerFunc(s.apiAdminTotpEnable)))
 	mux.Handle("POST /api/v1/admin/totp/disable", s.requireAdminAPI(http.HandlerFunc(s.apiAdminTotpDisable)))
 	mux.Handle("GET /api/v1/admin/system/backup", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSystemBackup)))
@@ -1822,6 +1823,31 @@ func (s *Server) apiAdminTotpStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, resp)
+}
+
+// apiAdminTotpGenerate 生成新的 TOTP 密钥（未启用时）。
+func (s *Server) apiAdminTotpGenerate(w http.ResponseWriter, r *http.Request) {
+	id := s.currentAdminID(r)
+	enabled, _, _ := db.AdminTOTP(s.db, id)
+	if enabled {
+		writeError(w, 400, "TOTP already enabled")
+		return
+	}
+	secret, err := security.GenerateTotpSecret()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	encrypted, err := s.totpCipher.Encrypt(secret)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	if err := db.SetAdminTOTPSecret(s.db, id, encrypted); err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"secret": secret, "issuer": s.siteSettings().Title})
 }
 
 func (s *Server) apiAdminTotpEnable(w http.ResponseWriter, r *http.Request) {

@@ -24,8 +24,9 @@
 
       <div v-if="totp.secret" style="margin-top:16px">
         <el-alert :title="t('account.totpScanHint')" type="info" :closable="false" />
-        <img :src="qrUrl" alt="TOTP QR" style="width:200px;height:200px;margin-top:12px;border:1px solid #eee;border-radius:8px" />
+        <img v-if="qrDataUrl" :src="qrDataUrl" alt="TOTP QR" style="width:200px;height:200px;margin-top:12px;border:1px solid #eee;border-radius:8px" />
         <p class="muted" style="margin-top:8px">{{ t('account.totpSecret') }}: <code class="mono">{{ totp.secret }}</code></p>
+        <p class="muted"><code class="mono">{{ otpauth }}</code></p>
         <div style="margin-top:12px;display:flex;gap:8px">
           <el-input v-model="totpCode" :placeholder="t('account.totpCodePlaceholder')" style="width:220px" />
           <el-button type="primary" :loading="totpSaving" @click="enableTotp">{{ t('account.totpConfirm') }}</el-button>
@@ -44,9 +45,10 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, FormInstance } from 'element-plus'
+import QRCode from 'qrcode'
 import { api } from '@/api'
 
 const { t } = useI18n()
@@ -60,11 +62,22 @@ const totpSaving = ref(false)
 const totp = ref<any>({ enabled: false, secret: '', issuer: 'LiteShop' })
 const totpCode = ref('')
 const disableCode = ref('')
-const qrUrl = computed(() => {
+const qrDataUrl = ref('')
+const otpauth = computed(() => {
   if (!totp.value.secret) return ''
-  const otpauth = `otpauth://totp/${encodeURIComponent(form.username || 'admin')}?secret=${totp.value.secret}&issuer=${encodeURIComponent(totp.value.issuer || 'LiteShop')}&digits=6&period=30`
-  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauth)}`
+  return `otpauth://totp/${encodeURIComponent(form.username || 'admin')}?secret=${totp.value.secret}&issuer=${encodeURIComponent(totp.value.issuer || 'LiteShop')}&digits=6&period=30`
 })
+watch(otpauth, async (v) => {
+  if (!v) {
+    qrDataUrl.value = ''
+    return
+  }
+  try {
+    qrDataUrl.value = await QRCode.toDataURL(v, { width: 200, margin: 1 })
+  } catch {
+    qrDataUrl.value = ''
+  }
+}, { immediate: true })
 
 onMounted(async () => {
   loading.value = true
@@ -89,9 +102,11 @@ async function loadTotp() {
 async function generateTotp() {
   totpLoading.value = true
   try {
-    const data = await api.get('/admin/totp')
+    const data = await api.post('/admin/totp/generate', {})
     totp.value.secret = data.secret
-    totp.value.issuer = data.issuer
+    totp.value.issuer = data.issuer || 'LiteShop'
+  } catch (e: any) {
+    ElMessage.error(e.message)
   } finally {
     totpLoading.value = false
   }
