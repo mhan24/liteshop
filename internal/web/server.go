@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
@@ -29,6 +30,7 @@ import (
 	"shop/internal/order"
 	"shop/internal/product"
 	"shop/internal/security"
+	"shop/internal/task"
 )
 
 type Server struct {
@@ -78,17 +80,20 @@ type SiteSettings struct {
 }
 
 func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
+	bus := task.NewBus(1024)
 	s := &Server{
 		db:        database,
 		cfg:       cfg,
 		pay:       bepusdt.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
-		notifier:  notify.New(cfg, database),
+		notifier:  notify.New(cfg, database, bus),
 		dbPath:    cfg.DatabasePath,
 		startTime: time.Now(),
 		sessions:  make(map[string]sessionInfo),
 		limiters:  make(map[string]*RateLimiter),
 		linkSent:  make(map[string]int64),
 	}
+	// 异步任务 worker：邮件 / Telegram / Webhook（HTTP 层只发布事件）。
+	bus.Start(context.Background(), 2, s.notifier.Handler())
 	s.totpCipher = security.NewCipher(s.sessionSecret())
 	s.orders = order.NewService(
 		repository.NewOrderRepositoryWithTZ(database, models.LocationFromTimezone(s.siteSettings().Timezone)),

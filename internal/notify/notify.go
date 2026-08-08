@@ -19,15 +19,17 @@ import (
 	"shop/internal/config"
 	"shop/internal/db"
 	"shop/internal/models"
+	"shop/internal/task"
 )
 
 type Notifier struct {
 	cfg config.Config
 	db  *sql.DB
+	bus *task.Bus
 }
 
-func New(cfg config.Config, database *sql.DB) *Notifier {
-	return &Notifier{cfg: cfg, db: database}
+func New(cfg config.Config, database *sql.DB, bus *task.Bus) *Notifier {
+	return &Notifier{cfg: cfg, db: database, bus: bus}
 }
 
 const (
@@ -122,6 +124,12 @@ func (n *Notifier) siteTitle() string {
 }
 
 func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
+	// 异步任务：HTTP 回调只入队，由 worker 执行邮件/Telegram。
+	n.publish(task.Job{Kind: task.KindPaid, Order: order, Cards: cards})
+}
+
+// sendPaidJob 发卡通知执行体（worker 内运行）。
+func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 	cfg := n.CurrentConfig()
 	// 发卡通知并入 delivered 事件模板统一管理（兼容旧 mail_paid_* 配置）。
 	tpls := n.EventTemplates()[EventDelivered]
@@ -177,6 +185,37 @@ func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
 		}
 		_ = db.AddOrderLog(n.db, order.ID, "notify_sent", "通知已发送 ("+strings.Join(channels, "+")+")", order.Status, order.Status, 0, "")
 	}
+}
+
+// Handler 返回任务分发函数（供 worker 消费）。
+func (n *Notifier) Handler() func(task.Job) {
+	return func(j task.Job) {
+		switch j.Kind {
+		case task.KindPaid:
+			n.sendPaidJob(j.Order, j.Cards)
+		case task.KindMail:
+			cfg := n.CurrentConfig()
+			if err := n.sendMailWithConfig(cfg, j.To, j.Subject, j.Body); err != nil {
+				log.Printf("notify mail failed to=%s err=%v", j.To, err)
+			}
+		case task.KindTelegram:
+			cfg := n.CurrentConfig()
+			if err := n.sendTelegramWithConfig(cfg, j.Text); err != nil {
+				log.Printf("notify telegram failed err=%v", err)
+			}
+		case task.KindWebhook:
+			n.sendWebhook(j.Event, j.Payload, n.siteTitle())
+		}
+	}
+}
+
+// publish 发布任务；未配置总线时同步执行（测试/降级）。
+func (n *Notifier) publish(j task.Job) {
+	if n.bus != nil {
+		n.bus.Publish(j)
+		return
+	}
+	n.Handler()(j)
 }
 
 // orderURL 构造订单查看地址；新订单携带查看令牌，避免依赖邮箱弱凭证。

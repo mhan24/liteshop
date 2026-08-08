@@ -16,6 +16,7 @@ import (
 
 	"shop/internal/db"
 	"shop/internal/models"
+	"shop/internal/task"
 )
 
 // 统一事件类型。
@@ -39,28 +40,22 @@ func (n *Notifier) Notify(event string, payload map[string]string) {
 
 	// Telegram
 	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
-		if err := n.sendTelegramWithConfig(cfg, "["+site+"] "+text); err != nil {
-			log.Printf("notify telegram failed event=%s err=%v", event, err)
-		}
+		n.publish(task.Job{Kind: task.KindTelegram, Text: "[" + site + "] " + text})
 	}
 	// Email：买家事件发给买家；无买家联系方式的系统事件发给管理员通知邮箱（若已配置）。
 	if cfg.SMTPHost != "" {
 		if contact := payload["contact"]; strings.Contains(contact, "@") {
 			subject := renderTemplate(n.eventTemplate(event, "mail_subject", "["+site+"] "+payload["title"]), payload)
 			body := renderTemplate(n.eventTemplate(event, "mail_body", n.eventText(event)), payload)
-			if err := n.sendMailWithConfig(cfg, contact, subject, body); err != nil {
-				log.Printf("notify mail failed event=%s to=%s err=%v", event, contact, err)
-			}
+			n.publish(task.Job{Kind: task.KindMail, To: contact, Subject: subject, Body: body})
 		} else if adminEmail := n.adminEmail(); adminEmail != "" {
 			subject := renderTemplate(n.eventTemplate(event, "mail_subject", "["+site+"] "+eventTitle(event)), payload)
-			if err := n.sendMailWithConfig(cfg, adminEmail, subject, text); err != nil {
-				log.Printf("notify admin mail failed event=%s to=%s err=%v", event, adminEmail, err)
-			}
+			n.publish(task.Job{Kind: task.KindMail, To: adminEmail, Subject: subject, Body: text})
 		}
 	}
 	// Webhook
 	if cfg.WebhookURL != "" {
-		go n.sendWebhook(event, payload, site)
+		n.publish(task.Job{Kind: task.KindWebhook, Event: event, Payload: payload})
 	}
 }
 
