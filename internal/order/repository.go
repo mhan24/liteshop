@@ -266,6 +266,32 @@ func (r *Repository) MarkPaidAndDeliver(orderID int64, tradeID, blockTx string, 
 	return delivered, nil
 }
 
+// CompleteFreeOrder 零金额订单（100% 折扣券）直接完成：created → paid 并发卡（单事务）。
+// 返回实际售出卡密数；订单状态已不是 created 时返回 ErrNoRows。
+func (r *Repository) CompleteFreeOrder(orderID int64, paidAt int64) (int64, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE orders SET status = 'paid', paid_at = ?, updated_at = ? WHERE id = ? AND status = 'created'`, paidAt, paidAt, orderID)
+	if err != nil {
+		return 0, err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return 0, ErrNoRows
+	}
+	res, err = tx.Exec(`UPDATE cards SET status = 'sold', sold_order = ?, reserved_order = 0, sold_at = ?, updated_at = ? WHERE reserved_order = ? AND status = 'locked'`, orderID, models.Now(), models.Now(), orderID)
+	if err != nil {
+		return 0, err
+	}
+	delivered, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return delivered, nil
+}
+
 // DeliverCards 将订单锁定的卡密标记为售出（事务）。
 func (r *Repository) DeliverCards(orderID int64) error {
 	_, err := r.db.Exec(`UPDATE cards SET status = 'sold', sold_order = ?, reserved_order = 0, sold_at = ?, updated_at = ? WHERE reserved_order = ? AND status = 'locked'`, orderID, models.Now(), models.Now(), orderID)

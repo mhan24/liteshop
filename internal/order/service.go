@@ -133,8 +133,9 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		}
 		discount = d
 		amountCents -= discount
-		if amountCents <= 0 {
-			return "", "", 0, 0, newBusinessErrorf("订单金额需大于 0（抵扣后金额为 0）")
+		// 100% 折扣券（或等额固定券）抵扣后金额为 0，走"零金额直接完成"路径。
+		if amountCents < 0 {
+			amountCents = 0
 		}
 	}
 	now := models.Now()
@@ -169,6 +170,29 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 			return order.OrderNo, "", 0, 0, wrapCouponError(err)
 		}
 		_ = s.repo.AddLog(order.ID, "coupon_used", fmt.Sprintf("优惠券抵扣 %d 分", discount), "", models.OrderCreated, 0)
+	}
+	// 零金额订单：跳过 BEpusdt 支付，直接置为已支付并发卡。
+	if order.AmountCents == 0 {
+		now := models.Now()
+		delivered, err := s.repo.CompleteFreeOrder(order.ID, now)
+		if err != nil {
+			return order.OrderNo, "", 0, 0, err
+		}
+		order.Status = models.OrderPaid
+		order.PaidAt = now
+		_ = s.repo.AddLog(order.ID, "payment_success", "免费订单（100% 折扣）直接完成", models.OrderCreated, models.OrderPaid, 0)
+		cards, _ := s.repo.GetOrderCards(order.ID)
+		if delivered == 0 || len(cards) == 0 {
+			_ = s.repo.SetOrderStatus(order.ID, models.OrderDeliveryFailed)
+			_ = s.repo.AddLog(order.ID, "delivery_failed", "发卡失败：无可用卡密", models.OrderPaid, models.OrderDeliveryFailed, 0)
+			return order.OrderNo, "", discount, couponID, ErrNoCards
+		}
+		_ = s.repo.SetOrderStatus(order.ID, models.OrderDelivered)
+		_ = s.repo.AddLog(order.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
+		if s.SendPaid != nil {
+			go s.SendPaid(order, cards)
+		}
+		return order.OrderNo, "", discount, couponID, nil
 	}
 	cfg := s.cfg()
 	// 订单页凭查看令牌访问（不再把买家邮箱放进跳转 URL）。

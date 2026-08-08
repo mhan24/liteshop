@@ -229,8 +229,8 @@ async function createOrder(token: string) {
       coupon_code: form.coupon_code.trim(),
       'cf-turnstile-response': token,
     })
-    if (res.payment_url) {
-      window.open(res.payment_url, '_blank', 'noopener')
+    if (res.order_no) {
+      if (res.payment_url) window.open(res.payment_url, '_blank', 'noopener')
       const q = res.token
         ? 'token=' + encodeURIComponent(res.token)
         : 'contact=' + encodeURIComponent(form.contact)

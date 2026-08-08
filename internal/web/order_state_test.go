@@ -146,6 +146,54 @@ func TestOrderCancelFreesCards(t *testing.T) {
 	}
 }
 
+// TestFreeOrderWith100PercentCoupon 验证 100% 折扣券订单跳过支付、直接完成并发卡。
+func TestFreeOrderWith100PercentCoupon(t *testing.T) {
+	d, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer d.Close()
+	now := models.Now()
+	_, _ = d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('t','',100,'active',?,?)`, now, now)
+	var productID int64
+	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&productID)
+	_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,'C1','available',?,?)`, productID, now, now)
+
+	repo := order.NewRepository(d)
+	svc := order.NewService(repo, func() *bepusdt.Client {
+		t.Fatal("payFn must not be called for a free order")
+		return nil
+	}, nil)
+	if err := repo.CreateCoupon(models.Coupon{Code: "FREE100", Type: "percent", Percent: 100, Active: true}); err != nil {
+		t.Fatalf("create coupon: %v", err)
+	}
+	p := models.Product{ID: productID, Name: "t", PriceCents: 100, MinQty: 1, MaxQty: 10, Status: "active"}
+	orderNo, paymentURL, _, _, err := svc.CreateOrder(p, 1, "a@b.com", "usdt.trc20", "FREE100")
+	if err != nil {
+		t.Fatalf("create free order: %v", err)
+	}
+	if paymentURL != "" {
+		t.Fatalf("free order should not have a payment url")
+	}
+	o, err := repo.GetOrderByNo(orderNo)
+	if err != nil {
+		t.Fatalf("get order: %v", err)
+	}
+	if o.Status != models.OrderDelivered {
+		t.Fatalf("status = %s, want delivered", o.Status)
+	}
+	var sold int
+	_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE status='sold' AND sold_order=?`, o.ID).Scan(&sold)
+	if sold != 1 {
+		t.Fatalf("sold = %d, want 1", sold)
+	}
+	var used int
+	_ = d.QueryRow(`SELECT used_count FROM coupons WHERE code='FREE100'`).Scan(&used)
+	if used != 1 {
+		t.Fatalf("coupon used_count = %d, want 1", used)
+	}
+}
+
 // TestRedeliverFromStock 验证补发卡密：从库存补扣、幂等释放旧锁定，
 // 并正确将新卡密标记为售出（不触发 UPDATE...LIMIT 语法错误）。
 func TestRedeliverFromStock(t *testing.T) {
