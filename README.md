@@ -99,7 +99,7 @@ internal/notify/     邮件 / Telegram 通知与模板
 internal/order/      订单业务逻辑（service）
 internal/product/    商品业务逻辑（service）
 internal/web/        HTTP 路由、JSON API、后台静态资源嵌入
-admin-ui/            Element Plus 后台（TS + Pinia）
+admin-ui/            Element Plus 后台（TS + Pinia；src/api|views|stores|hooks|utils|components）
 storefront/          Nuxt 3 SSR 前台（Tailwind）
 ```
 

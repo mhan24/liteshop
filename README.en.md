@@ -110,7 +110,7 @@ internal/order/      order business logic (service)
 internal/product/    product business logic (service)
 internal/security/   TOTP & AES-GCM cipher
 internal/web/        HTTP routes, JSON API, embedded admin SPA
-admin-ui/            Element Plus admin (TS + Pinia)
+admin-ui/            Element Plus admin (TS + Pinia; src/api|views|stores|hooks|utils|components)
 storefront/          Nuxt 3 SSR storefront (Tailwind)
 ```
 
