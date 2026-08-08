@@ -1,6 +1,11 @@
 export default defineEventHandler(async (event) => {
-  const config = useRuntimeConfig(event)
-  const origin = String(config.public.siteUrl || getRequestURL(event).origin).replace(/\/+$/, '')
+  const reqOrigin = String(getRequestURL(event).origin).replace(/\/+$/, '')
+  // 站点源取自数据库配置（public_base_url），避免依赖 Host/环境变量。
+  let origin = reqOrigin
+  try {
+    const site: any = await $fetch(reqOrigin + '/api/v1/site')
+    if (site?.public_base_url) origin = String(site.public_base_url).replace(/\/+$/, '')
+  } catch {}
   let urls: string[] = []
   try {
     const data: any = await $fetch(origin + '/api/v1/products')

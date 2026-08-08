@@ -1,6 +1,10 @@
 export default defineEventHandler(async (event) => {
-  const config = useRuntimeConfig(event)
-  const origin = String(config.public.siteUrl || getRequestURL(event).origin).replace(/\/+$/, '')
+  const reqOrigin = String(getRequestURL(event).origin).replace(/\/+$/, '')
+  let origin = reqOrigin
+  try {
+    const site: any = await $fetch(reqOrigin + '/api/v1/site')
+    if (site?.public_base_url) origin = String(site.public_base_url).replace(/\/+$/, '')
+  } catch {}
   setHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
   setHeader(event, 'Cache-Control', 'public, max-age=3600')
   return [

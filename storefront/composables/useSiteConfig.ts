@@ -9,6 +9,7 @@ export function loadSiteConfig(config: any) {
 }
 
 export function useSiteConfig() {
+  const site = siteConfig
   const locale = computed(() => siteConfig.value.locale || 'zh-CN')
   const currency = computed(() => siteConfig.value.currency || 'CNY')
   const symbol = computed(() => siteConfig.value.currency_symbol || '¥')
@@ -46,5 +47,5 @@ export function useSiteConfig() {
     }
   }
 
-  return { locale, currency, symbol, timezone, stockDisplay, stockText, money, moneyWithCode, date }
+  return { site, locale, currency, symbol, timezone, stockDisplay, stockText, money, moneyWithCode, date }
 }

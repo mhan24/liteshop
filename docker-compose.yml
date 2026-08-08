@@ -22,12 +22,6 @@ services:
     image: liteshop/shop:${TAG:-0.1.0}
     container_name: liteshop
     restart: unless-stopped
-    environment:
-      SHOP_LISTEN_ADDR: ":8080"
-      SHOP_DATABASE_PATH: /app/data/shop.db
-      SHOP_PUBLIC_BASE_URL: ${SHOP_PUBLIC_BASE_URL:-https://${DOMAIN:-localhost}}
-      BEPUSDT_NOTIFY_URL: ${BEPUSDT_NOTIFY_URL:-https://${DOMAIN:-localhost}/notify/bepusdt}
-      SHOP_SETUP_TOKEN: ${SHOP_SETUP_TOKEN:-}
     volumes:
       - liteshop_data:/app/data
     networks:
@@ -44,7 +38,6 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      NUXT_PUBLIC_SITE_URL: ${SHOP_PUBLIC_BASE_URL:-https://${DOMAIN:-localhost}}
     depends_on:
       - liteshop
     networks:

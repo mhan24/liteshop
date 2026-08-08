@@ -40,7 +40,6 @@ RUN mkdir -p /app/data && chown -R shop:shop /app
 USER shop
 EXPOSE 8080
 VOLUME ["/app/data"]
-ENV SHOP_LISTEN_ADDR=:8080 SHOP_DATABASE_PATH=/app/data/shop.db
 # 以 0077 umask 启动，保证运行期创建的数据库文件权限为 600
 CMD ["sh", "-c", "umask 0077 && exec /app/shop"]
 

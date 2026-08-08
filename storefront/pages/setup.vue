@@ -37,10 +37,6 @@
           <label class="text-sm font-semibold">{{ t('tradeTypes') }}</label>
           <input v-model="form.trade_types" class="w-full border rounded px-3 py-2" />
         </div>
-        <div>
-          <label class="text-sm font-semibold">{{ t('setupToken') }}</label>
-          <input v-model="form.setup_token" type="password" class="w-full border rounded px-3 py-2" />
-        </div>
         <button type="submit" :disabled="loading" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 font-semibold disabled:opacity-60">
           {{ loading ? t('processing') : t('completeSetup') }}
         </button>
@@ -64,7 +60,6 @@ const form = reactive({
   bepusdt_api_token: '',
   trade_types: '',
   fiat: 'CNY',
-  setup_token: '',
 })
 
 const { data } = await useAsyncData('setup-status', () => api.get('/setup').catch(() => ({ initialized: true })))

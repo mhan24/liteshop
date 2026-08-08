@@ -65,7 +65,7 @@ Caddy (reverse proxy :443)
 - Rate limiting (orders 20/min, login 10/min, etc.)
 - Security headers (X-Frame-Options / nosniff / Referrer-Policy / Permissions-Policy) + admin CSP
 - Health check `/health`
-- First-time initialization `/setup` (optional `SHOP_SETUP_TOKEN`)
+- First-time initialization `/setup`
 
 ---
 
@@ -193,7 +193,9 @@ curl -sSL https://raw.githubusercontent.com/mhan24/liteshop/main/install.sh | \
   DOMAIN=shop.example.com BUILD_ARTIFACT=https://…/liteshop-release.tgz bash
 ```
 
-Env vars: `DOMAIN` (required), `EMAIL` (Let's Encrypt), `BRANCH`, `SKIP_SSL=1` (plain http), `BUILD_ARTIFACT` (prebuilt tgz), `SHOP_USER`, `SHOP_SETUP_TOKEN` (optional init token to protect `/setup`).
+Env vars: `DOMAIN` (required), `EMAIL` (Let's Encrypt), `BRANCH`, `SKIP_SSL=1` (plain http), `BUILD_ARTIFACT` (prebuilt tgz), `SHOP_USER`.
+
+> Runtime configuration (site URL, payment, notifications, etc.) is stored in the database `settings` table via `/setup` and the admin panel; the app reads no application-level environment variables.
 
 ### Manual deployment
 

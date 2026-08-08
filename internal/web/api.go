@@ -228,6 +228,7 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"title":                 st.Title,
 		"subtitle":              st.Subtitle,
+		"public_base_url":       s.paymentConfig().PublicBaseURL,
 		"announcement":          st.Announcement,
 		"seo_description":       firstNonEmpty(st.SEODescription, st.Subtitle),
 		"seo_keywords":          st.SEOKeywords,
@@ -2285,14 +2286,9 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 		Fiat            string `json:"fiat"`
 		TurnstileSite   string `json:"turnstile_site_key"`
 		TurnstileSecret string `json:"turnstile_secret"`
-		SetupToken      string `json:"setup_token"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
 		writeError(w, 400, "bad json")
-		return
-	}
-	if s.cfg.SetupToken != "" && strings.TrimSpace(input.SetupToken) != s.cfg.SetupToken {
-		writeError(w, 403, "setup token required")
 		return
 	}
 	username := strings.TrimSpace(input.Username)
