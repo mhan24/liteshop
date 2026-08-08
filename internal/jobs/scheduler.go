@@ -8,7 +8,7 @@ import (
 )
 
 // Job 一个周期任务。
-type Job struct {
+type ScheduledJob struct {
 	Name     string
 	Interval time.Duration
 	Run      func()
@@ -17,7 +17,7 @@ type Job struct {
 // Scheduler 周期任务调度器（Go ticker，无需 MQ）。
 type Scheduler struct {
 	mu   sync.Mutex
-	jobs []Job
+	jobs []ScheduledJob
 }
 
 func NewScheduler() *Scheduler {
@@ -28,13 +28,13 @@ func NewScheduler() *Scheduler {
 func (s *Scheduler) Add(name string, interval time.Duration, run func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.jobs = append(s.jobs, Job{Name: name, Interval: interval, Run: run})
+	s.jobs = append(s.jobs, ScheduledJob{Name: name, Interval: interval, Run: run})
 }
 
 // Start 启动所有周期任务，直到 ctx 取消。
 func (s *Scheduler) Start(ctx context.Context) {
 	s.mu.Lock()
-	jobs := append([]Job(nil), s.jobs...)
+	jobs := append([]ScheduledJob(nil), s.jobs...)
 	s.mu.Unlock()
 	for _, j := range jobs {
 		go func(j Job) {
