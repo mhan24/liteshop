@@ -98,6 +98,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/notify", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminNotifySave)))
 	mux.Handle("POST /api/v1/admin/notify/test-email", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminNotifyTestEmail)))
 	mux.Handle("POST /api/v1/admin/notify/test-telegram", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminNotifyTestTelegram)))
+	mux.Handle("POST /api/v1/admin/notify/test-event", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminNotifyTestEvent)))
 	mux.Handle("GET /api/v1/admin/site", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSite)))
 	mux.Handle("POST /api/v1/admin/site", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSiteSave)))
 	mux.Handle("GET /api/v1/admin/account", s.requireAdminAPI(http.HandlerFunc(s.apiAdminAccount)))
@@ -1538,7 +1539,6 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 	cfg := s.notifier.CurrentConfig()
-	subject, mailBody, telegramBody := s.notifier.PaidTemplates()
 	events, _ := db.GetSetting(s.db, "notify_events")
 	adminEmail, _ := db.GetSetting(s.db, "notify_admin_email")
 	if strings.TrimSpace(events) == "" {
@@ -1557,9 +1557,6 @@ func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 		"notify_events":      events,
 		"notify_admin_email": adminEmail,
 		"event_templates":    s.notifier.EventTemplates(),
-		"mail_paid_subject":  subject,
-		"mail_paid_body":     mailBody,
-		"telegram_paid_body": telegramBody,
 	})
 }
 
@@ -1581,9 +1578,6 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 	setIfPresent("webhook_url", "webhook_url")
 	setIfPresent("notify_events", "notify_events")
 	setIfPresent("notify_admin_email", "notify_admin_email")
-	setIfPresent("mail_paid_subject", "mail_paid_subject")
-	setIfPresent("mail_paid_body", "mail_paid_body")
-	setIfPresent("telegram_paid_body", "telegram_paid_body")
 	if v := strings.TrimSpace(str(input["smtp_username"])); v != "" {
 		_ = db.SetSetting(s.db, "smtp_username", v)
 	}
@@ -1613,6 +1607,31 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.audit(r, "notify_update", "settings", "notify", "", "通知配置已更新")
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// apiAdminNotifyTestEvent 发送指定事件的测试通知（channel: telegram / mail / 空=自动）。
+func (s *Server) apiAdminNotifyTestEvent(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Event   string `json:"event"`
+		Channel string `json:"channel"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	input.Event = strings.TrimSpace(input.Event)
+	switch input.Event {
+	case notify.EventOrderCreated, notify.EventPaymentSuccess, notify.EventDelivered,
+		notify.EventLowStock, notify.EventSystemError:
+	default:
+		writeError(w, 400, "invalid event")
+		return
+	}
+	if err := s.notifier.SendTestEvent(input.Event, strings.TrimSpace(input.Channel)); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

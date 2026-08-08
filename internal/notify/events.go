@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -69,6 +70,19 @@ func (n *Notifier) eventTemplate(event, kind, fallback string) string {
 		if v, err := db.GetSetting(n.db, "evt_tpl_"+kind+"_"+event); err == nil && strings.TrimSpace(v) != "" {
 			return v
 		}
+		// 兼容旧版发卡模板键（delivered 事件迁移前配置的 mail_paid_*）。
+		if event == EventDelivered {
+			legacy := map[string]string{
+				"mail_subject": "mail_paid_subject",
+				"mail_body":    "mail_paid_body",
+				"telegram":     "telegram_paid_body",
+			}[kind]
+			if legacy != "" {
+				if v, err := db.GetSetting(n.db, legacy); err == nil && strings.TrimSpace(v) != "" {
+					return v
+				}
+			}
+		}
 	}
 	return fallback
 }
@@ -78,10 +92,25 @@ func (n *Notifier) EventTemplates() map[string]map[string]string {
 	events := []string{EventOrderCreated, EventPaymentSuccess, EventDelivered, EventLowStock, EventSystemError}
 	out := make(map[string]map[string]string, len(events))
 	for _, ev := range events {
+		var def map[string]string
+		if ev == EventDelivered {
+			// 发卡通知使用富文本默认模板（与旧 mail_paid_* 一致）。
+			def = map[string]string{
+				"telegram":     defaultTelegramPaidBody,
+				"mail_subject": defaultMailPaidSubject,
+				"mail_body":    defaultMailPaidBody,
+			}
+		} else {
+			def = map[string]string{
+				"telegram":     eventText(ev),
+				"mail_subject": "[" + n.siteTitle() + "] " + eventTitle(ev),
+				"mail_body":    eventText(ev),
+			}
+		}
 		out[ev] = map[string]string{
-			"telegram":     n.eventTemplate(ev, "telegram", n.eventText(ev)),
-			"mail_subject": n.eventTemplate(ev, "mail_subject", "["+n.siteTitle()+"] "+eventTitle(ev)),
-			"mail_body":    n.eventTemplate(ev, "mail_body", n.eventText(ev)),
+			"telegram":     n.eventTemplate(ev, "telegram", def["telegram"]),
+			"mail_subject": n.eventTemplate(ev, "mail_subject", def["mail_subject"]),
+			"mail_body":    n.eventTemplate(ev, "mail_body", def["mail_body"]),
 		}
 	}
 	return out
@@ -97,6 +126,54 @@ func (n *Notifier) adminEmail() string {
 		return ""
 	}
 	return strings.TrimSpace(v)
+}
+
+// SendTestEvent 发送一条指定事件的测试通知（channel: telegram / mail / 空=自动）。
+func (n *Notifier) SendTestEvent(event, channel string) error {
+	cfg := n.CurrentConfig()
+	site := n.siteTitle()
+	tpls := n.EventTemplates()[event]
+	payload := map[string]string{
+		"event":        event,
+		"title":        eventTitle(event),
+		"order_no":     "S20260101000000-TEST",
+		"product_name": "测试商品",
+		"qty":          "2",
+		"amount":       "10.00",
+		"fiat":         "CNY",
+		"trade_type":   "usdt.trc20",
+		"contact":      n.adminEmail(),
+		"paid_at":      time.Now().Format("2006-01-02 15:04:05"),
+		"cards":        "TEST-CARD-0001\nTEST-CARD-0002",
+		"order_url":    strings.TrimRight(cfg.PublicBaseURL, "/") + "/order/S20260101000000-TEST",
+		"available":    "5",
+		"message":      "这是一条测试通知",
+		"site_title":   site,
+	}
+	text := renderTemplate(tpls["telegram"], payload)
+	switch channel {
+	case "telegram":
+		if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
+			return errors.New("Telegram 未配置")
+		}
+		return n.sendTelegramWithConfig(cfg, "[TEST] ["+site+"] "+text)
+	case "mail":
+		admin := n.adminEmail()
+		if cfg.SMTPHost == "" {
+			return errors.New("SMTP 未配置")
+		}
+		if admin == "" {
+			return errors.New("未配置管理员通知邮箱")
+		}
+		subject := "[TEST] " + renderTemplate(tpls["mail_subject"], payload)
+		body := renderTemplate(tpls["mail_body"], payload)
+		return n.sendMailWithConfig(cfg, admin, subject, body)
+	default:
+		if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+			return n.SendTestEvent(event, "telegram")
+		}
+		return n.SendTestEvent(event, "mail")
+	}
 }
 
 func (n *Notifier) sendWebhook(event string, payload map[string]string, site string) {

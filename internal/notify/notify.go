@@ -62,25 +62,6 @@ const (
 查询订单：{{order_url}}`
 )
 
-func (n *Notifier) PaidTemplates() (string, string, string) {
-	subject := defaultMailPaidSubject
-	mailBody := defaultMailPaidBody
-	telegramBody := defaultTelegramPaidBody
-	if n.db == nil {
-		return subject, mailBody, telegramBody
-	}
-	if v, err := db.GetSetting(n.db, "mail_paid_subject"); err == nil && strings.TrimSpace(v) != "" {
-		subject = v
-	}
-	if v, err := db.GetSetting(n.db, "mail_paid_body"); err == nil && strings.TrimSpace(v) != "" {
-		mailBody = v
-	}
-	if v, err := db.GetSetting(n.db, "telegram_paid_body"); err == nil && strings.TrimSpace(v) != "" {
-		telegramBody = v
-	}
-	return subject, mailBody, telegramBody
-}
-
 func renderTemplate(tpl string, data map[string]string) string {
 	out := tpl
 	for k, v := range data {
@@ -142,7 +123,8 @@ func (n *Notifier) siteTitle() string {
 
 func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
 	cfg := n.CurrentConfig()
-	subjectTpl, mailBodyTpl, telegramBodyTpl := n.PaidTemplates()
+	// 发卡通知并入 delivered 事件模板统一管理（兼容旧 mail_paid_* 配置）。
+	tpls := n.EventTemplates()[EventDelivered]
 	cardLines := make([]string, 0, len(cards))
 	for _, c := range cards {
 		cardLines = append(cardLines, c.Content)
@@ -164,9 +146,9 @@ func (n *Notifier) SendPaid(order models.Order, cards []models.Card) {
 		"order_url":    orderURL(cfg.PublicBaseURL, order),
 		"site_title":   n.siteTitle(),
 	}
-	subject := renderTemplate(subjectTpl, data)
-	mailBody := renderTemplate(mailBodyTpl, data)
-	telegramBody := renderTemplate(telegramBodyTpl, data)
+	subject := renderTemplate(tpls["mail_subject"], data)
+	mailBody := renderTemplate(tpls["mail_body"], data)
+	telegramBody := renderTemplate(tpls["telegram"], data)
 	mailSent := false
 	telegramSent := false
 	if cfg.SMTPHost != "" && strings.Contains(order.BuyerContact, "@") {

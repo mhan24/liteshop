@@ -7,8 +7,10 @@
       <el-form-item :label="t('notify.smtpUsername')"><el-input v-model="form.smtp_username" :placeholder="t('notify.smtpUsernamePlaceholder')" /></el-form-item>
       <el-form-item :label="t('notify.smtpPassword')"><el-input v-model="form.smtp_password" type="password" :placeholder="t('notify.smtpPasswordPlaceholder')" show-password /></el-form-item>
       <el-form-item :label="t('notify.smtpFrom')"><el-input v-model="form.smtp_from" /></el-form-item>
+      <el-form-item><el-button @click="testEmail" :loading="testing === 'email'">{{ t('notify.testEmail') }}</el-button></el-form-item>
       <el-form-item :label="t('notify.telegramChatId')"><el-input v-model="form.telegram_chat_id" /></el-form-item>
       <el-form-item :label="t('notify.telegramToken')"><el-input v-model="form.telegram_bot_token" type="password" :placeholder="t('notify.telegramTokenPlaceholder')" show-password /></el-form-item>
+      <el-form-item><el-button @click="testTelegram" :loading="testing === 'telegram'">{{ t('notify.testTelegram') }}</el-button></el-form-item>
       <el-form-item :label="t('notify.webhookUrl')"><el-input v-model="form.webhook_url" :placeholder="t('notify.webhookPlaceholder')" /></el-form-item>
       <el-form-item :label="t('notify.webhookSecret')"><el-input v-model="form.webhook_secret" type="password" :placeholder="t('notify.webhookSecretPlaceholder')" show-password /></el-form-item>
       <el-form-item :label="t('notify.events')">
@@ -29,7 +31,7 @@
           <el-form-item :label="t('notify.eventTelegram')">
             <el-input v-model="form.event_templates[ev.key].telegram" type="textarea" :rows="5" :autosize="{ minRows: 5, maxRows: 14 }" />
           </el-form-item>
-          <template v-if="ev.key === 'order_created'">
+          <template v-if="ev.key === 'order_created' || ev.key === 'delivered'">
             <el-form-item :label="t('notify.eventMailSubject')">
               <el-input v-model="form.event_templates[ev.key].mail_subject" />
             </el-form-item>
@@ -37,12 +39,11 @@
               <el-input v-model="form.event_templates[ev.key].mail_body" type="textarea" :rows="9" :autosize="{ minRows: 9, maxRows: 20 }" />
             </el-form-item>
           </template>
+          <el-form-item>
+            <el-button size="small" @click="testEvent(ev.key)" :loading="testing === ev.key">{{ t('notify.test') }}</el-button>
+          </el-form-item>
         </el-collapse-item>
       </el-collapse>
-      <el-divider content-position="left">{{ t('notify.paidTemplates') }}</el-divider>
-      <el-form-item :label="t('notify.mailSubject')"><el-input v-model="form.mail_paid_subject" /></el-form-item>
-      <el-form-item :label="t('notify.mailBody')"><el-input v-model="form.mail_paid_body" type="textarea" :rows="10" :autosize="{ minRows: 10, maxRows: 24 }" /></el-form-item>
-      <el-form-item :label="t('notify.telegramBody')"><el-input v-model="form.telegram_paid_body" type="textarea" :rows="6" :autosize="{ minRows: 6, maxRows: 16 }" /></el-form-item>
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>
   </el-card>
@@ -59,6 +60,7 @@ const loading = ref(false)
 const saving = ref(false)
 const form = ref<any>({})
 const events = ref<string[]>([])
+const testing = ref('')
 const eventList = computed(() => [
   { key: 'order_created', label: t('notify.eventOrderCreated') },
   { key: 'payment_success', label: t('notify.eventPaymentSuccess') },
@@ -90,6 +92,44 @@ async function save() {
     ElMessage.error(e.message)
   } finally {
     saving.value = false
+  }
+}
+async function testEvent(ev: string) {
+  testing.value = ev
+  try {
+    await api.post('/admin/notify/test-event', { event: ev, channel: '' })
+    ElMessage.success(t('notify.testSent'))
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    testing.value = ''
+  }
+}
+async function testEmail() {
+  const to = String(form.value.notify_admin_email || '').trim() || window.prompt(t('notify.testEmailPrompt') || '') || ''
+  if (!to) {
+    ElMessage.warning(t('notify.testEmailNeedAddr'))
+    return
+  }
+  testing.value = 'email'
+  try {
+    await api.post('/admin/notify/test-email', { test_email: to })
+    ElMessage.success(t('notify.testSent'))
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    testing.value = ''
+  }
+}
+async function testTelegram() {
+  testing.value = 'telegram'
+  try {
+    await api.post('/admin/notify/test-telegram', {})
+    ElMessage.success(t('notify.testSent'))
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    testing.value = ''
   }
 }
 </script>
