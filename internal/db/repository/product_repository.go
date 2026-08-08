@@ -23,7 +23,7 @@ type ProductRepository struct {
 }
 
 func NewProductRepository(db *sql.DB) *ProductRepository {
-	return &Repository{db: db}
+	return &ProductRepository{db: db}
 }
 
 // ListViews 返回商品视图（可选仅上架）。

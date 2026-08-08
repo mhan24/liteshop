@@ -30,7 +30,7 @@ type OrderRepository struct {
 }
 
 func NewOrderRepository(db *sql.DB) *OrderRepository {
-	return &Repository{db: db, tz: models.BeijingLocation}
+	return &OrderRepository{db: db, tz: models.BeijingLocation}
 }
 
 // NewRepositoryWithTZ 使用指定时区（用于多地区统计自然日）。
@@ -38,7 +38,7 @@ func NewOrderRepositoryWithTZ(db *sql.DB, tz *time.Location) *OrderRepository {
 	if tz == nil {
 		tz = models.BeijingLocation
 	}
-	return &Repository{db: db, tz: tz}
+	return &OrderRepository{db: db, tz: tz}
 }
 
 // CreatePendingOrder 创建订单并锁定对应数量的可用卡密（事务）。
@@ -500,16 +500,16 @@ func (r *OrderRepository) CostSince(ts int64) (int64, error) {
 
 // CostSourceStats 返回成本来源统计（订单时间/迁移估算/未知）。
 func (r *OrderRepository) CostSourceStats() (orderTime, migrationEstimate, unknown int, err error) {
-	rows, err := r.db.Query(`SELECT cost_snapshot_source, COUNT(1) FROM orders WHERE status IN ('paid','processing','delivered','completed') GROUP BY cost_snapshot_source`)
-	if err != nil {
-		return
+	rows, qerr := r.db.Query(`SELECT cost_snapshot_source, COUNT(1) FROM orders WHERE status IN ('paid','processing','delivered','completed') GROUP BY cost_snapshot_source`)
+	if qerr != nil {
+		return 0, 0, 0, qerr
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var src string
 		var cnt int
-		if err := rows.Scan(&src, &cnt); err != nil {
-			return
+		if serr := rows.Scan(&src, &cnt); serr != nil {
+			return orderTime, migrationEstimate, unknown, serr
 		}
 		switch src {
 		case "order_time":
@@ -520,8 +520,7 @@ func (r *OrderRepository) CostSourceStats() (orderTime, migrationEstimate, unkno
 			unknown += cnt
 		}
 	}
-	err = rows.Err()
-	return
+	return orderTime, migrationEstimate, unknown, rows.Err()
 }
 
 // DailyRevenueRow 单日营收行。
