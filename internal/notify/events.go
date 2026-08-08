@@ -51,7 +51,7 @@ func (n *Notifier) Notify(event string, payload map[string]string) {
 				log.Printf("notify mail failed event=%s to=%s err=%v", event, contact, err)
 			}
 		} else if adminEmail := n.adminEmail(); adminEmail != "" {
-			subject := renderTemplate(n.eventTemplate(event, "mail_subject", "["+site+"] "+n.eventTitle(event)), payload)
+			subject := renderTemplate(n.eventTemplate(event, "mail_subject", "["+site+"] "+eventTitle(event)), payload)
 			if err := n.sendMailWithConfig(cfg, adminEmail, subject, text); err != nil {
 				log.Printf("notify admin mail failed event=%s to=%s err=%v", event, adminEmail, err)
 			}
@@ -80,7 +80,7 @@ func (n *Notifier) EventTemplates() map[string]map[string]string {
 	for _, ev := range events {
 		out[ev] = map[string]string{
 			"telegram":     n.eventTemplate(ev, "telegram", n.eventText(ev)),
-			"mail_subject": n.eventTemplate(ev, "mail_subject", "["+n.siteTitle()+"] "+n.eventTitle(ev)),
+			"mail_subject": n.eventTemplate(ev, "mail_subject", "["+n.siteTitle()+"] "+eventTitle(ev)),
 			"mail_body":    n.eventTemplate(ev, "mail_body", n.eventText(ev)),
 		}
 	}
