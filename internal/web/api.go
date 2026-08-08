@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"runtime"
 	"shop/internal/db"
@@ -548,12 +547,8 @@ func (s *Server) apiSendOrderLinks(w http.ResponseWriter, r *http.Request) {
 	base := strings.TrimRight(s.paymentConfig().PublicBaseURL, "/")
 	links := []string{}
 	for _, o := range orders {
-		link := base + "/order/" + o.OrderNo
-		if o.ViewToken != "" {
-			link += "?token=" + o.ViewToken
-		} else {
-			link += "?contact=" + url.QueryEscape(contact)
-		}
+		// 所有订单（含存量回填）均以查看令牌访问。
+		link := base + "/order/" + o.OrderNo + "?token=" + o.ViewToken
 		links = append(links, o.ProductName+" x"+strconv.Itoa(o.Qty)+": "+link)
 	}
 	if len(links) == 0 {
@@ -628,17 +623,10 @@ func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 // orderOwned 判断请求是否持有订单的访问凭证：
-// 新订单校验查看令牌（恒定时间比较）；存量旧订单（view_token 为空）回退到邮箱匹配。
+// 一律校验查看令牌（恒定时间比较）。存量订单已由迁移 014 回填令牌。
 func (s *Server) orderOwned(r *http.Request, o models.Order) bool {
-	if o.ViewToken != "" {
-		token := strings.TrimSpace(r.URL.Query().Get("token"))
-		if token == "" || !hmacEqual(token, o.ViewToken) {
-			return false
-		}
-		return true
-	}
-	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
-	return contact != "" && contact == o.BuyerContact
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	return token != "" && hmacEqual(token, o.ViewToken)
 }
 
 // hmacEqual 恒定时间比较（用于订单查看令牌）。

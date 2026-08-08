@@ -40,7 +40,7 @@ Caddy (reverse proxy :443)
 - Privacy / Terms / first-time `/setup`
 - SEO: canonical / OG / JSON-LD / sitemap / robots / favicon
 
-> Compatibility note: Legacy orders (created before the view-token feature) still support "email + order number" card access as a transitional mode scheduled for retirement; all new orders use a view token sent by email (token is only mailed to the registered address). The lookup API never returns order numbers or view links — access links are always delivered by email.
+> Access note: Every order (including legacy ones) uses a view token delivered by email to view cards / cancel; the token is only mailed to the registered address. Legacy orders were backfilled with tokens by migration, so "email + order number" access is no longer supported. The lookup API never returns order numbers or view links — use "send view link to my email" to recover a lost link.
 
 ### Admin panel (Element Plus + Pinia)
 
