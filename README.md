@@ -91,10 +91,13 @@ Caddy (反向代理 :443)
 ```
 cmd/shop/            Go 程序入口
 internal/config/     配置（纯默认值）
-internal/db/         SQLite 迁移与设置读写
+internal/db/         数据库层：sqlite.go / postgres.go（未来备用）/ migrations / settings
+internal/db/repository/  仓库层：OrderRepository / ProductRepository / KeyRepository
 internal/models/     模型与工具
 internal/bepusdt/    BEpusdt 创建/取消交易、签名、回调验签
 internal/notify/     邮件 / Telegram 通知与模板
+internal/order/      订单业务逻辑（service）
+internal/product/    商品业务逻辑（service）
 internal/web/        HTTP 路由、JSON API、后台静态资源嵌入
 admin-ui/            Element Plus 后台（TS + Pinia）
 storefront/          Nuxt 3 SSR 前台（Tailwind）

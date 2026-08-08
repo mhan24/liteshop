@@ -101,12 +101,13 @@ Cancel / expire: release stock and call BEpusdt `cancel-transaction`.
 ```
 cmd/shop/            Go entrypoint
 internal/config/     configuration defaults
-internal/db/         SQLite migrations & settings
+internal/db/         database layer: sqlite.go / postgres.go (future) / migrations / settings
+internal/db/repository/  repositories: OrderRepository / ProductRepository / KeyRepository
 internal/models/     models & helpers
 internal/bepusdt/    BEpusdt create/cancel/sign/verify
 internal/notify/     email / Telegram notifications
-internal/order/      order domain (service + repository)
-internal/product/    product domain
+internal/order/      order business logic (service)
+internal/product/    product business logic (service)
 internal/security/   TOTP & AES-GCM cipher
 internal/web/        HTTP routes, JSON API, embedded admin SPA
 admin-ui/            Element Plus admin (TS + Pinia)
