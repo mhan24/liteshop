@@ -77,12 +77,12 @@ type SiteSettings struct {
 	StockDisplay   string
 }
 
-func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
+func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	s := &Server{
-		db:        db,
+		db:        database,
 		cfg:       cfg,
 		pay:       bepusdt.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
-		notifier:  notify.New(cfg, db),
+		notifier:  notify.New(cfg, database),
 		dbPath:    cfg.DatabasePath,
 		startTime: time.Now(),
 		sessions:  make(map[string]sessionInfo),
@@ -91,13 +91,13 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 	}
 	s.totpCipher = security.NewCipher(s.sessionSecret())
 	s.orders = order.NewService(
-		repository.NewOrderRepositoryWithTZ(db, models.LocationFromTimezone(s.siteSettings().Timezone)),
+		repository.NewOrderRepositoryWithTZ(database, models.LocationFromTimezone(s.siteSettings().Timezone)),
 		s.payClient,
 		s.paymentConfigForService,
 	)
 	s.orders.SendPaid = s.notifier.SendPaid
-	s.products = product.NewService(repository.NewProductRepository(db))
-	s.keys = repository.NewKeyRepository(db)
+	s.products = product.NewService(repository.NewProductRepository(database))
+	s.keys = repository.NewKeyRepository(database)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -695,7 +695,7 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 	}
 	var adminID int64
 	var expiresAt int64
-	adminID, expiresAt, err = db.SessionAdminID(s.db, id)
+	adminID, expiresAt, err := db.SessionAdminID(s.db, id)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			log.Printf("session lookup: %v", err)
