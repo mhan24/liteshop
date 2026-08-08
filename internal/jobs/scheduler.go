@@ -37,7 +37,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 	jobs := append([]ScheduledJob(nil), s.jobs...)
 	s.mu.Unlock()
 	for _, j := range jobs {
-		go func(j Job) {
+		go func(j ScheduledJob) {
 			ticker := time.NewTicker(j.Interval)
 			defer ticker.Stop()
 			for {
