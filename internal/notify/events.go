@@ -102,9 +102,9 @@ func (n *Notifier) EventTemplates() map[string]map[string]string {
 			}
 		} else {
 			def = map[string]string{
-				"telegram":     eventText(ev),
+				"telegram":     n.eventText(ev),
 				"mail_subject": "[" + n.siteTitle() + "] " + eventTitle(ev),
-				"mail_body":    eventText(ev),
+				"mail_body":    n.eventText(ev),
 			}
 		}
 		out[ev] = map[string]string{
