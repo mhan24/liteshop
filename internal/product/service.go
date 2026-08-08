@@ -7,6 +7,9 @@ import (
 	"shop/internal/models"
 )
 
+// View 商品视图（仓库层类型别名，保持对外类型不变）。
+type View = repository.View
+
 // CategoryView 分类分组视图（前台首页/搜索用）。
 type CategoryView struct {
 	Name       string
