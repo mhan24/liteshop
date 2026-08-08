@@ -1,7 +1,7 @@
 <template>
   <el-card v-loading="loading">
     <template #header><h2>{{ t('notify.title') }}</h2></template>
-    <el-form label-position="top" :model="form" style="max-width:680px">
+    <el-form label-position="top" :model="form" style="max-width:960px">
       <el-form-item :label="t('notify.smtpHost')"><el-input v-model="form.smtp_host" /></el-form-item>
       <el-form-item :label="t('notify.smtpPort')"><el-input-number v-model="form.smtp_port" :min="1" /></el-form-item>
       <el-form-item :label="t('notify.smtpUsername')"><el-input v-model="form.smtp_username" :placeholder="t('notify.smtpUsernamePlaceholder')" /></el-form-item>
@@ -27,22 +27,22 @@
       <el-collapse>
         <el-collapse-item v-for="ev in eventList" :key="ev.key" :title="ev.label">
           <el-form-item :label="t('notify.eventTelegram')">
-            <el-input v-model="form.event_templates[ev.key].telegram" type="textarea" :rows="3" />
+            <el-input v-model="form.event_templates[ev.key].telegram" type="textarea" :rows="5" :autosize="{ minRows: 5, maxRows: 14 }" />
           </el-form-item>
           <template v-if="ev.key === 'order_created'">
             <el-form-item :label="t('notify.eventMailSubject')">
               <el-input v-model="form.event_templates[ev.key].mail_subject" />
             </el-form-item>
             <el-form-item :label="t('notify.eventMailBody')">
-              <el-input v-model="form.event_templates[ev.key].mail_body" type="textarea" :rows="5" />
+              <el-input v-model="form.event_templates[ev.key].mail_body" type="textarea" :rows="9" :autosize="{ minRows: 9, maxRows: 20 }" />
             </el-form-item>
           </template>
         </el-collapse-item>
       </el-collapse>
       <el-divider content-position="left">{{ t('notify.paidTemplates') }}</el-divider>
       <el-form-item :label="t('notify.mailSubject')"><el-input v-model="form.mail_paid_subject" /></el-form-item>
-      <el-form-item :label="t('notify.mailBody')"><el-input v-model="form.mail_paid_body" type="textarea" :rows="8" /></el-form-item>
-      <el-form-item :label="t('notify.telegramBody')"><el-input v-model="form.telegram_paid_body" type="textarea" :rows="6" /></el-form-item>
+      <el-form-item :label="t('notify.mailBody')"><el-input v-model="form.mail_paid_body" type="textarea" :rows="10" :autosize="{ minRows: 10, maxRows: 24 }" /></el-form-item>
+      <el-form-item :label="t('notify.telegramBody')"><el-input v-model="form.telegram_paid_body" type="textarea" :rows="6" :autosize="{ minRows: 6, maxRows: 16 }" /></el-form-item>
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>
   </el-card>
