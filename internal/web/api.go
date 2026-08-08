@@ -21,15 +21,17 @@ import (
 	"time"
 )
 
-// secretSettings 备份不导出、恢复不覆盖的密钥类配置键。
-var secretSettings = map[string]bool{
-	"session_secret":       true,
-	"bepusdt_api_token":    true,
-	"smtp_password":        true,
-	"telegram_bot_token":   true,
-	"webhook_secret":       true,
-	"turnstile_secret":     true,
-	"maintenance_password": true,
+// secretSettingsKey 判断是否为敏感配置键（secrets 表键 + 会话主密钥）。
+func secretSettingsKey(k string) bool {
+	if k == "session_secret" {
+		return true
+	}
+	for _, s := range db.SecretSettingKeys {
+		if k == s {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -218,7 +220,7 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 	}
 	maintenanceEnabled, _ := db.GetSetting(s.db, "maintenance_enabled")
 	maintenanceMessage, _ := db.GetSetting(s.db, "maintenance_message")
-	maintenancePassword, _ := db.GetSetting(s.db, "maintenance_password")
+	maintenancePassword, _ := db.GetSecret(s.db, "maintenance_password", s.totpCipher)
 	enabled := strings.TrimSpace(maintenanceEnabled) == "1"
 	if enabled && maintenancePassword != "" && s.maintenanceUnlocked(r, maintenancePassword) {
 		enabled = false
@@ -321,7 +323,7 @@ func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
-	maintenancePassword, _ := db.GetSetting(s.db, "maintenance_password")
+	maintenancePassword, _ := db.GetSecret(s.db, "maintenance_password", s.totpCipher)
 	if maintenancePassword == "" ||
 		!hmacEqual(hashMaintenancePassword(strings.TrimSpace(input.Password)), normalizeMaintenanceHash(maintenancePassword)) {
 		writeError(w, 403, "密码错误")
@@ -329,7 +331,7 @@ func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 	// 存量明文在解锁成功后升级为哈希存储。
 	if normalized := normalizeMaintenanceHash(maintenancePassword); normalized != maintenancePassword {
-		_ = db.SetSetting(s.db, "maintenance_password", normalized)
+		_ = db.SetSecret(s.db, "maintenance_password", normalized, s.totpCipher)
 		maintenancePassword = normalized
 	}
 	secure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
@@ -1491,7 +1493,7 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if v := strings.TrimSpace(str(input["bepusdt_api_token"])); v != "" {
-		_ = db.SetSetting(s.db, "bepusdt_api_token", v)
+		_ = db.SetSecret(s.db, "bepusdt_api_token", v, s.totpCipher)
 	}
 	s.audit(r, "payment_update", "settings", "payment", "", "支付配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -1542,13 +1544,13 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 		_ = db.SetSetting(s.db, "smtp_username", v)
 	}
 	if v := strings.TrimSpace(str(input["smtp_password"])); v != "" {
-		_ = db.SetSetting(s.db, "smtp_password", v)
+		_ = db.SetSecret(s.db, "smtp_password", v, s.totpCipher)
 	}
 	if v := strings.TrimSpace(str(input["telegram_bot_token"])); v != "" {
-		_ = db.SetSetting(s.db, "telegram_bot_token", v)
+		_ = db.SetSecret(s.db, "telegram_bot_token", v, s.totpCipher)
 	}
 	if v := strings.TrimSpace(str(input["webhook_secret"])); v != "" {
-		_ = db.SetSetting(s.db, "webhook_secret", v)
+		_ = db.SetSecret(s.db, "webhook_secret", v, s.totpCipher)
 	}
 	// 事件模板：evt_tpl_<kind>_<event>（空值回退默认模板）
 	if v, ok := input["event_templates"]; ok {
@@ -1641,7 +1643,7 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		"turnstile_secret_set":  s.turnstileSecret() != "",
 		"maintenance_enabled":   mustGetSetting(s, "maintenance_enabled"),
 		"maintenance_message":   mustGetSetting(s, "maintenance_message"),
-		"maintenance_pass_set":  mustGetSetting(s, "maintenance_password") != "",
+		"maintenance_pass_set":  func() bool { v, _ := db.GetSecret(s.db, "maintenance_password", s.totpCipher); return v != "" }(),
 		"site_links":            parseSiteLinks(mustGetSetting(s, "site_links")),
 		"default_product_image": s.defaultProductImage(),
 		"site_logo":             s.siteLogoURL(),
@@ -1731,10 +1733,10 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := strings.TrimSpace(str(input["maintenance_password"])); v != "" {
 		// 存储 SHA-256 哈希，不再明文保存。
-		_ = db.SetSetting(s.db, "maintenance_password", hashMaintenancePassword(v))
+		_ = db.SetSecret(s.db, "maintenance_password", hashMaintenancePassword(v), s.totpCipher)
 	}
 	if v := strings.TrimSpace(str(input["turnstile_secret"])); v != "" {
-		_ = db.SetSetting(s.db, "turnstile_secret", v)
+		_ = db.SetSecret(s.db, "turnstile_secret", v, s.totpCipher)
 	}
 	s.audit(r, "site_update", "settings", "site", "", "站点配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -2127,8 +2129,10 @@ func (s *Server) apiAdminSystemBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 备份不包含密钥类配置：避免明文密钥随文件外泄；恢复后需在后台重新填写。
-	for k := range secretSettings {
-		delete(settings, k)
+	for k := range settings {
+		if secretSettingsKey(k) {
+			delete(settings, k)
+		}
 	}
 	w.Header().Set("Content-Disposition", "attachment; filename=liteshop-settings.json")
 	writeJSON(w, 200, map[string]any{"app": "liteshop", "settings": settings})
@@ -2158,7 +2162,7 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// 密钥类配置禁止被备份覆盖（恢复后需重新填写）。
-		if secretSettings[k] {
+		if secretSettingsKey(k) {
 			continue
 		}
 		if err := db.SetSetting(s.db, k, v); err != nil {

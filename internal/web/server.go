@@ -81,11 +81,12 @@ type SiteSettings struct {
 
 func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	bus := task.NewBus(1024)
+	cipher := security.NewCipher(db.EnsureSessionSecret(database))
 	s := &Server{
 		db:        database,
 		cfg:       cfg,
 		pay:       bepusdt.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
-		notifier:  notify.New(cfg, database, bus),
+		notifier:  notify.New(cfg, database, bus, cipher),
 		dbPath:    cfg.DatabasePath,
 		startTime: time.Now(),
 		sessions:  make(map[string]sessionInfo),
@@ -94,7 +95,7 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	}
 	// 异步任务 worker：邮件 / Telegram / Webhook（HTTP 层只发布事件）。
 	bus.Start(context.Background(), 2, s.notifier.Handler())
-	s.totpCipher = security.NewCipher(s.sessionSecret())
+	s.totpCipher = cipher
 	s.orders = order.NewService(
 		repository.NewOrderRepositoryWithTZ(database, models.LocationFromTimezone(s.siteSettings().Timezone)),
 		s.payClient,
@@ -247,6 +248,13 @@ func (s *Server) paymentConfig() config.Config {
 		}
 		return strings.TrimSpace(v)
 	}
+	getSecret := func(key string) string {
+		v, err := db.GetSecret(s.db, key, s.totpCipher)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(v)
+	}
 	cfg.BepusdtFiat = s.fiat()
 	cfg.BepusdtTradeTypes = s.tradeTypes()
 	if len(cfg.BepusdtTradeTypes) > 0 {
@@ -255,7 +263,7 @@ func (s *Server) paymentConfig() config.Config {
 	if v := get("bepusdt_base_url"); v != "" {
 		cfg.BepusdtBaseURL = strings.TrimRight(v, "/")
 	}
-	if v := get("bepusdt_api_token"); v != "" {
+	if v := getSecret("bepusdt_api_token"); v != "" {
 		cfg.BepusdtToken = v
 	}
 	if v := get("bepusdt_timeout_sec"); v != "" {
@@ -634,17 +642,12 @@ func (s *Server) sessionID(r *http.Request) (string, bool) {
 }
 
 func (s *Server) sessionSecret() string {
-	if v, err := db.GetSetting(s.db, "session_secret"); err == nil && strings.TrimSpace(v) != "" {
-		return v
-	}
-	secret := models.RandomToken(32)
-	_ = db.SetSetting(s.db, "session_secret", secret)
-	return secret
+	return db.EnsureSessionSecret(s.db)
 }
 
 func (s *Server) turnstileSecret() string {
-	if v, err := db.GetSetting(s.db, "turnstile_secret"); err == nil && strings.TrimSpace(v) != "" {
-		return v
+	if v, err := db.GetSecret(s.db, "turnstile_secret", s.totpCipher); err == nil && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
 	}
 	return s.cfg.TurnstileSecret
 }

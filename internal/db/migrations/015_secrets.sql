@@ -1,0 +1,4 @@
+-- 015_secrets.sql - 敏感配置拆表（AES 加密存储）
+-- 由 Go 迁移器执行（legacyUpgrades["015_secrets"] -> ensureSecretsTable）
+-- 将 settings 中的 BEpusdt Token / SMTP 密码 / Telegram Token / Webhook Secret /
+-- Turnstile Secret / 维护密码 迁移到 secrets 表（AES-GCM 加密），并从 settings 删除。

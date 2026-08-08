@@ -19,6 +19,7 @@ import (
 	"shop/internal/config"
 	"shop/internal/db"
 	"shop/internal/models"
+	"shop/internal/security"
 	"shop/internal/task"
 )
 
@@ -26,10 +27,11 @@ type Notifier struct {
 	cfg config.Config
 	db  *sql.DB
 	bus *task.Bus
+	cipher *security.Cipher
 }
 
-func New(cfg config.Config, database *sql.DB, bus *task.Bus) *Notifier {
-	return &Notifier{cfg: cfg, db: database, bus: bus}
+func New(cfg config.Config, database *sql.DB, bus *task.Bus, cipher *security.Cipher) *Notifier {
+	return &Notifier{cfg: cfg, db: database, bus: bus, cipher: cipher}
 }
 
 const (
@@ -95,14 +97,14 @@ func (n *Notifier) CurrentConfig() config.Config {
 	if v := get("smtp_username"); v != "" {
 		cfg.SMTPUsername = v
 	}
-	if v := get("smtp_password"); v != "" {
-		cfg.SMTPPassword = v
+	if v, err := db.GetSecret(n.db, "smtp_password", n.cipher); err == nil && strings.TrimSpace(v) != "" {
+		cfg.SMTPPassword = strings.TrimSpace(v)
 	}
 	if v := get("smtp_from"); v != "" {
 		cfg.SMTPFrom = v
 	}
-	if v := get("telegram_bot_token"); v != "" {
-		cfg.TelegramBotToken = v
+	if v, err := db.GetSecret(n.db, "telegram_bot_token", n.cipher); err == nil && strings.TrimSpace(v) != "" {
+		cfg.TelegramBotToken = strings.TrimSpace(v)
 	}
 	if v := get("telegram_chat_id"); v != "" {
 		cfg.TelegramChatID = v
@@ -110,8 +112,8 @@ func (n *Notifier) CurrentConfig() config.Config {
 	if v := get("webhook_url"); v != "" {
 		cfg.WebhookURL = v
 	}
-	if v := get("webhook_secret"); v != "" {
-		cfg.WebhookSecret = v
+	if v, err := db.GetSecret(n.db, "webhook_secret", n.cipher); err == nil && strings.TrimSpace(v) != "" {
+		cfg.WebhookSecret = strings.TrimSpace(v)
 	}
 	return cfg
 }

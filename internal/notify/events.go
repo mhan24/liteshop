@@ -209,7 +209,7 @@ func (n *Notifier) webhookSecret() string {
 	if n.db == nil {
 		return ""
 	}
-	v, err := db.GetSetting(n.db, "webhook_secret")
+	v, err := db.GetSecret(n.db, "webhook_secret", n.cipher)
 	if err != nil {
 		return ""
 	}
