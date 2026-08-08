@@ -283,7 +283,7 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// DefaultProductImage 是内置默认占位图（站内资源，前端兜底 /default-service.svg）。
+// DefaultProductImage 是内置默认占位图（站内资源，前端兜底 /default-product.svg）。
 const DefaultProductImage = ""
 
 func (s *Server) defaultProductImage() string {
@@ -611,9 +611,9 @@ func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := map[string]any{"order": item}
 	if owned {
-		switch service.Status {
+		switch order.Status {
 		case models.OrderPaid, models.OrderProcessing, models.OrderDelivered, models.OrderCompleted:
-			cards, _ := s.orders.Repo().GetOrderCards(service.ID)
+			cards, _ := s.orders.Repo().GetOrderCards(order.ID)
 			list := []map[string]any{}
 			for _, c := range cards {
 				list = append(list, cardJSON(c))

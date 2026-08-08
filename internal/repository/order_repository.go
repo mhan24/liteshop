@@ -1,5 +1,5 @@
 // Package order 提供订单领域的仓储与业务逻辑。
-// 分层: web handler → service.Service → service.Repository → db
+// 分层: web handler → order.Service → order.Repository → db
 package repository
 
 import (
@@ -49,12 +49,12 @@ func (r *OrderRepository) CreatePendingOrder(order *models.Order) error {
 	}
 	defer tx.Rollback()
 	res, err := tx.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, cost_cents, cost_snapshot_source, fiat, trade_type, buyer_contact, view_token, status, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?)`, service.OrderNo, service.ProductID, service.ProductName, service.Qty, service.AmountCents, service.CostCents, service.CostSnapshotSource, service.Fiat, service.TradeType, service.BuyerContact, service.ViewToken, service.CreatedAt, service.UpdatedAt)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?)`, order.OrderNo, order.ProductID, order.ProductName, order.Qty, order.AmountCents, order.CostCents, order.CostSnapshotSource, order.Fiat, order.TradeType, order.BuyerContact, order.ViewToken, order.CreatedAt, order.UpdatedAt)
 	if err != nil {
 		return err
 	}
-	service.ID, _ = res.LastInsertId()
-	rows, err := tx.Query(`SELECT id FROM cards WHERE product_id = ? AND status = 'available' LIMIT ?`, service.ProductID, service.Qty)
+	order.ID, _ = res.LastInsertId()
+	rows, err := tx.Query(`SELECT id FROM cards WHERE product_id = ? AND status = 'available' LIMIT ?`, order.ProductID, order.Qty)
 	if err != nil {
 		return err
 	}
@@ -68,11 +68,11 @@ func (r *OrderRepository) CreatePendingOrder(order *models.Order) error {
 		ids = append(ids, id)
 	}
 	rows.Close()
-	if len(ids) != service.Qty {
+	if len(ids) != order.Qty {
 		return errInsufficient
 	}
 	for _, id := range ids {
-		if _, err := tx.Exec(`UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ? WHERE id = ? AND status = 'available'`, service.ID, models.Now(), id); err != nil {
+		if _, err := tx.Exec(`UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ? WHERE id = ? AND status = 'available'`, order.ID, models.Now(), id); err != nil {
 			return err
 		}
 	}
