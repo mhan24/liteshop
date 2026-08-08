@@ -163,23 +163,6 @@ go build -o shop ./cmd/shop
 
 ## Deployment (server)
 
-### Docker (NAS / panels)
-
-```bash
-cp .env.example .env     # set DOMAIN
-docker compose up -d --build
-```
-
-| Service | Description | Port |
-| --- | --- | --- |
-| `liteshop` | Go API + embedded admin | internal 8080 |
-| `storefront` | Nuxt SSR | internal 3000 |
-| `caddy` | reverse proxy + auto HTTPS | 80 / 443 |
-| `sqlite` | data in named volume `liteshop_data` | — |
-
-- Open `https://<DOMAIN>/setup` for first-time initialization
-- BEpusdt callback: `https://<DOMAIN>/notify/bepusdt`
-
 ### One-click install
 
 On a fresh Ubuntu / Debian / CentOS / Rocky / Alma server, point the domain A record to the server, then:

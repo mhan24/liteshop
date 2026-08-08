@@ -22,7 +22,7 @@ English / 中文：
 ### Deployment / 部署
 
 - Go 1.26 + SQLite (modernc latest), single zero-dependency binary / Go 1.26 + SQLite（modernc 最新），单二进制零依赖
-- Docker / one-click install.sh: non-root, UMask=0077, data files 600, Caddy auto-HTTPS / Docker / 一键 install.sh：非 root 运行、UMask=0077、数据文件 600、Caddy 自动 HTTPS
+- One-click install.sh: non-root, UMask=0077, data files 600, Caddy auto-HTTPS / 一键 install.sh：非 root 运行、UMask=0077、数据文件 600、Caddy 自动 HTTPS
 
 ### Dependencies / 依赖
 
@@ -52,7 +52,7 @@ LiteShop 首个官方发布版本。
 ### 部署
 
 - Go 1.26 + SQLite（modernc 最新），单二进制零依赖
-- Docker / 一键 install.sh：非 root 运行、UMask=0077、数据文件 600、Caddy 自动 HTTPS
+- 一键 install.sh：非 root 运行、UMask=0077、数据文件 600、Caddy 自动 HTTPS
 
 ### 依赖
 
