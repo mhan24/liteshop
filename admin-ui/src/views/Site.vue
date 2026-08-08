@@ -3,6 +3,7 @@
     <template #header><h2>{{ t('site.title') }}</h2></template>
     <el-form label-position="top" :model="form" style="max-width:680px">
       <el-form-item :label="t('site.siteTitle')"><el-input v-model="form.site_title" /></el-form-item>
+      <el-form-item :label="t('site.publicBaseUrl')"><el-input v-model="form.shop_public_base_url" :placeholder="t('site.publicBaseUrlPlaceholder')" /></el-form-item>
       <el-form-item :label="t('site.announcement')">
         <MdEditor v-model="form.site_announcement" :language="editorLang" :preview="false" style="height:300px;width:100%" />
       </el-form-item>

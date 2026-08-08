@@ -262,6 +262,8 @@ const messages = {
     site: {
       title: '站点设置',
       siteTitle: '站点标题',
+      publicBaseUrl: '站点公开地址',
+      publicBaseUrlPlaceholder: '如 https://shop.example.com（订单/通知链接使用）',
       subtitleNote: '副标题（同时用作 SEO 描述）',
       locale: '站点语言',
       currency: '货币',
@@ -640,6 +642,8 @@ const messages = {
     site: {
       title: 'Site',
       siteTitle: 'Site title',
+      publicBaseUrl: 'Site public base URL',
+      publicBaseUrlPlaceholder: 'e.g. https://shop.example.com (used in order/notification links)',
       subtitleNote: 'Subtitle (also used as SEO description)',
       locale: 'Site locale',
       currency: 'Currency',

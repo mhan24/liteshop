@@ -1668,6 +1668,7 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"site_title":            st.Title,
 		"site_subtitle":         st.Subtitle,
+		"shop_public_base_url":  s.paymentConfig().PublicBaseURL,
 		"site_announcement":     st.Announcement,
 		"seo_description":       st.SEODescription,
 		"seo_keywords":          st.SEOKeywords,
@@ -1718,6 +1719,15 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 		"stock_display_mode": "stock_display_mode",
 	} {
 		setIfPresent(key, field)
+	}
+	// 站点公开地址（订单/通知链接使用）。
+	if v, ok := input["shop_public_base_url"]; ok {
+		u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		_ = db.SetSetting(s.db, "shop_public_base_url", u)
 	}
 	// 图片类 URL 仅接受 http/https 绝对地址（空值表示使用默认占位图）。
 	for _, f := range []string{"default_product_image", "site_logo", "site_favicon"} {
