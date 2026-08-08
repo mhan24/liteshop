@@ -34,7 +34,7 @@ func (n *Notifier) Notify(event string, payload map[string]string) {
 	}
 	cfg := n.CurrentConfig()
 	site := n.siteTitle()
-	text := renderTemplate(n.eventText(event), payload)
+	text := renderTemplate(n.eventTemplate(event, "telegram", n.eventText(event)), payload)
 
 	// Telegram
 	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
@@ -42,17 +42,61 @@ func (n *Notifier) Notify(event string, payload map[string]string) {
 			log.Printf("notify telegram failed event=%s err=%v", event, err)
 		}
 	}
-	// Email (仅订单相关事件发给买家, 简单事件发到站点 SMTP From 不现实, 故仅当 payload 含 contact 时发送)
-	if contact := payload["contact"]; cfg.SMTPHost != "" && strings.Contains(contact, "@") {
-		subject := "[" + site + "] " + payload["title"]
-		if err := n.sendMailWithConfig(cfg, contact, subject, text); err != nil {
-			log.Printf("notify mail failed event=%s to=%s err=%v", event, contact, err)
+	// Email：买家事件发给买家；无买家联系方式的系统事件发给管理员通知邮箱（若已配置）。
+	if cfg.SMTPHost != "" {
+		if contact := payload["contact"]; strings.Contains(contact, "@") {
+			subject := renderTemplate(n.eventTemplate(event, "mail_subject", "["+site+"] "+payload["title"]), payload)
+			body := renderTemplate(n.eventTemplate(event, "mail_body", n.eventText(event)), payload)
+			if err := n.sendMailWithConfig(cfg, contact, subject, body); err != nil {
+				log.Printf("notify mail failed event=%s to=%s err=%v", event, contact, err)
+			}
+		} else if adminEmail := n.adminEmail(); adminEmail != "" {
+			subject := renderTemplate(n.eventTemplate(event, "mail_subject", "["+site+"] "+n.eventTitle(event)), payload)
+			if err := n.sendMailWithConfig(cfg, adminEmail, subject, text); err != nil {
+				log.Printf("notify admin mail failed event=%s to=%s err=%v", event, adminEmail, err)
+			}
 		}
 	}
 	// Webhook
 	if cfg.WebhookURL != "" {
 		go n.sendWebhook(event, payload, site)
 	}
+}
+
+// eventTemplate 返回事件模板（存配置优先，否则回退默认值）。
+func (n *Notifier) eventTemplate(event, kind, fallback string) string {
+	if n.db != nil {
+		if v, err := db.GetSetting(n.db, "evt_tpl_"+kind+"_"+event); err == nil && strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return fallback
+}
+
+// EventTemplates 返回各事件当前生效的模板（供后台展示与编辑）。
+func (n *Notifier) EventTemplates() map[string]map[string]string {
+	events := []string{EventOrderCreated, EventPaymentSuccess, EventDelivered, EventLowStock, EventSystemError}
+	out := make(map[string]map[string]string, len(events))
+	for _, ev := range events {
+		out[ev] = map[string]string{
+			"telegram":     n.eventTemplate(ev, "telegram", n.eventText(ev)),
+			"mail_subject": n.eventTemplate(ev, "mail_subject", "["+n.siteTitle()+"] "+n.eventTitle(ev)),
+			"mail_body":    n.eventTemplate(ev, "mail_body", n.eventText(ev)),
+		}
+	}
+	return out
+}
+
+// adminEmail 返回管理员通知邮箱（接收低库存/系统异常等事件）。
+func (n *Notifier) adminEmail() string {
+	if n.db == nil {
+		return ""
+	}
+	v, err := db.GetSetting(n.db, "notify_admin_email")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(v)
 }
 
 func (n *Notifier) sendWebhook(event string, payload map[string]string, site string) {

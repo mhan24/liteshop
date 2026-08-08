@@ -1540,6 +1540,7 @@ func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 	cfg := s.notifier.CurrentConfig()
 	subject, mailBody, telegramBody := s.notifier.PaidTemplates()
 	events, _ := db.GetSetting(s.db, "notify_events")
+	adminEmail, _ := db.GetSetting(s.db, "notify_admin_email")
 	if strings.TrimSpace(events) == "" {
 		events = "order_created,payment_success,delivered,low_stock,system_error"
 	}
@@ -1554,6 +1555,8 @@ func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 		"webhook_url":        cfg.WebhookURL,
 		"webhook_secret_set": cfg.WebhookSecret != "",
 		"notify_events":      events,
+		"notify_admin_email": adminEmail,
+		"event_templates":    s.notifier.EventTemplates(),
 		"mail_paid_subject":  subject,
 		"mail_paid_body":     mailBody,
 		"telegram_paid_body": telegramBody,
@@ -1577,6 +1580,7 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 	setIfPresent("telegram_chat_id", "telegram_chat_id")
 	setIfPresent("webhook_url", "webhook_url")
 	setIfPresent("notify_events", "notify_events")
+	setIfPresent("notify_admin_email", "notify_admin_email")
 	setIfPresent("mail_paid_subject", "mail_paid_subject")
 	setIfPresent("mail_paid_body", "mail_paid_body")
 	setIfPresent("telegram_paid_body", "telegram_paid_body")
@@ -1591,6 +1595,22 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := strings.TrimSpace(str(input["webhook_secret"])); v != "" {
 		_ = db.SetSetting(s.db, "webhook_secret", v)
+	}
+	// 事件模板：evt_tpl_<kind>_<event>（空值回退默认模板）
+	if v, ok := input["event_templates"]; ok {
+		if m, ok := v.(map[string]any); ok {
+			for ev, tpl := range m {
+				tm, ok := tpl.(map[string]any)
+				if !ok {
+					continue
+				}
+				for _, kind := range []string{"telegram", "mail_subject", "mail_body"} {
+					if val, ok := tm[kind]; ok {
+						_ = db.SetSetting(s.db, "evt_tpl_"+kind+"_"+ev, strings.TrimSpace(str(val)))
+					}
+				}
+			}
+		}
 	}
 	s.audit(r, "notify_update", "settings", "notify", "", "通知配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})

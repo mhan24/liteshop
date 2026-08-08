@@ -20,6 +20,25 @@
           <el-checkbox value="system_error">{{ t('notify.eventSystemError') }}</el-checkbox>
         </el-checkbox-group>
       </el-form-item>
+      <el-divider content-position="left">{{ t('notify.eventTemplates') }}</el-divider>
+      <el-form-item :label="t('notify.adminEmail')">
+        <el-input v-model="form.notify_admin_email" :placeholder="t('notify.adminEmailPlaceholder')" />
+      </el-form-item>
+      <el-collapse>
+        <el-collapse-item v-for="ev in eventList" :key="ev.key" :title="ev.label">
+          <el-form-item :label="t('notify.eventTelegram')">
+            <el-input v-model="form.event_templates[ev.key].telegram" type="textarea" :rows="3" />
+          </el-form-item>
+          <template v-if="ev.key === 'order_created'">
+            <el-form-item :label="t('notify.eventMailSubject')">
+              <el-input v-model="form.event_templates[ev.key].mail_subject" />
+            </el-form-item>
+            <el-form-item :label="t('notify.eventMailBody')">
+              <el-input v-model="form.event_templates[ev.key].mail_body" type="textarea" :rows="5" />
+            </el-form-item>
+          </template>
+        </el-collapse-item>
+      </el-collapse>
       <el-divider content-position="left">{{ t('notify.paidTemplates') }}</el-divider>
       <el-form-item :label="t('notify.mailSubject')"><el-input v-model="form.mail_paid_subject" /></el-form-item>
       <el-form-item :label="t('notify.mailBody')"><el-input v-model="form.mail_paid_body" type="textarea" :rows="8" /></el-form-item>
@@ -30,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api'
@@ -40,6 +59,13 @@ const loading = ref(false)
 const saving = ref(false)
 const form = ref<any>({})
 const events = ref<string[]>([])
+const eventList = computed(() => [
+  { key: 'order_created', label: t('notify.eventOrderCreated') },
+  { key: 'payment_success', label: t('notify.eventPaymentSuccess') },
+  { key: 'delivered', label: t('notify.eventDelivered') },
+  { key: 'low_stock', label: t('notify.eventLowStock') },
+  { key: 'system_error', label: t('notify.eventSystemError') },
+])
 
 onMounted(async () => {
   loading.value = true
@@ -50,6 +76,7 @@ onMounted(async () => {
     form.value.telegram_bot_token = ''
     form.value.webhook_secret = ''
     events.value = String(form.value.notify_events || '').split(',').filter(Boolean)
+    if (!form.value.event_templates) form.value.event_templates = {}
   } finally {
     loading.value = false
   }
