@@ -16,18 +16,18 @@ import (
 	"time"
 
 	"shop/internal/config"
-	"shop/internal/db"
+	"shop/internal/db/repository"
+	"shop/internal/jobs"
 	"shop/internal/models"
 	"shop/internal/security"
-	"shop/internal/jobs"
 
 	"shop/internal/logging"
 )
 
 type Notifier struct {
-	cfg config.Config
-	db  *sql.DB
-	bus *jobs.Bus
+	cfg    config.Config
+	db     *sql.DB
+	bus    *jobs.Bus
 	cipher *security.Cipher
 }
 
@@ -81,7 +81,7 @@ func (n *Notifier) CurrentConfig() config.Config {
 		return cfg
 	}
 	get := func(key string) string {
-		v, err := db.GetSetting(n.db, key)
+		v, err := repository.GetSetting(n.db, key)
 		if err != nil {
 			return ""
 		}
@@ -98,13 +98,13 @@ func (n *Notifier) CurrentConfig() config.Config {
 	if v := get("smtp_username"); v != "" {
 		cfg.SMTPUsername = v
 	}
-	if v, err := db.GetSecret(n.db, "smtp_password", n.cipher); err == nil && strings.TrimSpace(v) != "" {
+	if v, err := repository.GetSecret(n.db, "smtp_password", n.cipher); err == nil && strings.TrimSpace(v) != "" {
 		cfg.SMTPPassword = strings.TrimSpace(v)
 	}
 	if v := get("smtp_from"); v != "" {
 		cfg.SMTPFrom = v
 	}
-	if v, err := db.GetSecret(n.db, "telegram_bot_token", n.cipher); err == nil && strings.TrimSpace(v) != "" {
+	if v, err := repository.GetSecret(n.db, "telegram_bot_token", n.cipher); err == nil && strings.TrimSpace(v) != "" {
 		cfg.TelegramBotToken = strings.TrimSpace(v)
 	}
 	if v := get("telegram_chat_id"); v != "" {
@@ -113,14 +113,14 @@ func (n *Notifier) CurrentConfig() config.Config {
 	if v := get("webhook_url"); v != "" {
 		cfg.WebhookURL = v
 	}
-	if v, err := db.GetSecret(n.db, "webhook_secret", n.cipher); err == nil && strings.TrimSpace(v) != "" {
+	if v, err := repository.GetSecret(n.db, "webhook_secret", n.cipher); err == nil && strings.TrimSpace(v) != "" {
 		cfg.WebhookSecret = strings.TrimSpace(v)
 	}
 	return cfg
 }
 
 func (n *Notifier) siteTitle() string {
-	if v, err := db.GetSetting(n.db, "site_title"); err == nil && strings.TrimSpace(v) != "" {
+	if v, err := repository.GetSetting(n.db, "site_title"); err == nil && strings.TrimSpace(v) != "" {
 		return strings.TrimSpace(v)
 	}
 	return "LiteShop"
@@ -166,7 +166,7 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 		if err := n.sendMailWithConfig(cfg, order.BuyerContact, subject, mailBody); err != nil {
 			logging.App().Sugar().Warnf("send paid mail failed: order=%s to=%s err=%v", order.OrderNo, order.BuyerContact, err)
 			n.enqueueFailedMail(order.BuyerContact, subject, mailBody, order.ID)
-			_ = db.AddOrderLog(n.db, order.ID, "notify_failed", "邮件通知发送失败: "+err.Error(), order.Status, order.Status, 0, "smtp")
+			_ = repository.AddOrderLog(n.db, order.ID, "notify_failed", "邮件通知发送失败: "+err.Error(), order.Status, order.Status, 0, "smtp")
 		} else {
 			mailSent = true
 		}
@@ -174,7 +174,7 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
 		if err := n.sendTelegramWithConfig(cfg, telegramBody); err != nil {
 			logging.App().Sugar().Warnf("send paid telegram failed: order=%s err=%v", order.OrderNo, err)
-			_ = db.AddOrderLog(n.db, order.ID, "notify_failed", "Telegram 通知发送失败: "+err.Error(), order.Status, order.Status, 0, "telegram")
+			_ = repository.AddOrderLog(n.db, order.ID, "notify_failed", "Telegram 通知发送失败: "+err.Error(), order.Status, order.Status, 0, "telegram")
 		} else {
 			telegramSent = true
 		}
@@ -187,7 +187,7 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 		if telegramSent {
 			channels = append(channels, "Telegram")
 		}
-		_ = db.AddOrderLog(n.db, order.ID, "notify_sent", "通知已发送 ("+strings.Join(channels, "+")+")", order.Status, order.Status, 0, "")
+		_ = repository.AddOrderLog(n.db, order.ID, "notify_sent", "通知已发送 ("+strings.Join(channels, "+")+")", order.Status, order.Status, 0, "")
 	}
 }
 
@@ -237,7 +237,7 @@ func (n *Notifier) enqueueFailedMail(to, subject, body string, orderID int64) {
 	if n.db == nil {
 		return
 	}
-	_ = db.EnqueueMail(n.db, to, subject, body, orderID, time.Now().Add(time.Minute).Unix())
+	_ = repository.EnqueueMail(n.db, to, subject, body, orderID, time.Now().Add(time.Minute).Unix())
 }
 
 // orderURL 构造订单查看地址；新订单携带查看令牌，避免依赖邮箱弱凭证。

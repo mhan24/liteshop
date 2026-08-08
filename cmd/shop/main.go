@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"shop/internal/api"
 	"shop/internal/config"
 	"shop/internal/db"
-	"shop/internal/api"
+	"shop/internal/db/repository"
 	"shop/internal/logging"
 )
 
@@ -28,10 +29,10 @@ func main() {
 	defer database.Close()
 
 	if cfg.AdminPassword != "" {
-		if _, err := db.SeedAdmin(database, cfg.AdminUsername, cfg.AdminPassword); err != nil {
+		if _, err := repository.SeedAdmin(database, cfg.AdminUsername, cfg.AdminPassword); err != nil {
 			log.Fatal(err)
 		}
-	} else if !db.HasAdmin(database) {
+	} else if !repository.HasAdmin(database) {
 		log.Printf("no admin configured; open /setup or /admin to initialize")
 	}
 

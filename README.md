@@ -40,11 +40,11 @@ English: [README.en.md](README.en.md)
 
 - SQLite 存储（纯 Go，无 CGO）；无应用级环境变量，**全部配置在初始化与管理后台写入数据库**
 - 配置系统：`settings`（系统配置）+ `secrets`（敏感配置 AES-GCM 加密）
-- 分层：api（handler）→ service（业务）→ repository（数据）→ db；payment / notify / jobs / logging 按职责独立
+- 分层：api（handler）→ service（业务）→ db/repository（数据）→ db/schema（schema 演进）；payment / notify / jobs / logging 按职责独立
 - 任务系统：进程内 goroutine + channel（邮件 / Telegram / Webhook），HTTP 层只发布事件
 - 后台任务（cron + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份
 - 日志（zap）：app / payment / security 三通道，50MB 轮转保留 7 份
-- 迁移体系：编号 .sql 迁移（`internal/db/migrations/`），只执行一次并记录
+- 迁移体系：编号 .sql 迁移（`internal/db/schema/migrations/`），只执行一次并记录
 - 管理员安全：PBKDF2-SHA256、TOTP 2FA、**登录失败 5 次锁定 10 分钟**、登录时序均摊防枚举
 - 安全：RBAC、审计日志、全接口限流、Turnstile、CSP、HSTS、安全响应头、CSV 注入防护、SQL 全参数化
 - 健康检查 `/health`、首次初始化 `/setup`
@@ -76,16 +76,16 @@ Caddy (反向代理 :443)
 ```
 HTTP handler (internal/api)
     → service (internal/service)
-    → repository (internal/repository)
+    → repository (internal/db/repository)
     → database/sql (internal/db)
 ```
 
-- `OrderRepository` / `ProductRepository` / `KeyRepository`（卡密）集中所有 SQL，业务不散落 `db.Exec`；
+- `internal/db/repository` 集中全部 SQL：Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log，业务不散落 `db.Exec`；
 - 换数据库只需换驱动（sqlite.go / postgres.go 未来备用）+ 迁移方言。
 
 ### 数据库迁移（Laravel 风格）
 
-- 迁移文件 `internal/db/migrations/`，编号命名（`001_init.sql`、`002_...`、…），按序执行；
+- 迁移文件 `internal/db/schema/migrations/`，编号命名（`001_init.sql`、`002_...`、…），按序执行；
 - 每个迁移记录在 `schema_migrations`，**只执行一次**，重启不重复；
 - 规范：**新增 schema 变更必须新增编号 .sql 文件**，禁止启动时"检查表 / 自动补列"；
 - 仅 SQLite 无法纯 SQL 表达的存量升级（条件 ALTER / 表重建 / 数据迁移）使用 Go 迁移步骤。
@@ -138,8 +138,9 @@ HTTP handler (internal/api)
 cmd/shop/               Go 程序入口
 internal/api/           HTTP 路由、JSON API、支付回调、内嵌后台（handler 层）
 internal/service/       业务逻辑（OrderService / ProductService）
-internal/repository/    数据访问（OrderRepository / ProductRepository / KeyRepository）
-internal/db/            数据库层：sqlite.go / postgres.go（未来备用）/ migrations / settings+secrets
+internal/db/            数据库连接层：sqlite.go / postgres.go（未来备用）
+internal/db/schema/     schema 演进：迁移执行器 + migrations/*.sql（唯一 schema 变更入口）
+internal/db/repository/ 全部数据访问（Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log）
 internal/models/        模型与工具
 internal/payment/       BEpusdt 支付对接
 internal/notify/        通知（事件模板 / 邮件 / Telegram / Webhook）

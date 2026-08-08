@@ -1,4 +1,4 @@
-package db
+package repository
 
 import (
 	"database/sql"
@@ -17,6 +17,41 @@ var SecretSettingKeys = []string{
 	"webhook_secret",
 	"turnstile_secret",
 	"maintenance_password",
+}
+
+// GetSetting 读取系统配置；无记录返回空串。
+func GetSetting(d *sql.DB, key string) (string, error) {
+	var value string
+	err := d.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return value, err
+}
+
+// SetSetting 写入（或更新）系统配置。
+func SetSetting(d *sql.DB, key, value string) error {
+	_, err := d.Exec(`INSERT INTO settings(key, value, updated_at) VALUES(?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, key, value, models.Now())
+	return err
+}
+
+// AllSettings 返回全部系统配置。
+func AllSettings(d *sql.DB) (map[string]string, error) {
+	rows, err := d.Query(`SELECT key, value FROM settings ORDER BY key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
 }
 
 // EnsureSessionSecret 返回会话主密钥（缺失时生成并写入 settings）。
@@ -55,47 +90,13 @@ func SetSecret(d *sql.DB, key, value string, c *security.Cipher) error {
 	if err != nil {
 		return err
 	}
-	return upsertSecret(d, key, enc)
+	return UpsertSecretRaw(d, key, enc)
 }
 
-// upsertSecret 直接写入已加密值（迁移/内部使用）。
-func upsertSecret(d *sql.DB, key, encrypted string) error {
+// UpsertSecretRaw 直接写入已加密值（迁移/内部使用）。
+func UpsertSecretRaw(d *sql.DB, key, encrypted string) error {
 	_, err := d.Exec(`INSERT INTO secrets(key, value, updated_at) VALUES(?, ?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
 		key, encrypted, models.Now())
 	return err
-}
-
-// ensureSecretsTable 建 secrets 表，并把存量 settings 中的敏感配置迁移为 AES 加密存储。
-func ensureSecretsTable(d *sql.DB) error {
-	cipher := security.NewCipher(EnsureSessionSecret(d))
-	if cipher == nil {
-		return errors.New("cipher init failed")
-	}
-	for _, key := range SecretSettingKeys {
-		v, err := GetSetting(d, key)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(v) == "" {
-			continue
-		}
-		if cipher.IsEncrypted(v) {
-			if err := upsertSecret(d, key, v); err != nil {
-				return err
-			}
-		} else {
-			enc, err := cipher.Encrypt(v)
-			if err != nil {
-				return err
-			}
-			if err := upsertSecret(d, key, enc); err != nil {
-				return err
-			}
-		}
-		if _, err := d.Exec(`DELETE FROM settings WHERE key = ?`, key); err != nil {
-			return err
-		}
-	}
-	return nil
 }

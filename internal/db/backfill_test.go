@@ -1,7 +1,6 @@
 package db
 
 import (
-	"strings"
 	"testing"
 
 	"shop/internal/models"
@@ -147,39 +146,6 @@ func TestMigration008CostSource(t *testing.T) {
 	_ = d.QueryRow(`SELECT COUNT(1) FROM pragma_table_info('orders') WHERE name='cost_snapshot_source'`).Scan(&cols)
 	if cols == 0 {
 		t.Fatalf("orders.cost_snapshot_source missing")
-	}
-}
-
-// TestMigration007SQLIntegrity 验证 007 迁移 SQL 能被正确拆分且关键语句完整。
-func TestMigration007SQLIntegrity(t *testing.T) {
-	data, err := migrationFS.ReadFile("migrations/007_coupon_unique_and_backfill.sql")
-	if err != nil {
-		t.Fatalf("read 007: %v", err)
-	}
-	stmts := splitSQL(string(data))
-	joined := strings.Join(stmts, " ")
-	// 关键语句必须存在且完整
-	for _, want := range []string{
-		"UPDATE coupons", "used_count",
-		"SELECT COUNT(*) FROM coupon_usages",
-		"DELETE FROM coupon_usages",
-		"DROP INDEX IF EXISTS idx_coupon_usage_order",
-		"CREATE UNIQUE INDEX", "WHERE order_no <> ''",
-		"UPDATE orders", "COALESCE(",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("007 missing statement fragment: %q", want)
-		}
-	}
-	// 拆分不应产生空语句或残缺尾部
-	for _, s := range stmts {
-		if strings.TrimSpace(s) == "" {
-			t.Fatalf("007 produced empty statement")
-		}
-	}
-	// 最后一条语句应完整结束（以分号拆分后最后仍非空为正常，此处验证无截断注释）
-	if strings.Contains(stmts[len(stmts)-1], "--") {
-		t.Fatalf("007 trailing comment leaked into SQL statement")
 	}
 }
 

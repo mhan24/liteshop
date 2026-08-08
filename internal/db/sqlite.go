@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	_ "modernc.org/sqlite"
+
+	"shop/internal/db/schema"
 )
 
 // Open 打开 SQLite 数据库并执行迁移（当前默认实现）。
@@ -18,7 +20,7 @@ func Open(path string) (*sql.DB, error) {
 	if err := d.Ping(); err != nil {
 		return nil, err
 	}
-	if err := migrate(d); err != nil {
+	if err := schema.Migrate(d); err != nil {
 		return nil, err
 	}
 	return d, nil

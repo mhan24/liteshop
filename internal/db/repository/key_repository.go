@@ -1,4 +1,3 @@
-// Package repository 提供数据库访问仓库层（Order/Product/Key）。
 package repository
 
 import (

@@ -10,6 +10,7 @@ import (
 
 	"shop/internal/config"
 	"shop/internal/db"
+	"shop/internal/db/repository"
 )
 
 func TestWebhookDelivery(t *testing.T) {
@@ -20,7 +21,7 @@ func TestWebhookDelivery(t *testing.T) {
 	defer d.Close()
 
 	// 启用事件 + 配置 webhook
-	_ = db.SetSetting(d, "notify_events", "payment_success,system_error")
+	_ = repository.SetSetting(d, "notify_events", "payment_success,system_error")
 	var mu sync.Mutex
 	received := []map[string]any{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +33,7 @@ func TestWebhookDelivery(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
-	_ = db.SetSetting(d, "webhook_url", srv.URL)
+	_ = repository.SetSetting(d, "webhook_url", srv.URL)
 
 	n := &Notifier{cfg: defaultCfg(), db: d}
 	payload := map[string]string{"event": EventPaymentSuccess, "order_no": "S1", "title": "支付成功通知", "contact": "a@b.com"}
@@ -70,14 +71,14 @@ func TestEventDisabledSkip(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	_ = db.SetSetting(d, "notify_events", "system_error")
+	_ = repository.SetSetting(d, "notify_events", "system_error")
 	var hit bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hit = true
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
-	_ = db.SetSetting(d, "webhook_url", srv.URL)
+	_ = repository.SetSetting(d, "webhook_url", srv.URL)
 	n := &Notifier{cfg: defaultCfg(), db: d}
 	n.Notify(EventPaymentSuccess, map[string]string{"event": EventPaymentSuccess})
 	time.Sleep(300 * time.Millisecond)
@@ -92,8 +93,8 @@ func TestNotifyLowStock(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	_ = db.SetSetting(d, "notify_events", "low_stock")
-	_ = db.SetSetting(d, "low_stock_threshold", "5")
+	_ = repository.SetSetting(d, "notify_events", "low_stock")
+	_ = repository.SetSetting(d, "low_stock_threshold", "5")
 	var mu sync.Mutex
 	var count int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +104,7 @@ func TestNotifyLowStock(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
-	_ = db.SetSetting(d, "webhook_url", srv.URL)
+	_ = repository.SetSetting(d, "webhook_url", srv.URL)
 	n := &Notifier{cfg: defaultCfg(), db: d}
 
 	n.NotifyLowStock(1, "测试商品", 3, 5) // 低于阈值

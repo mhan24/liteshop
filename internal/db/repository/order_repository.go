@@ -1,5 +1,3 @@
-// Package order 提供订单领域的仓储与业务逻辑。
-// 分层: web handler → order.Service → order.Repository → db
 package repository
 
 import (

@@ -1,4 +1,4 @@
-package db
+package repository
 
 import (
 	"database/sql"
@@ -12,6 +12,32 @@ var ErrAdminNotFound = errors.New("admin not found")
 
 // ErrLastAdmin 不能降级/删除最后一个管理员。
 var ErrLastAdmin = errors.New("cannot demote the last admin")
+
+// HasAdmin 是否存在至少一个管理员。
+func HasAdmin(d *sql.DB) bool {
+	var count int
+	if err := d.QueryRow(`SELECT COUNT(1) FROM admins`).Scan(&count); err != nil {
+		return false
+	}
+	return count > 0
+}
+
+// SeedAdmin 创建初始管理员；已存在管理员时返回 (false, nil)。
+// 返回是否实际插入，供调用方处理并发初始化。
+func SeedAdmin(d *sql.DB, username, password string) (bool, error) {
+	if HasAdmin(d) {
+		return false, nil
+	}
+	_, err := d.Exec(`INSERT INTO admins(id, username, password_hash, role, created_at) VALUES(1, ?, ?, 'admin', ?)`, username, models.HashPassword(password), models.Now())
+	if err != nil {
+		// 并发下可能已由另一请求插入，视为已初始化。
+		if HasAdmin(d) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
 
 // AdminByUsername 按用户名查询登录凭据。
 func AdminByUsername(d *sql.DB, username string) (adminID int64, hash, totpSecret string, totpEnabled bool, err error) {

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"shop/internal/payment"
-	"shop/internal/repository"
+	"shop/internal/db/repository"
 	"shop/internal/models"
+	"shop/internal/payment"
 )
 
 // PaymentConfig 提供支付所需配置（由 web 层实现，避免循环依赖）。

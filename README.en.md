@@ -40,11 +40,11 @@ An automated digital-goods delivery (card / activation code) shop built with **G
 
 - SQLite storage (pure Go, no CGO); no application-level environment variables — **all configuration is written to the database** during `/setup` and from the admin panel
 - Config system: `settings` (system config) + `secrets` (sensitive config AES-GCM encrypted)
-- Layering: api (handler) → service (business) → repository (data) → db; payment / notify / jobs / logging each isolated by responsibility
+- Layering: api (handler) → service (business) → db/repository (data) → db/schema (schema evolution); payment / notify / jobs / logging each isolated by responsibility
 - Task system: in-process goroutine + channel (mail / Telegram / Webhook); the HTTP layer only publishes events
 - Background jobs (cron + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files
-- Migration system: numbered .sql migrations (`internal/db/migrations/`), each run exactly once and recorded
+- Migration system: numbered .sql migrations (`internal/db/schema/migrations/`), each run exactly once and recorded
 - Admin security: PBKDF2-SHA256, TOTP 2FA, **lockout after 5 failed logins for 10 minutes**, timing-equalized login
 - Security: RBAC, audit logs, endpoint-wide rate limiting, Turnstile, CSP, HSTS, security headers, CSV injection guard, fully parameterized SQL
 - Health check `/health`, first-time setup `/setup`
@@ -76,16 +76,16 @@ Caddy (reverse proxy :443)
 ```
 HTTP handler (internal/api)
     → service (internal/service)
-    → repository (internal/repository)
+    → repository (internal/db/repository)
     → database/sql (internal/db)
 ```
 
-- `OrderRepository` / `ProductRepository` / `KeyRepository` (cards) centralize all SQL; business code has no scattered `db.Exec`;
+- `internal/db/repository` centralizes all SQL: Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log; business code has no scattered `db.Exec`;
 - Switching databases only requires a new driver (sqlite.go / postgres.go future) + a migration dialect.
 
 ### Database migrations (Laravel style)
 
-- Migration files live in `internal/db/migrations/`, numbered (`001_init.sql`, `002_...`, …), applied in order;
+- Migration files live in `internal/db/schema/migrations/`, numbered (`001_init.sql`, `002_...`, …), applied in order;
 - Every applied migration is recorded in `schema_migrations` and **runs exactly once** — never re-run on restart;
 - Policy: **new schema changes must be new numbered .sql files**; no startup "table checks / auto column creation";
 - Go migration steps are reserved for legacy upgrades SQLite cannot express in pure SQL (conditional ALTER / table rebuild / data migration).
@@ -138,8 +138,9 @@ Cancel / expire: release stock + call BEpusdt `cancel-transaction`.
 cmd/shop/               Go entrypoint
 internal/api/           HTTP routes, JSON API, payment callback, embedded admin (handler layer)
 internal/service/       business logic (OrderService / ProductService)
-internal/repository/    data access (OrderRepository / ProductRepository / KeyRepository)
-internal/db/            database layer: sqlite.go / postgres.go (future) / migrations / settings+secrets
+internal/db/            database connection layer: sqlite.go / postgres.go (future)
+internal/db/schema/     schema evolution: migration runner + migrations/*.sql (single entry for schema changes)
+internal/db/repository/ all data access (Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log)
 internal/models/        models & helpers
 internal/payment/       BEpusdt integration
 internal/notify/        notifications (event templates / mail / Telegram / Webhook)

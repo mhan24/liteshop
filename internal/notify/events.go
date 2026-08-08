@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"shop/internal/db"
-	"shop/internal/models"
+	"shop/internal/db/repository"
 	"shop/internal/jobs"
+	"shop/internal/models"
 
 	"shop/internal/logging"
 )
@@ -63,7 +63,7 @@ func (n *Notifier) Notify(event string, payload map[string]string) {
 // eventTemplate 返回事件模板（存配置优先，否则回退默认值）。
 func (n *Notifier) eventTemplate(event, kind, fallback string) string {
 	if n.db != nil {
-		if v, err := db.GetSetting(n.db, "evt_tpl_"+kind+"_"+event); err == nil && strings.TrimSpace(v) != "" {
+		if v, err := repository.GetSetting(n.db, "evt_tpl_"+kind+"_"+event); err == nil && strings.TrimSpace(v) != "" {
 			return v
 		}
 		// 兼容旧版发卡模板键（delivered 事件迁移前配置的 mail_paid_*）。
@@ -74,7 +74,7 @@ func (n *Notifier) eventTemplate(event, kind, fallback string) string {
 				"telegram":     "telegram_paid_body",
 			}[kind]
 			if legacy != "" {
-				if v, err := db.GetSetting(n.db, legacy); err == nil && strings.TrimSpace(v) != "" {
+				if v, err := repository.GetSetting(n.db, legacy); err == nil && strings.TrimSpace(v) != "" {
 					return v
 				}
 			}
@@ -117,7 +117,7 @@ func (n *Notifier) adminEmail() string {
 	if n.db == nil {
 		return ""
 	}
-	v, err := db.GetSetting(n.db, "notify_admin_email")
+	v, err := repository.GetSetting(n.db, "notify_admin_email")
 	if err != nil {
 		return ""
 	}
@@ -210,7 +210,7 @@ func (n *Notifier) webhookSecret() string {
 	if n.db == nil {
 		return ""
 	}
-	v, err := db.GetSecret(n.db, "webhook_secret", n.cipher)
+	v, err := repository.GetSecret(n.db, "webhook_secret", n.cipher)
 	if err != nil {
 		return ""
 	}
@@ -219,7 +219,7 @@ func (n *Notifier) webhookSecret() string {
 
 // eventEnabled 判断事件是否已启用通知。
 func (n *Notifier) eventEnabled(event string) bool {
-	raw, err := db.GetSetting(n.db, "notify_events")
+	raw, err := repository.GetSetting(n.db, "notify_events")
 	if err != nil {
 		return true
 	}

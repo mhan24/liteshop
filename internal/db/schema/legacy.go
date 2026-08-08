@@ -1,15 +1,31 @@
-package db
+package schema
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
+	"shop/internal/db/repository"
 	"shop/internal/models"
+	"shop/internal/security"
 )
 
-func migrate(db *sql.DB) error {
-	return migrateDB(db)
+// legacyUpgrade 将旧版本库升级到最新结构（幂等）。
+func legacyUpgrade(db *sql.DB) error {
+	if err := ensureProductColumns(db); err != nil {
+		return err
+	}
+	if err := ensureCardColumns(db); err != nil {
+		return err
+	}
+	if err := ensureAdminColumns(db); err != nil {
+		return err
+	}
+	if err := backfillOrderStatuses(db); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ensureAdminColumns 为旧版单管理员表补充 role 列并支持多管理员。
@@ -189,130 +205,36 @@ func ensureProductColumns(db *sql.DB) error {
 	return nil
 }
 
-func ResetAllTables(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
+// ensureSecretsTable 建 secrets 表，并把存量 settings 中的敏感配置迁移为 AES 加密存储。
+func ensureSecretsTable(db *sql.DB) error {
+	cipher := security.NewCipher(repository.EnsureSessionSecret(db))
+	if cipher == nil {
+		return errors.New("cipher init failed")
 	}
-	defer tx.Rollback()
-	tables := []string{"order_logs", "cards", "orders", "products", "settings", "admins"}
-	for _, t := range tables {
-		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", t)); err != nil {
+	for _, key := range repository.SecretSettingKeys {
+		v, err := repository.GetSetting(db, key)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		if cipher.IsEncrypted(v) {
+			if err := repository.UpsertSecretRaw(db, key, v); err != nil {
+				return err
+			}
+		} else {
+			enc, err := cipher.Encrypt(v)
+			if err != nil {
+				return err
+			}
+			if err := repository.UpsertSecretRaw(db, key, enc); err != nil {
+				return err
+			}
+		}
+		if _, err := db.Exec(`DELETE FROM settings WHERE key = ?`, key); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM sqlite_sequence WHERE name IN ('products','cards','orders')`); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func AllSettings(db *sql.DB) (map[string]string, error) {
-	rows, err := db.Query(`SELECT key, value FROM settings ORDER BY key`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make(map[string]string)
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			return nil, err
-		}
-		out[k] = v
-	}
-	return out, rows.Err()
-}
-
-func HasAdmin(db *sql.DB) bool {
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(1) FROM admins`).Scan(&count); err != nil {
-		return false
-	}
-	return count > 0
-}
-
-// SeedAdmin 创建初始管理员；已存在管理员时返回 (false, nil)。
-// 返回是否实际插入，供调用方处理并发初始化。
-func SeedAdmin(db *sql.DB, username, password string) (bool, error) {
-	if HasAdmin(db) {
-		return false, nil
-	}
-	_, err := db.Exec(`INSERT INTO admins(id, username, password_hash, role, created_at) VALUES(1, ?, ?, 'admin', ?)`, username, models.HashPassword(password), models.Now())
-	if err != nil {
-		// 并发下可能已由另一请求插入，视为已初始化。
-		if HasAdmin(db) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-func GetSetting(db *sql.DB, key string) (string, error) {
-	var value string
-	err := db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	return value, err
-}
-
-func SetSetting(db *sql.DB, key, value string) error {
-	_, err := db.Exec(`INSERT INTO settings(key, value, updated_at) VALUES(?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, key, value, models.Now())
-	return err
-}
-
-// AddOrderLog 追加一条订单事件日志。
-func AddOrderLog(db *sql.DB, orderID int64, event, message, fromStatus, toStatus string, adminID int64, metadata string) error {
-	_, err := db.Exec(`INSERT INTO order_logs(order_id, event, message, from_status, to_status, admin_id, metadata, created_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, orderID, event, message, fromStatus, toStatus, adminID, metadata, models.Now())
-	return err
-}
-
-// AddAuditLog 追加一条管理员审计日志。
-func AddAuditLog(db *sql.DB, adminID int64, username, action, targetType, targetID, before, after string) error {
-	_, err := db.Exec(`INSERT INTO audit_logs(admin_id, username, action, target_type, target_id, before_value, after_value, created_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, adminID, username, action, targetType, targetID, before, after, models.Now())
-	return err
-}
-
-// AuditLogs 返回审计日志（最新在前）。
-func AuditLogs(db *sql.DB, limit int) ([]models.AuditLog, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	rows, err := db.Query(`SELECT id, admin_id, username, action, target_type, target_id, before_value, after_value, created_at FROM audit_logs ORDER BY id DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []models.AuditLog{}
-	for rows.Next() {
-		var l models.AuditLog
-		if err := rows.Scan(&l.ID, &l.AdminID, &l.Username, &l.Action, &l.TargetType, &l.TargetID, &l.Before, &l.After, &l.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, l)
-	}
-	return out, rows.Err()
-}
-
-// OrderLogs 返回某订单的事件日志（按时间正序）。
-func OrderLogs(db *sql.DB, orderID int64) ([]models.OrderEvent, error) {
-	rows, err := db.Query(`SELECT id, order_id, event, message, from_status, to_status, admin_id, metadata, created_at FROM order_logs WHERE order_id = ? ORDER BY id ASC`, orderID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []models.OrderEvent{}
-	for rows.Next() {
-		var e models.OrderEvent
-		if err := rows.Scan(&e.ID, &e.OrderID, &e.Event, &e.Message, &e.From, &e.To, &e.AdminID, &e.Metadata, &e.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return nil
 }

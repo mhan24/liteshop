@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"time"
 
-	"shop/internal/db"
+	"shop/internal/db/repository"
 
 	"shop/internal/logging"
 )
@@ -14,14 +14,14 @@ import (
 func CleanupJob(d *sql.DB, memoryCleanups ...func()) func() {
 	return func() {
 		now := time.Now()
-		if err := db.DeleteExpiredSessions(d, now.Unix()); err != nil {
+		if err := repository.DeleteExpiredSessions(d, now.Unix()); err != nil {
 			logging.App().Sugar().Errorf("job cleanup sessions: %v", err)
 		}
 		retention := now.Add(-180 * 24 * time.Hour).Unix()
-		if err := db.DeleteOldAuditLogs(d, retention); err != nil {
+		if err := repository.DeleteOldAuditLogs(d, retention); err != nil {
 			logging.App().Sugar().Errorf("job cleanup audit_logs: %v", err)
 		}
-		if err := db.DeleteOldOrderLogs(d, retention); err != nil {
+		if err := repository.DeleteOldOrderLogs(d, retention); err != nil {
 			logging.App().Sugar().Errorf("job cleanup order_logs: %v", err)
 		}
 		for _, fn := range memoryCleanups {

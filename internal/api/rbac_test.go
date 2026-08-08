@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"shop/internal/db"
+	"shop/internal/db/repository"
 	"shop/internal/models"
 )
 
@@ -13,7 +14,7 @@ func TestAdminRolesAndAudit(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	if _, err := db.SeedAdmin(d, "admin1", "password123"); err != nil {
+	if _, err := repository.SeedAdmin(d, "admin1", "password123"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -34,10 +35,10 @@ func TestAdminRolesAndAudit(t *testing.T) {
 	}
 
 	// 审计日志写入
-	if err := db.AddAuditLog(d, 1, "admin1", "product_create", "product", "测试商品", "", "price=100"); err != nil {
+	if err := repository.AddAuditLog(d, 1, "admin1", "product_create", "product", "测试商品", "", "price=100"); err != nil {
 		t.Fatalf("audit: %v", err)
 	}
-	logs, err := db.AuditLogs(d, 10)
+	logs, err := repository.AuditLogs(d, 10)
 	if err != nil {
 		t.Fatalf("logs: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"shop/internal/db"
+	"shop/internal/db/repository"
 )
 
 func TestEmailRetryJob(t *testing.T) {
@@ -14,7 +15,7 @@ func TestEmailRetryJob(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer d.Close()
-	if err := db.EnqueueMail(d, "a@b.com", "S", "B", 0, time.Now().Unix()); err != nil {
+	if err := repository.EnqueueMail(d, "a@b.com", "S", "B", 0, time.Now().Unix()); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	// 失败 → attempts+1，排入下次重试

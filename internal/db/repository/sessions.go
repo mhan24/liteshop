@@ -1,4 +1,4 @@
-package db
+package repository
 
 import "database/sql"
 
@@ -38,7 +38,7 @@ func DeleteSessionsByAdmin(d *sql.DB, adminID int64) error {
 	return err
 }
 
-// DeleteAllSessions 清空全部会话。
+// DeleteAllSessions 删除全部会话（恢复/重置后吊销所有登录）。
 func DeleteAllSessions(d *sql.DB) error {
 	_, err := d.Exec(`DELETE FROM sessions`)
 	return err

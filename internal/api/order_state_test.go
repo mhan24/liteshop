@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"shop/internal/payment"
 	"shop/internal/db"
-	"shop/internal/repository"
+	"shop/internal/db/repository"
 	"shop/internal/models"
+	"shop/internal/payment"
 	"shop/internal/service"
 )
 

@@ -22,17 +22,15 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"shop/internal/payment"
 	"shop/internal/config"
-	"shop/internal/db"
+	"shop/internal/db/repository"
 	"shop/internal/jobs"
 	"shop/internal/logging"
-	"shop/internal/repository"
 	"shop/internal/models"
 	"shop/internal/notify"
-	"shop/internal/service"
+	"shop/internal/payment"
 	"shop/internal/security"
-
+	"shop/internal/service"
 )
 
 type Server struct {
@@ -93,17 +91,17 @@ type SiteSettings struct {
 
 func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	bus := jobs.NewBus(1024)
-	cipher := security.NewCipher(db.EnsureSessionSecret(database))
+	cipher := security.NewCipher(repository.EnsureSessionSecret(database))
 	s := &Server{
-		db:        database,
-		cfg:       cfg,
-		pay:       payment.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
-		notifier:  notify.New(cfg, database, bus, cipher),
-		dbPath:    cfg.DatabasePath,
-		startTime: time.Now(),
-		sessions:  make(map[string]sessionInfo),
-		limiters:  make(map[string]*RateLimiter),
-		linkSent:  make(map[string]int64),
+		db:         database,
+		cfg:        cfg,
+		pay:        payment.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
+		notifier:   notify.New(cfg, database, bus, cipher),
+		dbPath:     cfg.DatabasePath,
+		startTime:  time.Now(),
+		sessions:   make(map[string]sessionInfo),
+		limiters:   make(map[string]*RateLimiter),
+		linkSent:   make(map[string]int64),
 		loginFails: make(map[string]loginGuard),
 	}
 	// 异步任务 worker：邮件 / Telegram / Webhook（HTTP 层只发布事件）。
@@ -197,7 +195,7 @@ func (s *Server) tradeTypeAllowed(v string) bool {
 }
 
 func (s *Server) tradeTypes() []string {
-	value, err := db.GetSetting(s.db, "bepusdt_trade_types")
+	value, err := repository.GetSetting(s.db, "bepusdt_trade_types")
 	if err == nil && strings.TrimSpace(value) != "" {
 		// 过滤历史遗留的非法值（旧版本可绕过校验保存），避免前台选项与接口校验不一致。
 		var out []string
@@ -214,12 +212,12 @@ func (s *Server) tradeTypes() []string {
 }
 
 func (s *Server) fiat() string {
-	value, err := db.GetSetting(s.db, "bepusdt_fiat")
+	value, err := repository.GetSetting(s.db, "bepusdt_fiat")
 	if err == nil && strings.TrimSpace(value) != "" {
 		return strings.ToUpper(strings.TrimSpace(value))
 	}
 	// 兼容旧版本误存到 "fiat" 键的配置（此前保存键名错误导致不生效）。
-	if legacy, err := db.GetSetting(s.db, "fiat"); err == nil && strings.TrimSpace(legacy) != "" {
+	if legacy, err := repository.GetSetting(s.db, "fiat"); err == nil && strings.TrimSpace(legacy) != "" {
 		return strings.ToUpper(strings.TrimSpace(legacy))
 	}
 	return s.cfg.BepusdtFiat
@@ -250,14 +248,14 @@ func notifyPathConflicts(v string) bool {
 func (s *Server) paymentConfig() config.Config {
 	cfg := s.cfg
 	get := func(key string) string {
-		v, err := db.GetSetting(s.db, key)
+		v, err := repository.GetSetting(s.db, key)
 		if err != nil {
 			return ""
 		}
 		return strings.TrimSpace(v)
 	}
 	getSecret := func(key string) string {
-		v, err := db.GetSecret(s.db, key, s.totpCipher)
+		v, err := repository.GetSecret(s.db, key, s.totpCipher)
 		if err != nil {
 			return ""
 		}
@@ -324,7 +322,7 @@ func (s *Server) siteSettings() SiteSettings {
 		Terms:          "请在这里填写服务条款。",
 	}
 	get := func(key string) string {
-		v, err := db.GetSetting(s.db, key)
+		v, err := repository.GetSetting(s.db, key)
 		if err != nil {
 			return ""
 		}
@@ -629,7 +627,7 @@ func (s *Server) requireRole(min string, next http.Handler) http.Handler {
 
 // audit 记录一条管理员审计日志（记录谁/何时/改了什么/前后值）。
 func (s *Server) audit(r *http.Request, action, targetType, targetID, before, after string) {
-	_ = db.AddAuditLog(s.db, s.currentAdminID(r), s.currentAdminName(r), action, targetType, targetID, before, after)
+	_ = repository.AddAuditLog(s.db, s.currentAdminID(r), s.currentAdminName(r), action, targetType, targetID, before, after)
 }
 
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID int64) error {
@@ -639,7 +637,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 	id := models.RandomToken(24)
 	expiry := time.Now().Add(12 * time.Hour)
 	// 会话持久化到数据库，服务重启不丢登录态。
-	if err := db.CreateSession(s.db, id, adminID, expiry.Unix()); err != nil {
+	if err := repository.CreateSession(s.db, id, adminID, expiry.Unix()); err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
 	// HTTPS 下使用 __Host- 前缀（强制 Secure + Path=/ + 无 Domain）；
@@ -672,18 +670,18 @@ func (s *Server) sessionID(r *http.Request) (string, bool) {
 }
 
 func (s *Server) sessionSecret() string {
-	return db.EnsureSessionSecret(s.db)
+	return repository.EnsureSessionSecret(s.db)
 }
 
 func (s *Server) turnstileSecret() string {
-	if v, err := db.GetSecret(s.db, "turnstile_secret", s.totpCipher); err == nil && strings.TrimSpace(v) != "" {
+	if v, err := repository.GetSecret(s.db, "turnstile_secret", s.totpCipher); err == nil && strings.TrimSpace(v) != "" {
 		return strings.TrimSpace(v)
 	}
 	return s.cfg.TurnstileSecret
 }
 
 func (s *Server) turnstileSiteKey() string {
-	if v, err := db.GetSetting(s.db, "turnstile_site_key"); err == nil && strings.TrimSpace(v) != "" {
+	if v, err := repository.GetSetting(s.db, "turnstile_site_key"); err == nil && strings.TrimSpace(v) != "" {
 		return v
 	}
 	return s.cfg.TurnstileSiteKey
@@ -733,7 +731,7 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 	}
 	var adminID int64
 	var expiresAt int64
-	adminID, expiresAt, err := db.SessionAdminID(s.db, id)
+	adminID, expiresAt, err := repository.SessionAdminID(s.db, id)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			log.Printf("session lookup: %v", err)
@@ -741,18 +739,18 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 		return 0, "", false
 	}
 	if time.Now().Unix() >= expiresAt {
-		_ = db.DeleteSession(s.db, id)
+		_ = repository.DeleteSession(s.db, id)
 		return 0, "", false
 	}
 	// 滑动续期：仅在剩余不足 1 小时时刷新，减少每次请求的写放大。
 	if expiresAt-time.Now().Unix() < 3600 {
-		_ = db.SlideSessionExpiry(s.db, id, time.Now().Add(12*time.Hour).Unix())
+		_ = repository.SlideSessionExpiry(s.db, id, time.Now().Add(12*time.Hour).Unix())
 	}
 	var role string
-	role, err = db.AdminRole(s.db, adminID)
+	role, err = repository.AdminRole(s.db, adminID)
 	if err != nil {
 		// 管理员已被删除：吊销其会话，避免降级为 viewer 继续访问。
-		_ = db.DeleteSession(s.db, id)
+		_ = repository.DeleteSession(s.db, id)
 		return 0, "", false
 	}
 	return adminID, role, true
@@ -760,7 +758,7 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 
 // purgeAdminSessions 删除某管理员的全部会话（删除账号时调用）。
 func (s *Server) purgeAdminSessions(adminID int64) {
-	_ = db.DeleteSessionsByAdmin(s.db, adminID)
+	_ = repository.DeleteSessionsByAdmin(s.db, adminID)
 }
 
 // loginLocked 判断用户名是否处于锁定状态。
@@ -804,7 +802,7 @@ func (s *Server) currentAdminName(r *http.Request) string {
 	if !ok {
 		return ""
 	}
-	name, _ := db.AdminUsername(s.db, id)
+	name, _ := repository.AdminUsername(s.db, id)
 	return name
 }
 

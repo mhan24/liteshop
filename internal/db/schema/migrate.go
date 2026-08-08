@@ -1,4 +1,10 @@
-package db
+// Package schema 负责数据库 schema 演进：迁移执行器与存量库升级。
+//
+// 设计约定（Laravel/Django 风格）：
+//   - 所有 schema 变更必须新增"编号 .sql 迁移文件"（migrations/），按序执行并记录到 schema_migrations；
+//   - 迁移只执行一次，禁止在启动时做"检查表/自动补列"；
+//   - legacy 升级仅用于 SQLite 无法用纯 SQL 表达的存量升级（条件 ALTER / 表重建 / 数据迁移）。
+package schema
 
 import (
 	"database/sql"
@@ -14,20 +20,15 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-// 迁移策略（Laravel/Django 风格）：
-//   - 所有 schema 变更必须新增"编号 .sql 迁移文件"，按序执行并记录到 schema_migrations；
-//   - 迁移只执行一次，禁止在启动时做"检查表/自动补列"；
-//   - legacyUpgrades 仅用于 SQLite 无法用纯 SQL 表达的存量升级（条件 ALTER / 表重建 / 数据迁移）。
-//
 // key 为迁移文件 basename（含 .sql 后缀），与 listMigrationFiles 的 basename 匹配。
 var legacyUpgrades = map[string]func(*sql.DB) error{
-	"002_legacy_upgrade.sql":       legacyUpgrade,
-	"004_product_columns.sql":      ensureProductColumns,
-	"015_secrets.sql":              ensureSecretsTable,
+	"002_legacy_upgrade.sql":  legacyUpgrade,
+	"004_product_columns.sql": ensureProductColumns,
+	"015_secrets.sql":         ensureSecretsTable,
 }
 
-// migrateDB 执行所有未应用的数据库迁移。
-func migrateDB(db *sql.DB) error {
+// Migrate 执行所有未应用的数据库迁移。
+func Migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		version TEXT PRIMARY KEY,
 		applied_at INTEGER NOT NULL
@@ -93,7 +94,9 @@ func migrationApplied(db *sql.DB, name string) (bool, error) {
 
 // isGoOnlyMigration 标记仅含 Go 逻辑、无独立 SQL 的迁移文件。
 func isGoOnlyMigration(name string) bool {
-	return strings.Contains(name, "legacy_upgrade") || strings.Contains(name, "004_product_columns") || strings.Contains(name, "015_secrets")
+	// 注意：015_secrets.sql 含真实建表 SQL，必须走 runSQLMigration，
+	// 其后 Go 步骤 ensureSecretsTable 只做存量数据加密迁移。
+	return strings.Contains(name, "legacy_upgrade") || strings.Contains(name, "004_product_columns")
 }
 
 func runSQLMigration(db *sql.DB, name string) error {
@@ -161,21 +164,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
-}
-
-// legacyUpgrade 将旧版本库升级到最新结构（幂等）。
-func legacyUpgrade(db *sql.DB) error {
-	if err := ensureProductColumns(db); err != nil {
-		return err
-	}
-	if err := ensureCardColumns(db); err != nil {
-		return err
-	}
-	if err := ensureAdminColumns(db); err != nil {
-		return err
-	}
-	if err := backfillOrderStatuses(db); err != nil {
-		return err
-	}
-	return nil
 }

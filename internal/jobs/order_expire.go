@@ -1,7 +1,6 @@
 package jobs
 
 import (
-
 	"shop/internal/service"
 
 	"shop/internal/logging"

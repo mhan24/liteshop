@@ -3,7 +3,7 @@ package service
 import (
 	"strings"
 
-	"shop/internal/repository"
+	"shop/internal/db/repository"
 	"shop/internal/models"
 )
 

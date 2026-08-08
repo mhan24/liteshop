@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"os"
 	"runtime"
-	"go.uber.org/zap"
-	"shop/internal/db"
+	"shop/internal/db/repository"
 	"shop/internal/logging"
 	"shop/internal/models"
 	"shop/internal/notify"
-	"shop/internal/service"
 	"shop/internal/security"
+	"shop/internal/service"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +26,7 @@ func secretSettingsKey(k string) bool {
 	if k == "session_secret" {
 		return true
 	}
-	for _, s := range db.SecretSettingKeys {
+	for _, s := range repository.SecretSettingKeys {
 		if k == s {
 			return true
 		}
@@ -215,13 +215,13 @@ func parseSiteLinks(raw string) []map[string]string {
 
 func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 	st := s.siteSettings()
-	rawCopyright, _ := db.GetSetting(s.db, "site_copyright")
+	rawCopyright, _ := repository.GetSetting(s.db, "site_copyright")
 	if strings.TrimSpace(rawCopyright) == "" {
 		rawCopyright = "© {{year}} {{site_title}}. All rights reserved."
 	}
-	maintenanceEnabled, _ := db.GetSetting(s.db, "maintenance_enabled")
-	maintenanceMessage, _ := db.GetSetting(s.db, "maintenance_message")
-	maintenancePassword, _ := db.GetSecret(s.db, "maintenance_password", s.totpCipher)
+	maintenanceEnabled, _ := repository.GetSetting(s.db, "maintenance_enabled")
+	maintenanceMessage, _ := repository.GetSetting(s.db, "maintenance_message")
+	maintenancePassword, _ := repository.GetSecret(s.db, "maintenance_password", s.totpCipher)
 	enabled := strings.TrimSpace(maintenanceEnabled) == "1"
 	if enabled && maintenancePassword != "" && s.maintenanceUnlocked(r, maintenancePassword) {
 		enabled = false
@@ -319,12 +319,12 @@ func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	maintenanceEnabled, _ := db.GetSetting(s.db, "maintenance_enabled")
+	maintenanceEnabled, _ := repository.GetSetting(s.db, "maintenance_enabled")
 	if strings.TrimSpace(maintenanceEnabled) != "1" {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
-	maintenancePassword, _ := db.GetSecret(s.db, "maintenance_password", s.totpCipher)
+	maintenancePassword, _ := repository.GetSecret(s.db, "maintenance_password", s.totpCipher)
 	if maintenancePassword == "" ||
 		!hmacEqual(hashMaintenancePassword(strings.TrimSpace(input.Password)), normalizeMaintenanceHash(maintenancePassword)) {
 		writeError(w, 403, "密码错误")
@@ -332,7 +332,7 @@ func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 	// 存量明文在解锁成功后升级为哈希存储。
 	if normalized := normalizeMaintenanceHash(maintenancePassword); normalized != maintenancePassword {
-		_ = db.SetSecret(s.db, "maintenance_password", normalized, s.totpCipher)
+		_ = repository.SetSecret(s.db, "maintenance_password", normalized, s.totpCipher)
 		maintenancePassword = normalized
 	}
 	secure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
@@ -673,7 +673,7 @@ func (s *Server) apiAdminSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "unauthorized")
 		return
 	}
-	username, _ := db.AdminUsername(s.db, id)
+	username, _ := repository.AdminUsername(s.db, id)
 	writeJSON(w, 200, map[string]any{"ok": true, "username": username, "role": role})
 }
 
@@ -695,8 +695,8 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "尝试次数过多，账号已锁定，请 10 分钟后再试")
 		return
 	}
-	adminID, hash, totpSecret, totpEnabled, err := db.AdminByUsername(s.db, username)
-	if err == db.ErrAdminNotFound {
+	adminID, hash, totpSecret, totpEnabled, err := repository.AdminByUsername(s.db, username)
+	if err == repository.ErrAdminNotFound {
 		// 恒定时间：对不存在用户也执行一次 PBKDF2，避免用户名枚举时间侧信道。
 		_ = models.HashPassword(input.Password)
 		logging.Security().Warn("admin login failed", zap.String("username", username), zap.String("ip", ip), zap.String("reason", "not_found"))
@@ -750,7 +750,7 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 				writeError(w, 500, "totp secret encrypt failed")
 				return
 			}
-			if err := db.SetAdminTOTPSecret(s.db, adminID, enc); err != nil {
+			if err := repository.SetAdminTOTPSecret(s.db, adminID, enc); err != nil {
 				s.notifier.NotifySystemError("TOTP 旧明文升级失败 admin=" + fmt.Sprint(adminID) + ": " + err.Error())
 				writeError(w, 500, "totp secret upgrade failed")
 				return
@@ -783,7 +783,7 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "invalid or expired token")
 		return
 	}
-	_, totpSecret, err := db.AdminTOTP(s.db, info.AdminID)
+	_, totpSecret, err := repository.AdminTOTP(s.db, info.AdminID)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -804,7 +804,7 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "totp secret encrypt failed")
 			return
 		}
-		if err := db.SetAdminTOTPSecret(s.db, info.AdminID, enc); err != nil {
+		if err := repository.SetAdminTOTPSecret(s.db, info.AdminID, enc); err != nil {
 			s.notifier.NotifySystemError("TOTP 旧明文升级失败 admin=" + fmt.Sprint(info.AdminID) + ": " + err.Error())
 			writeError(w, 500, "totp secret upgrade failed")
 			return
@@ -819,7 +819,7 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
 	if id, ok := s.sessionID(r); ok {
-		_ = db.DeleteSession(s.db, id)
+		_ = repository.DeleteSession(s.db, id)
 		s.sessMu.Lock()
 		delete(s.sessions, id)
 		s.sessMu.Unlock()
@@ -1479,7 +1479,7 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	setIfPresent := func(key, field string) {
 		if v, ok := input[field]; ok {
-			_ = db.SetSetting(s.db, key, strings.TrimSpace(str(v)))
+			_ = repository.SetSetting(s.db, key, strings.TrimSpace(str(v)))
 		}
 	}
 	setIfPresent("bepusdt_timeout_sec", "bepusdt_timeout_sec")
@@ -1489,7 +1489,7 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, err.Error())
 			return
 		}
-		_ = db.SetSetting(s.db, "bepusdt_base_url", u)
+		_ = repository.SetSetting(s.db, "bepusdt_base_url", u)
 	}
 	if v, ok := input["fiat"]; ok {
 		f, err := normalizeFiat(strings.TrimSpace(str(v)))
@@ -1498,7 +1498,7 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// 注意键名为 bepusdt_fiat（读取方），旧代码误写 "fiat" 导致配置不生效。
-		_ = db.SetSetting(s.db, "bepusdt_fiat", f)
+		_ = repository.SetSetting(s.db, "bepusdt_fiat", f)
 	}
 	if v, ok := input["trade_types"]; ok {
 		tt, err := normalizeTradeTypes(strings.TrimSpace(str(v)))
@@ -1506,7 +1506,7 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, err.Error())
 			return
 		}
-		_ = db.SetSetting(s.db, "bepusdt_trade_types", tt)
+		_ = repository.SetSetting(s.db, "bepusdt_trade_types", tt)
 	}
 	for _, field := range []string{"shop_public_base_url", "bepusdt_notify_url"} {
 		if v, ok := input[field]; ok {
@@ -1515,7 +1515,7 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 				writeError(w, 400, err.Error())
 				return
 			}
-			_ = db.SetSetting(s.db, field, u)
+			_ = repository.SetSetting(s.db, field, u)
 		}
 	}
 	// 回调路径需字符校验且不得与已有路由冲突，非法值回退默认（不保存）
@@ -1524,11 +1524,11 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 			v = "/" + v
 		}
 		if reNotifyPath.MatchString(v) && !notifyPathConflicts(v) {
-			_ = db.SetSetting(s.db, "bepusdt_notify_path", v)
+			_ = repository.SetSetting(s.db, "bepusdt_notify_path", v)
 		}
 	}
 	if v := strings.TrimSpace(str(input["bepusdt_api_token"])); v != "" {
-		_ = db.SetSecret(s.db, "bepusdt_api_token", v, s.totpCipher)
+		_ = repository.SetSecret(s.db, "bepusdt_api_token", v, s.totpCipher)
 	}
 	s.audit(r, "payment_update", "settings", "payment", "", "支付配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -1536,8 +1536,8 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 	cfg := s.notifier.CurrentConfig()
-	events, _ := db.GetSetting(s.db, "notify_events")
-	adminEmail, _ := db.GetSetting(s.db, "notify_admin_email")
+	events, _ := repository.GetSetting(s.db, "notify_events")
+	adminEmail, _ := repository.GetSetting(s.db, "notify_admin_email")
 	if strings.TrimSpace(events) == "" {
 		events = "order_created,payment_success,delivered,low_stock,system_error"
 	}
@@ -1565,7 +1565,7 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 	}
 	setIfPresent := func(key, field string) {
 		if v, ok := input[field]; ok {
-			_ = db.SetSetting(s.db, key, strings.TrimSpace(str(v)))
+			_ = repository.SetSetting(s.db, key, strings.TrimSpace(str(v)))
 		}
 	}
 	setIfPresent("smtp_host", "smtp_host")
@@ -1576,16 +1576,16 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 	setIfPresent("notify_events", "notify_events")
 	setIfPresent("notify_admin_email", "notify_admin_email")
 	if v := strings.TrimSpace(str(input["smtp_username"])); v != "" {
-		_ = db.SetSetting(s.db, "smtp_username", v)
+		_ = repository.SetSetting(s.db, "smtp_username", v)
 	}
 	if v := strings.TrimSpace(str(input["smtp_password"])); v != "" {
-		_ = db.SetSecret(s.db, "smtp_password", v, s.totpCipher)
+		_ = repository.SetSecret(s.db, "smtp_password", v, s.totpCipher)
 	}
 	if v := strings.TrimSpace(str(input["telegram_bot_token"])); v != "" {
-		_ = db.SetSecret(s.db, "telegram_bot_token", v, s.totpCipher)
+		_ = repository.SetSecret(s.db, "telegram_bot_token", v, s.totpCipher)
 	}
 	if v := strings.TrimSpace(str(input["webhook_secret"])); v != "" {
-		_ = db.SetSecret(s.db, "webhook_secret", v, s.totpCipher)
+		_ = repository.SetSecret(s.db, "webhook_secret", v, s.totpCipher)
 	}
 	// 事件模板：evt_tpl_<kind>_<event>（空值回退默认模板）
 	if v, ok := input["event_templates"]; ok {
@@ -1597,7 +1597,7 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 				}
 				for _, kind := range []string{"telegram", "mail_subject", "mail_body"} {
 					if val, ok := tm[kind]; ok {
-						_ = db.SetSetting(s.db, "evt_tpl_"+kind+"_"+ev, strings.TrimSpace(str(val)))
+						_ = repository.SetSetting(s.db, "evt_tpl_"+kind+"_"+ev, strings.TrimSpace(str(val)))
 					}
 				}
 			}
@@ -1658,7 +1658,7 @@ func (s *Server) apiAdminNotifyTestTelegram(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 	st := s.siteSettings()
-	rawCopyright, _ := db.GetSetting(s.db, "site_copyright")
+	rawCopyright, _ := repository.GetSetting(s.db, "site_copyright")
 	if strings.TrimSpace(rawCopyright) == "" {
 		rawCopyright = "© {{year}} {{site_title}}. All rights reserved."
 	}
@@ -1678,7 +1678,7 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		"turnstile_secret_set":  s.turnstileSecret() != "",
 		"maintenance_enabled":   mustGetSetting(s, "maintenance_enabled"),
 		"maintenance_message":   mustGetSetting(s, "maintenance_message"),
-		"maintenance_pass_set":  func() bool { v, _ := db.GetSecret(s.db, "maintenance_password", s.totpCipher); return v != "" }(),
+		"maintenance_pass_set":  func() bool { v, _ := repository.GetSecret(s.db, "maintenance_password", s.totpCipher); return v != "" }(),
 		"site_links":            parseSiteLinks(mustGetSetting(s, "site_links")),
 		"default_product_image": s.defaultProductImage(),
 		"site_logo":             s.siteLogoURL(),
@@ -1691,7 +1691,7 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 }
 
 func mustGetSetting(s *Server, key string) string {
-	v, _ := db.GetSetting(s.db, key)
+	v, _ := repository.GetSetting(s.db, key)
 	return v
 }
 
@@ -1703,7 +1703,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 	}
 	setIfPresent := func(key, field string) {
 		if v, ok := input[field]; ok {
-			_ = db.SetSetting(s.db, key, strings.TrimSpace(str(v)))
+			_ = repository.SetSetting(s.db, key, strings.TrimSpace(str(v)))
 		}
 	}
 	for key, field := range map[string]string{
@@ -1724,7 +1724,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, err.Error())
 			return
 		}
-		_ = db.SetSetting(s.db, "shop_public_base_url", u)
+		_ = repository.SetSetting(s.db, "shop_public_base_url", u)
 	}
 	// 图片类 URL 仅接受 http/https 绝对地址（空值表示使用默认占位图）。
 	for _, f := range []string{"default_product_image", "site_logo", "site_favicon"} {
@@ -1734,7 +1734,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 				writeError(w, 400, err.Error())
 				return
 			}
-			_ = db.SetSetting(s.db, f, u)
+			_ = repository.SetSetting(s.db, f, u)
 		}
 	}
 	if v, ok := input["site_links"]; ok {
@@ -1759,19 +1759,19 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 				clean = clean[:50]
 			}
 			if raw, err := json.Marshal(clean); err == nil {
-				_ = db.SetSetting(s.db, "site_links", string(raw))
+				_ = repository.SetSetting(s.db, "site_links", string(raw))
 			}
 		}
 	}
 	if _, exists := input["maintenance_enabled"]; exists {
-		_ = db.SetSetting(s.db, "maintenance_enabled", strings.TrimSpace(str(input["maintenance_enabled"])))
+		_ = repository.SetSetting(s.db, "maintenance_enabled", strings.TrimSpace(str(input["maintenance_enabled"])))
 	}
 	if v := strings.TrimSpace(str(input["maintenance_password"])); v != "" {
 		// 存储 SHA-256 哈希，不再明文保存。
-		_ = db.SetSecret(s.db, "maintenance_password", hashMaintenancePassword(v), s.totpCipher)
+		_ = repository.SetSecret(s.db, "maintenance_password", hashMaintenancePassword(v), s.totpCipher)
 	}
 	if v := strings.TrimSpace(str(input["turnstile_secret"])); v != "" {
-		_ = db.SetSecret(s.db, "turnstile_secret", v, s.totpCipher)
+		_ = repository.SetSecret(s.db, "turnstile_secret", v, s.totpCipher)
 	}
 	s.audit(r, "site_update", "settings", "site", "", "站点配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -1779,7 +1779,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminAccount(w http.ResponseWriter, r *http.Request) {
 	id := s.currentAdminID(r)
-	username, _ := db.AdminUsername(s.db, id)
+	username, _ := repository.AdminUsername(s.db, id)
 	writeJSON(w, 200, map[string]any{"username": username})
 }
 
@@ -1795,7 +1795,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	hash, err := db.AdminPasswordHash(s.db, id)
+	hash, err := repository.AdminPasswordHash(s.db, id)
 	if err != nil {
 		writeError(w, 500, "no admin")
 		return
@@ -1809,7 +1809,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "username empty")
 		return
 	}
-	oldUsername, _ := db.AdminUsername(s.db, id)
+	oldUsername, _ := repository.AdminUsername(s.db, id)
 	if input.NewPassword != "" {
 		if err := models.ValidatePasswordStrength(input.NewPassword); err != nil {
 			writeError(w, 400, err.Error())
@@ -1825,7 +1825,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "username too long")
 		return
 	}
-	if err := db.UpdateAdminAccount(s.db, id, username, hash); err != nil {
+	if err := repository.UpdateAdminAccount(s.db, id, username, hash); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1837,7 +1837,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminTotpStatus(w http.ResponseWriter, r *http.Request) {
 	id := s.currentAdminID(r)
-	enabled, secret, _ := db.AdminTOTP(s.db, id)
+	enabled, secret, _ := repository.AdminTOTP(s.db, id)
 	resp := map[string]any{"enabled": enabled, "issuer": s.siteSettings().Title}
 	if !enabled && secret != "" {
 		if plain, err := s.totpCipher.Decrypt(secret); err == nil {
@@ -1850,7 +1850,7 @@ func (s *Server) apiAdminTotpStatus(w http.ResponseWriter, r *http.Request) {
 // apiAdminTotpGenerate 生成新的 TOTP 密钥（未启用时）。
 func (s *Server) apiAdminTotpGenerate(w http.ResponseWriter, r *http.Request) {
 	id := s.currentAdminID(r)
-	enabled, _, _ := db.AdminTOTP(s.db, id)
+	enabled, _, _ := repository.AdminTOTP(s.db, id)
 	if enabled {
 		writeError(w, 400, "TOTP already enabled")
 		return
@@ -1865,7 +1865,7 @@ func (s *Server) apiAdminTotpGenerate(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	if err := db.SetAdminTOTPSecret(s.db, id, encrypted); err != nil {
+	if err := repository.SetAdminTOTPSecret(s.db, id, encrypted); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1891,11 +1891,11 @@ func (s *Server) apiAdminTotpEnable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "totp secret encrypt failed")
 		return
 	}
-	if err := db.SetAdminTOTPSecret(s.db, id, encrypted); err != nil {
+	if err := repository.SetAdminTOTPSecret(s.db, id, encrypted); err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	if err := db.SetAdminTOTPEnabled(s.db, id, true); err != nil {
+	if err := repository.SetAdminTOTPEnabled(s.db, id, true); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1909,7 +1909,7 @@ func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 		Otp string `json:"otp"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
-	_, secret, err := db.AdminTOTP(s.db, id)
+	_, secret, err := repository.AdminTOTP(s.db, id)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1923,7 +1923,7 @@ func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "invalid otp")
 		return
 	}
-	if err := db.SetAdminTOTPEnabled(s.db, id, false); err != nil {
+	if err := repository.SetAdminTOTPEnabled(s.db, id, false); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1934,7 +1934,7 @@ func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 // ---------- 管理员管理 (仅 admin) ----------
 
 func (s *Server) apiAdminListAdmins(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.ListAdmins(s.db)
+	rows, err := repository.ListAdmins(s.db)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1981,7 +1981,7 @@ func (s *Server) apiAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
 	if role != models.RoleAdmin && role != models.RoleOperator && role != models.RoleViewer {
 		role = models.RoleOperator
 	}
-	if err := db.CreateAdmin(s.db, username, models.HashPassword(input.Password), role); err != nil {
+	if err := repository.CreateAdmin(s.db, username, models.HashPassword(input.Password), role); err != nil {
 		writeError(w, 400, "create failed (username may exist)")
 		return
 	}
@@ -2004,13 +2004,13 @@ func (s *Server) apiAdminSetRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid role")
 		return
 	}
-	before, _ := db.AdminRole(s.db, id)
-	if err := db.SetAdminRoleGuarded(s.db, id, role); err != nil {
-		if err == db.ErrAdminNotFound {
+	before, _ := repository.AdminRole(s.db, id)
+	if err := repository.SetAdminRoleGuarded(s.db, id, role); err != nil {
+		if err == repository.ErrAdminNotFound {
 			writeError(w, 404, "admin not found")
 			return
 		}
-		if err == db.ErrLastAdmin {
+		if err == repository.ErrLastAdmin {
 			writeError(w, 400, "cannot demote the last admin")
 			return
 		}
@@ -2031,16 +2031,16 @@ func (s *Server) apiAdminDeleteAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "cannot delete yourself")
 		return
 	}
-	cur, _ := db.AdminRole(s.db, id)
+	cur, _ := repository.AdminRole(s.db, id)
 	if cur == models.RoleAdmin {
-		admins, _ := db.AdminCountByRole(s.db, models.RoleAdmin)
+		admins, _ := repository.AdminCountByRole(s.db, models.RoleAdmin)
 		if admins <= 1 {
 			writeError(w, 400, "cannot delete the last admin")
 			return
 		}
 	}
-	uname, _ := db.AdminUsername(s.db, id)
-	if err := db.DeleteAdmin(s.db, id); err != nil {
+	uname, _ := repository.AdminUsername(s.db, id)
+	if err := repository.DeleteAdmin(s.db, id); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -2053,7 +2053,7 @@ func (s *Server) apiAdminDeleteAdmin(w http.ResponseWriter, r *http.Request) {
 // ---------- 审计日志 (仅 admin) ----------
 
 func (s *Server) apiAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
-	logs, err := db.AuditLogs(s.db, 200)
+	logs, err := repository.AuditLogs(s.db, 200)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -2183,7 +2183,7 @@ func (s *Server) apiAdminCouponDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiAdminSystemBackup(w http.ResponseWriter, r *http.Request) {
-	settings, err := db.AllSettings(s.db)
+	settings, err := repository.AllSettings(s.db)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -2225,7 +2225,7 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 		if secretSettingsKey(k) {
 			continue
 		}
-		if err := db.SetSetting(s.db, k, v); err != nil {
+		if err := repository.SetSetting(s.db, k, v); err != nil {
 			writeInternalError(w, err)
 			return
 		}
@@ -2234,7 +2234,7 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 	s.sessMu.Lock()
 	s.sessions = make(map[string]sessionInfo)
 	s.sessMu.Unlock()
-	_ = db.DeleteAllSessions(s.db)
+	_ = repository.DeleteAllSessions(s.db)
 	// 配置恢复后清空限流器，避免旧 IP 限制残留影响管理员操作
 	s.limitersMu.Lock()
 	s.limiters = make(map[string]*RateLimiter)
@@ -2252,24 +2252,24 @@ func (s *Server) apiAdminSystemReset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "confirm required")
 		return
 	}
-	if err := db.ResetAllTables(s.db); err != nil {
+	if err := repository.ResetAllTables(s.db); err != nil {
 		writeInternalError(w, err)
 		return
 	}
 	s.sessMu.Lock()
 	s.sessions = make(map[string]sessionInfo)
 	s.sessMu.Unlock()
-	_ = db.DeleteAllSessions(s.db)
+	_ = repository.DeleteAllSessions(s.db)
 	s.audit(r, "system_reset", "system", "all", "all data", "reset")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func (s *Server) apiSetupStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"initialized": db.HasAdmin(s.db), "site_title": s.siteSettings().Title})
+	writeJSON(w, 200, map[string]any{"initialized": repository.HasAdmin(s.db), "site_title": s.siteSettings().Title})
 }
 
 func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
-	if db.HasAdmin(s.db) {
+	if repository.HasAdmin(s.db) {
 		writeError(w, 400, "already initialized")
 		return
 	}
@@ -2310,7 +2310,7 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 	if siteTitle == "" {
 		siteTitle = "LiteShop"
 	}
-	inserted, err := db.SeedAdmin(s.db, username, input.Password)
+	inserted, err := repository.SeedAdmin(s.db, username, input.Password)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -2367,7 +2367,7 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 		settings["turnstile_secret"] = strings.TrimSpace(input.TurnstileSecret)
 	}
 	for k, v := range settings {
-		if err := db.SetSetting(s.db, k, v); err != nil {
+		if err := repository.SetSetting(s.db, k, v); err != nil {
 			writeInternalError(w, err)
 			return
 		}

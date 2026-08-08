@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"time"
 
-	"shop/internal/db"
+	"shop/internal/db/repository"
 
 	"shop/internal/logging"
 )
@@ -13,7 +13,7 @@ import (
 // send 由调用方注入（notifier.SendRawMail），避免 jobs ↔ notify 循环依赖。
 func EmailRetryJob(d *sql.DB, send func(to, subject, body string) error) func() {
 	return func() {
-		items, err := db.DueMails(d, time.Now().Unix())
+		items, err := repository.DueMails(d, time.Now().Unix())
 		if err != nil {
 			logging.App().Sugar().Errorf("job email_retry: %v", err)
 			return
@@ -21,12 +21,12 @@ func EmailRetryJob(d *sql.DB, send func(to, subject, body string) error) func() 
 		for _, m := range items {
 			if err := send(m.To, m.Subject, m.Body); err != nil {
 				next := time.Now().Add(time.Duration(1<<(m.Attempts+1)) * time.Minute).Unix()
-				if rerr := db.MarkMailRetry(d, m.ID, next); rerr != nil {
+				if rerr := repository.MarkMailRetry(d, m.ID, next); rerr != nil {
 					logging.App().Sugar().Errorf("job email_retry: mark retry %d: %v", m.ID, rerr)
 				}
 				continue
 			}
-			if err := db.MarkMailSent(d, m.ID); err != nil {
+			if err := repository.MarkMailSent(d, m.ID); err != nil {
 				logging.App().Sugar().Errorf("job email_retry: mark sent %d: %v", m.ID, err)
 			}
 		}

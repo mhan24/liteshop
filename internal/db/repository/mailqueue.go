@@ -1,4 +1,4 @@
-package db
+package repository
 
 import (
 	"database/sql"
@@ -32,7 +32,7 @@ func DueMails(d *sql.DB, now int64) ([]MailItem, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []MailItem
+	out := []MailItem{}
 	for rows.Next() {
 		var m MailItem
 		if err := rows.Scan(&m.ID, &m.To, &m.Subject, &m.Body, &m.OrderID, &m.Attempts, &m.NextRetryAt); err != nil {
@@ -43,18 +43,14 @@ func DueMails(d *sql.DB, now int64) ([]MailItem, error) {
 	return out, rows.Err()
 }
 
-// MarkMailSent 发送成功后删除队列项。
+// MarkMailSent 标记邮件发送成功（删除队列项）。
 func MarkMailSent(d *sql.DB, id int64) error {
 	_, err := d.Exec(`DELETE FROM mail_queue WHERE id = ?`, id)
 	return err
 }
 
-// MarkMailRetry 发送失败：次数 +1，下次重试时间按退避计算；超过上限则丢弃。
+// MarkMailRetry 记录一次失败并设置下次重试时间。
 func MarkMailRetry(d *sql.DB, id int64, nextRetryAt int64) error {
-	_, err := d.Exec(`UPDATE mail_queue SET attempts = attempts + 1, next_retry_at = ? WHERE id = ? AND attempts < 5`, nextRetryAt, id)
-	if err != nil {
-		return err
-	}
-	_, err = d.Exec(`DELETE FROM mail_queue WHERE id = ? AND attempts >= 5`, id)
+	_, err := d.Exec(`UPDATE mail_queue SET attempts = attempts + 1, next_retry_at = ? WHERE id = ?`, nextRetryAt, id)
 	return err
 }
