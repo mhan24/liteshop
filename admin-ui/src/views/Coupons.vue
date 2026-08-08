@@ -1,10 +1,10 @@
 <template>
   <div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
       <h2>{{ t('coupons.title') }}</h2>
       <el-button type="primary" @click="openCreate">{{ t('coupons.add') }}</el-button>
     </div>
-    <el-table :data="coupons" v-loading="loading" size="large">
+    <el-table v-loading="loading" :data="coupons" size="large">
       <el-table-column prop="code" :label="t('coupons.code')" width="140" />
       <el-table-column :label="t('coupons.type')" width="90">
         <template #default="{ row }">{{ row.type === 'percent' ? '%' : t('coupons.fixed') }}</template>
@@ -23,7 +23,9 @@
       </el-table-column>
       <el-table-column :label="t('common.status')" width="90">
         <template #default="{ row }">
-          <el-tag :type="row.active ? 'success' : 'info'" size="small">{{ row.active ? t('common.yes') : t('common.no') }}</el-tag>
+          <el-tag :type="row.active ? 'success' : 'info'" size="small">{{
+            row.active ? t('common.yes') : t('common.no')
+          }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column :label="t('coupons.expires')" width="160">
@@ -43,7 +45,7 @@
         <el-row :gutter="12">
           <el-col :md="12">
             <el-form-item :label="t('coupons.type')">
-              <el-select v-model="form.type" style="width:100%">
+              <el-select v-model="form.type" style="width: 100%">
                 <el-option :label="t('coupons.fixed')" value="fixed" />
                 <el-option label="%" value="percent" />
               </el-select>
@@ -51,30 +53,36 @@
           </el-col>
           <el-col :md="12">
             <el-form-item :label="t('coupons.valueLabel')">
-              <el-input-number v-if="form.type === 'percent'" v-model="form.percent" :min="1" :max="100" style="width:100%" />
-              <el-input-number v-else v-model="form.value" :min="0.01" :precision="2" style="width:100%" />
+              <el-input-number
+                v-if="form.type === 'percent'"
+                v-model="form.percent"
+                :min="1"
+                :max="100"
+                style="width: 100%"
+              />
+              <el-input-number v-else v-model="form.value" :min="0.01" :precision="2" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>
         <el-row :gutter="12">
           <el-col :md="12">
             <el-form-item :label="t('coupons.minAmountLabel')">
-              <el-input-number v-model="form.min_amount" :min="0" :precision="2" style="width:100%" />
+              <el-input-number v-model="form.min_amount" :min="0" :precision="2" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :md="12">
             <el-form-item :label="t('coupons.maxUses')">
-              <el-input-number v-model="form.max_uses" :min="0" style="width:100%" />
+              <el-input-number v-model="form.max_uses" :min="0" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>
         <el-form-item :label="t('coupons.productFilter')">
-          <el-select v-model="form.product_id" clearable style="width:100%">
+          <el-select v-model="form.product_id" clearable style="width: 100%">
             <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('coupons.expiresLabel')">
-          <el-date-picker v-model="form.expires_at" type="datetime" value-format="timestamp" style="width:100%" />
+          <el-date-picker v-model="form.expires_at" type="datetime" value-format="timestamp" style="width: 100%" />
         </el-form-item>
         <el-checkbox v-model="form.active">{{ t('coupons.active') }}</el-checkbox>
       </el-form>
@@ -101,9 +109,15 @@ const editing = ref<number | null>(null)
 const coupons = ref<any[]>([])
 const products = ref<any[]>([])
 const form = reactive({
-  code: '', type: 'fixed', value: 0.01, percent: 10,
-  min_amount: 0, max_uses: 0, product_id: undefined as number | undefined,
-  expires_at: undefined as number | undefined, active: true,
+  code: '',
+  type: 'fixed',
+  value: 0.01,
+  percent: 10,
+  min_amount: 0,
+  max_uses: 0,
+  product_id: undefined as number | undefined,
+  expires_at: undefined as number | undefined,
+  active: true,
 })
 
 async function load() {
@@ -117,15 +131,31 @@ async function load() {
 }
 function openCreate() {
   editing.value = null
-  Object.assign(form, { code: '', type: 'fixed', value: 0.01, percent: 10, min_amount: 0, max_uses: 0, product_id: undefined, expires_at: undefined, active: true })
+  Object.assign(form, {
+    code: '',
+    type: 'fixed',
+    value: 0.01,
+    percent: 10,
+    min_amount: 0,
+    max_uses: 0,
+    product_id: undefined,
+    expires_at: undefined,
+    active: true,
+  })
   dialog.value = true
 }
 function openEdit(row: any) {
   editing.value = row.id
   Object.assign(form, {
-    code: row.code, type: row.type, value: (row.value_cents || 0) / 100, percent: row.percent,
-    min_amount: (row.min_amount_cents || 0) / 100, max_uses: row.max_uses,
-    product_id: row.product_id || undefined, expires_at: row.expires_at || undefined, active: row.active,
+    code: row.code,
+    type: row.type,
+    value: (row.value_cents || 0) / 100,
+    percent: row.percent,
+    min_amount: (row.min_amount_cents || 0) / 100,
+    max_uses: row.max_uses,
+    product_id: row.product_id || undefined,
+    expires_at: row.expires_at || undefined,
+    active: row.active,
   })
   dialog.value = true
 }
@@ -133,11 +163,15 @@ async function save() {
   saving.value = true
   try {
     const payload: any = {
-      code: form.code, type: form.type, percent: form.percent,
+      code: form.code,
+      type: form.type,
+      percent: form.percent,
       value_cents: Math.round(form.value * 100),
       min_amount_cents: Math.round(form.min_amount * 100),
-      max_uses: form.max_uses, product_id: form.product_id || 0,
-      expires_at: form.expires_at || 0, active: form.active,
+      max_uses: form.max_uses,
+      product_id: form.product_id || 0,
+      expires_at: form.expires_at || 0,
+      active: form.active,
     }
     if (editing.value) await api.post('/admin/coupons/' + editing.value + '/edit', payload)
     else await api.post('/admin/coupons', payload)

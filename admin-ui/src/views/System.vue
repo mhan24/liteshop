@@ -1,9 +1,11 @@
 <template>
   <div>
     <el-card>
-      <template #header><h2>{{ t('system.backup') }}</h2></template>
+      <template #header
+        ><h2>{{ t('system.backup') }}</h2></template
+      >
       <p class="muted">{{ t('system.backupNote') }}</p>
-      <p class="muted" style="color:#b45309">{{ t('system.backupWarning') }}</p>
+      <p class="muted" style="color: #b45309">{{ t('system.backupWarning') }}</p>
       <el-space>
         <el-button type="primary" @click="download">{{ t('system.downloadBackup') }}</el-button>
         <el-upload :before-upload="handleUpload" :show-file-list="false" accept=".json,application/json">
@@ -11,10 +13,16 @@
         </el-upload>
       </el-space>
     </el-card>
-    <el-card style="margin-top:16px">
-      <template #header><h2 style="color:var(--el-color-danger)">{{ t('system.danger') }}</h2></template>
+    <el-card style="margin-top: 16px">
+      <template #header
+        ><h2 style="color: var(--el-color-danger)">{{ t('system.danger') }}</h2></template
+      >
       <p>{{ t('system.dangerNote') }}</p>
-      <el-input v-model="confirmText" :placeholder="t('system.deleteConfirm')" style="max-width:240px;margin-bottom:12px" />
+      <el-input
+        v-model="confirmText"
+        :placeholder="t('system.deleteConfirm')"
+        style="max-width: 240px; margin-bottom: 12px"
+      />
       <div>
         <el-button type="danger" :disabled="confirmText !== 'DELETE'" @click="reset">{{ t('system.reset') }}</el-button>
       </div>

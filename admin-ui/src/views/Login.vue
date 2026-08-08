@@ -1,18 +1,35 @@
 <template>
   <div class="login-wrap">
     <el-card class="login-card">
-      <template #header><h2>{{ t('login.title') }}</h2></template>
+      <template #header
+        ><h2>{{ t('login.title') }}</h2></template
+      >
       <el-form ref="formRef" :model="form" label-position="top">
-        <el-form-item :label="t('login.username')" prop="username" :rules="[{ required: true, message: t('login.usernameRequired') }]">
+        <el-form-item
+          :label="t('login.username')"
+          prop="username"
+          :rules="[{ required: true, message: t('login.usernameRequired') }]"
+        >
           <el-input v-model="form.username" @keyup.enter="submit" />
         </el-form-item>
-        <el-form-item :label="t('login.password')" prop="password" :rules="[{ required: true, message: t('login.passwordRequired') }]">
+        <el-form-item
+          :label="t('login.password')"
+          prop="password"
+          :rules="[{ required: true, message: t('login.passwordRequired') }]"
+        >
           <el-input v-model="form.password" type="password" show-password @keyup.enter="submit" />
         </el-form-item>
-        <el-form-item v-if="totpStep" :label="t('login.otp')" prop="otp" :rules="[{ required: true, message: t('login.otpRequired') }]">
+        <el-form-item
+          v-if="totpStep"
+          :label="t('login.otp')"
+          prop="otp"
+          :rules="[{ required: true, message: t('login.otpRequired') }]"
+        >
           <el-input v-model="form.otp" inputmode="numeric" maxlength="6" @keyup.enter="submit" />
         </el-form-item>
-        <el-button type="primary" :loading="loading" @click="submit" style="width:100%">{{ t(totpStep ? 'login.verify' : 'login.login') }}</el-button>
+        <el-button type="primary" :loading="loading" style="width: 100%" @click="submit">{{
+          t(totpStep ? 'login.verify' : 'login.login')
+        }}</el-button>
       </el-form>
     </el-card>
   </div>
@@ -20,12 +37,10 @@
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api'
 
-const router = useRouter()
 const { t } = useI18n()
 const loading = ref(false)
 const formRef = ref()

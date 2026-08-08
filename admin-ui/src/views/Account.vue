@@ -1,34 +1,59 @@
 <template>
   <el-card v-loading="loading">
-    <template #header><h2>{{ t('account.title') }}</h2></template>
-    <el-form ref="formRef" :model="form" label-position="top" style="max-width:480px">
-      <el-form-item :label="t('account.username')" prop="username" :rules="[{ required: true, message: t('account.username') }]">
+    <template #header
+      ><h2>{{ t('account.title') }}</h2></template
+    >
+    <el-form ref="formRef" :model="form" label-position="top" style="max-width: 480px">
+      <el-form-item
+        :label="t('account.username')"
+        prop="username"
+        :rules="[{ required: true, message: t('account.username') }]"
+      >
         <el-input v-model="form.username" />
       </el-form-item>
-      <el-form-item :label="t('account.currentPassword')" prop="current_password" :rules="[{ required: true, message: t('account.currentPasswordRequired') }]">
+      <el-form-item
+        :label="t('account.currentPassword')"
+        prop="current_password"
+        :rules="[{ required: true, message: t('account.currentPasswordRequired') }]"
+      >
         <el-input v-model="form.current_password" type="password" show-password />
       </el-form-item>
-      <el-form-item :label="t('account.newPassword')"><el-input v-model="form.new_password" type="password" show-password /></el-form-item>
-      <el-form-item :label="t('account.confirmPassword')"><el-input v-model="form.confirm_password" type="password" show-password /></el-form-item>
+      <el-form-item :label="t('account.newPassword')"
+        ><el-input v-model="form.new_password" type="password" show-password
+      /></el-form-item>
+      <el-form-item :label="t('account.confirmPassword')"
+        ><el-input v-model="form.confirm_password" type="password" show-password
+      /></el-form-item>
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>
   </el-card>
 
   <!-- TOTP 双因素 -->
-  <el-card style="margin-top:16px" v-loading="totpLoading">
-    <template #header><h2>{{ t('account.totp') }}</h2></template>
+  <el-card v-loading="totpLoading" style="margin-top: 16px">
+    <template #header
+      ><h2>{{ t('account.totp') }}</h2></template
+    >
 
     <template v-if="!totp.enabled">
       <p class="muted">{{ t('account.totpHint') }}</p>
       <el-button type="primary" @click="generateTotp">{{ t('account.totpGenerate') }}</el-button>
 
-      <div v-if="totp.secret" style="margin-top:16px">
+      <div v-if="totp.secret" style="margin-top: 16px">
         <el-alert :title="t('account.totpScanHint')" type="info" :closable="false" />
-        <img v-if="qrDataUrl" :src="qrDataUrl" alt="TOTP QR" style="width:200px;height:200px;margin-top:12px;border:1px solid #eee;border-radius:8px" />
-        <p class="muted" style="margin-top:8px">{{ t('account.totpSecret') }}: <code class="mono">{{ totp.secret }}</code></p>
-        <p class="muted"><code class="mono">{{ otpauth }}</code></p>
-        <div style="margin-top:12px;display:flex;gap:8px">
-          <el-input v-model="totpCode" :placeholder="t('account.totpCodePlaceholder')" style="width:220px" />
+        <img
+          v-if="qrDataUrl"
+          :src="qrDataUrl"
+          alt="TOTP QR"
+          style="width: 200px; height: 200px; margin-top: 12px; border: 1px solid #eee; border-radius: 8px"
+        />
+        <p class="muted" style="margin-top: 8px">
+          {{ t('account.totpSecret') }}: <code class="mono">{{ totp.secret }}</code>
+        </p>
+        <p class="muted">
+          <code class="mono">{{ otpauth }}</code>
+        </p>
+        <div style="margin-top: 12px; display: flex; gap: 8px">
+          <el-input v-model="totpCode" :placeholder="t('account.totpCodePlaceholder')" style="width: 220px" />
           <el-button type="primary" :loading="totpSaving" @click="enableTotp">{{ t('account.totpConfirm') }}</el-button>
         </div>
       </div>
@@ -36,9 +61,11 @@
 
     <template v-else>
       <el-tag type="success">{{ t('account.totpEnabled') }}</el-tag>
-      <div style="margin-top:12px;display:flex;gap:8px">
-        <el-input v-model="disableCode" :placeholder="t('account.totpCodePlaceholder')" style="width:220px" />
-        <el-button type="danger" plain :loading="totpSaving" @click="disableTotp">{{ t('account.totpDisable') }}</el-button>
+      <div style="margin-top: 12px; display: flex; gap: 8px">
+        <el-input v-model="disableCode" :placeholder="t('account.totpCodePlaceholder')" style="width: 220px" />
+        <el-button type="danger" plain :loading="totpSaving" @click="disableTotp">{{
+          t('account.totpDisable')
+        }}</el-button>
       </div>
     </template>
   </el-card>
@@ -67,17 +94,21 @@ const otpauth = computed(() => {
   if (!totp.value.secret) return ''
   return `otpauth://totp/${encodeURIComponent(form.username || 'admin')}?secret=${totp.value.secret}&issuer=${encodeURIComponent(totp.value.issuer || 'LiteShop')}&digits=6&period=30`
 })
-watch(otpauth, async (v) => {
-  if (!v) {
-    qrDataUrl.value = ''
-    return
-  }
-  try {
-    qrDataUrl.value = await QRCode.toDataURL(v, { width: 200, margin: 1 })
-  } catch {
-    qrDataUrl.value = ''
-  }
-}, { immediate: true })
+watch(
+  otpauth,
+  async (v) => {
+    if (!v) {
+      qrDataUrl.value = ''
+      return
+    }
+    try {
+      qrDataUrl.value = await QRCode.toDataURL(v, { width: 200, margin: 1 })
+    } catch {
+      qrDataUrl.value = ''
+    }
+  },
+  { immediate: true },
+)
 
 onMounted(async () => {
   loading.value = true

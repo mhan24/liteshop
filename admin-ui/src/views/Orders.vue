@@ -1,19 +1,27 @@
 <template>
   <div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
       <h2>{{ t('orders.title') }}</h2>
       <div>
-        <el-button v-if="selected.length" type="warning" @click="batchResend">{{ t('orders.batchResend') }} ({{ selected.length }})</el-button>
+        <el-button v-if="selected.length" type="warning" @click="batchResend"
+          >{{ t('orders.batchResend') }} ({{ selected.length }})</el-button
+        >
         <el-button @click="exportCSV">{{ t('common.exportCsv') }}</el-button>
       </div>
     </div>
-    <el-card style="margin-bottom:12px">
+    <el-card style="margin-bottom: 12px">
       <el-form :inline="true" @submit.prevent="search">
         <el-form-item>
-          <el-input v-model="filters.q" :placeholder="t('orders.searchPlaceholder')" clearable style="width:220px" @keyup.enter="search" />
+          <el-input
+            v-model="filters.q"
+            :placeholder="t('orders.searchPlaceholder')"
+            clearable
+            style="width: 220px"
+            @keyup.enter="search"
+          />
         </el-form-item>
         <el-form-item>
-          <el-select v-model="filters.status" clearable :placeholder="t('orders.allStatus')" style="width:140px">
+          <el-select v-model="filters.status" clearable :placeholder="t('orders.allStatus')" style="width: 140px">
             <el-option v-for="(label, key) in statusOptions" :key="key" :label="label" :value="key" />
           </el-select>
         </el-form-item>
@@ -23,7 +31,7 @@
             type="datetimerange"
             :start-placeholder="t('orders.startDate')"
             :end-placeholder="t('orders.endDate')"
-            style="width:360px"
+            style="width: 360px"
           />
         </el-form-item>
         <el-form-item>
@@ -32,7 +40,12 @@
         </el-form-item>
       </el-form>
     </el-card>
-    <el-table :data="pagedOrders" v-loading="loading" size="large" @selection-change="(rows: any[]) => selected = rows.map(r => r.id)">
+    <el-table
+      v-loading="loading"
+      :data="pagedOrders"
+      size="large"
+      @selection-change="(rows: any[]) => (selected = rows.map((r) => r.id))"
+    >
       <el-table-column type="selection" width="45" />
       <el-table-column prop="id" :label="t('common.id')" width="70" />
       <el-table-column prop="order_no" :label="t('orders.orderNo')" />
@@ -55,8 +68,15 @@
         </template>
       </el-table-column>
     </el-table>
-    <div style="display:flex;justify-content:flex-end;margin-top:12px">
-      <el-pagination v-if="orders.length" background layout="prev, pager, next, total" :total="orders.length" :page-size="pageSize" v-model:current-page="currentPage" />
+    <div style="display: flex; justify-content: flex-end; margin-top: 12px">
+      <el-pagination
+        v-if="orders.length"
+        v-model:current-page="currentPage"
+        background
+        layout="prev, pager, next, total"
+        :total="orders.length"
+        :page-size="pageSize"
+      />
     </div>
   </div>
 </template>
@@ -78,7 +98,9 @@ const pageSize = ref(20)
 const filters = reactive({ q: '', status: '', range: null as [Date, Date] | null })
 const route = useRoute()
 if (typeof route.query.status === 'string') filters.status = route.query.status
-const pagedOrders = computed(() => orders.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
+const pagedOrders = computed(() =>
+  orders.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+)
 
 const statusOptions = computed(() => ({
   created: t('orders.status.created'),
@@ -124,9 +146,16 @@ function statusText(status: string) {
 }
 function statusType(status: string): any {
   const m: any = {
-    paid: 'success', processing: 'success', delivered: 'success', completed: 'success',
-    waiting_payment: 'warning', created: 'info',
-    expired: 'danger', payment_failed: 'danger', delivery_failed: 'danger', cancelled: 'info',
+    paid: 'success',
+    processing: 'success',
+    delivered: 'success',
+    completed: 'success',
+    waiting_payment: 'warning',
+    created: 'info',
+    expired: 'danger',
+    payment_failed: 'danger',
+    delivery_failed: 'danger',
+    cancelled: 'info',
   }
   return m[status] || 'info'
 }

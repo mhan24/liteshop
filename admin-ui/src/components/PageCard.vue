@@ -1,6 +1,8 @@
 <template>
   <el-card v-loading="loading">
-    <template #header><h2>{{ title }}</h2></template>
+    <template #header
+      ><h2>{{ title }}</h2></template
+    >
     <slot />
   </el-card>
 </template>

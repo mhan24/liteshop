@@ -1,27 +1,50 @@
 <template>
   <el-card v-loading="loading">
-    <template #header><h2>{{ t('site.title') }}</h2></template>
-    <el-form label-position="top" :model="form" style="max-width:680px">
+    <template #header
+      ><h2>{{ t('site.title') }}</h2></template
+    >
+    <el-form label-position="top" :model="form" style="max-width: 680px">
       <el-form-item :label="t('site.siteTitle')"><el-input v-model="form.site_title" /></el-form-item>
-      <el-form-item :label="t('site.publicBaseUrl')"><el-input v-model="form.shop_public_base_url" :placeholder="t('site.publicBaseUrlPlaceholder')" /></el-form-item>
+      <el-form-item :label="t('site.publicBaseUrl')"
+        ><el-input v-model="form.shop_public_base_url" :placeholder="t('site.publicBaseUrlPlaceholder')"
+      /></el-form-item>
       <el-form-item :label="t('site.announcement')">
-        <MdEditor v-model="form.site_announcement" :language="editorLang" :preview="false" style="height:300px;width:100%" />
+        <MdEditor
+          v-model="form.site_announcement"
+          :language="editorLang"
+          :preview="false"
+          style="height: 300px; width: 100%"
+        />
       </el-form-item>
       <el-form-item :label="t('site.logo')">
         <el-input v-model="form.site_logo" :placeholder="t('site.logoPlaceholder')" />
-        <el-image v-if="form.site_logo" :src="form.site_logo" fit="contain" style="width:160px;height:64px;margin-top:8px;border:1px solid #eee;border-radius:8px">
+        <el-image
+          v-if="form.site_logo"
+          :src="form.site_logo"
+          fit="contain"
+          style="width: 160px; height: 64px; margin-top: 8px; border: 1px solid #eee; border-radius: 8px"
+        >
           <template #error>.</template>
         </el-image>
       </el-form-item>
       <el-form-item :label="t('site.favicon')">
         <el-input v-model="form.site_favicon" :placeholder="t('site.faviconPlaceholder')" />
-        <el-image v-if="form.site_favicon" :src="form.site_favicon" fit="contain" style="width:48px;height:48px;margin-top:8px;border:1px solid #eee;border-radius:8px">
+        <el-image
+          v-if="form.site_favicon"
+          :src="form.site_favicon"
+          fit="contain"
+          style="width: 48px; height: 48px; margin-top: 8px; border: 1px solid #eee; border-radius: 8px"
+        >
           <template #error>.</template>
         </el-image>
       </el-form-item>
       <el-form-item :label="t('site.defaultProductImage')">
         <el-input v-model="form.default_product_image" :placeholder="t('site.defaultProductImagePlaceholder')" />
-        <el-image :src="form.default_product_image" fit="contain" style="width:120px;height:120px;margin-top:8px;border:1px solid #eee;border-radius:8px">
+        <el-image
+          :src="form.default_product_image"
+          fit="contain"
+          style="width: 120px; height: 120px; margin-top: 8px; border: 1px solid #eee; border-radius: 8px"
+        >
           <template #error>.</template>
         </el-image>
       </el-form-item>
@@ -31,7 +54,7 @@
       <el-row :gutter="12">
         <el-col :md="8">
           <el-form-item :label="t('site.locale')">
-            <el-select v-model="form.site_locale" style="width:100%">
+            <el-select v-model="form.site_locale" style="width: 100%">
               <el-option value="zh-CN">简体中文</el-option>
               <el-option value="en-US">English</el-option>
             </el-select>
@@ -39,7 +62,7 @@
         </el-col>
         <el-col :md="8">
           <el-form-item :label="t('site.currency')">
-            <el-select v-model="form.site_currency" style="width:100%">
+            <el-select v-model="form.site_currency" style="width: 100%">
               <el-option value="CNY">CNY ¥</el-option>
               <el-option value="USD">USD $</el-option>
               <el-option value="EUR">EUR €</el-option>
@@ -54,7 +77,7 @@
         </el-col>
       </el-row>
       <el-form-item :label="t('site.stockDisplay')">
-        <el-select v-model="form.stock_display_mode" style="width:200px">
+        <el-select v-model="form.stock_display_mode" style="width: 200px">
           <el-option :label="t('site.stockExact')" value="exact" />
           <el-option :label="t('site.stockFuzzy')" value="fuzzy" />
         </el-select>
@@ -66,7 +89,7 @@
           <div v-for="(link, idx) in form.site_links" :key="idx" class="link-row">
             <el-input v-model="link.name" :placeholder="t('site.linkName')" />
             <el-input v-model="link.url" :placeholder="t('site.linkUrl')" />
-            <el-select v-model="link.category" style="width:130px">
+            <el-select v-model="link.category" style="width: 130px">
               <el-option :label="t('site.linkContact')" value="contact" />
               <el-option :label="t('site.linkFriend')" value="link" />
             </el-select>
@@ -78,23 +101,49 @@
 
       <el-form-item :label="t('site.copyright')"><el-input v-model="form.site_copyright" /></el-form-item>
       <el-form-item :label="t('site.privacy')">
-        <MdEditor v-model="form.privacy_policy" :language="editorLang" :preview="false" style="height:300px;width:100%" />
+        <MdEditor
+          v-model="form.privacy_policy"
+          :language="editorLang"
+          :preview="false"
+          style="height: 300px; width: 100%"
+        />
       </el-form-item>
       <el-form-item :label="t('site.terms')">
-        <MdEditor v-model="form.terms_of_service" :language="editorLang" :preview="false" style="height:300px;width:100%" />
+        <MdEditor
+          v-model="form.terms_of_service"
+          :language="editorLang"
+          :preview="false"
+          style="height: 300px; width: 100%"
+        />
       </el-form-item>
       <el-form-item :label="t('site.turnstileSiteKey')"><el-input v-model="form.turnstile_site_key" /></el-form-item>
-      <el-form-item :label="t('site.turnstileSecret')"><el-input v-model="form.turnstile_secret" type="password" :placeholder="t('site.turnstileSecretPlaceholder')" show-password /></el-form-item>
+      <el-form-item :label="t('site.turnstileSecret')"
+        ><el-input
+          v-model="form.turnstile_secret"
+          type="password"
+          :placeholder="t('site.turnstileSecretPlaceholder')"
+          show-password
+      /></el-form-item>
 
       <el-divider content-position="left">{{ t('site.maintenance') }}</el-divider>
       <el-form-item :label="t('site.maintenanceEnabled')">
         <el-switch v-model="maintenanceEnabled" />
       </el-form-item>
       <el-form-item :label="t('site.maintenanceMessage')">
-        <el-input v-model="form.maintenance_message" type="textarea" :rows="3" :placeholder="t('site.maintenanceMessagePlaceholder')" />
+        <el-input
+          v-model="form.maintenance_message"
+          type="textarea"
+          :rows="3"
+          :placeholder="t('site.maintenanceMessagePlaceholder')"
+        />
       </el-form-item>
       <el-form-item :label="t('site.maintenancePassword')">
-        <el-input v-model="form.maintenance_password" type="password" :placeholder="t('site.maintenancePasswordPlaceholder')" show-password />
+        <el-input
+          v-model="form.maintenance_password"
+          type="password"
+          :placeholder="t('site.maintenancePasswordPlaceholder')"
+          show-password
+        />
       </el-form-item>
 
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>

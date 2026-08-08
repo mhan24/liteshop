@@ -4,46 +4,61 @@
       <h2>{{ t('orders.detail') }} · {{ order.order_no }}</h2>
       <div>
         <el-tag :type="statusType(order.status)" size="large">{{ statusText(order.status) }}</el-tag>
-        <el-button style="margin-left:8px" @click="$router.push('/orders')">{{ t('orders.back') }}</el-button>
+        <el-button style="margin-left: 8px" @click="$router.push('/orders')">{{ t('orders.back') }}</el-button>
       </div>
     </div>
 
     <!-- 操作按钮 -->
-    <el-card style="margin-top:12px">
-      <template #header><span>{{ t('orders.actions') }}</span></template>
+    <el-card style="margin-top: 12px">
+      <template #header
+        ><span>{{ t('orders.actions') }}</span></template
+      >
       <el-space v-if="store.canWrite" wrap>
         <el-button
-          v-if="['paid','processing','delivered','completed','delivery_failed'].includes(order.status) && cards.length"
+          v-if="
+            ['paid', 'processing', 'delivered', 'completed', 'delivery_failed'].includes(order.status) && cards.length
+          "
           type="primary"
           @click="resend"
-        >{{ t('orders.resend') }}</el-button>
+          >{{ t('orders.resend') }}</el-button
+        >
         <el-button
           v-if="order.status === 'delivery_failed' || order.status === 'payment_failed'"
           type="warning"
           @click="redeliver"
-        >{{ t('orders.redeliver') }}</el-button>
+          >{{ t('orders.redeliver') }}</el-button
+        >
         <el-button
           v-if="order.status === 'waiting_payment' || order.status === 'created'"
           type="danger"
           plain
           @click="cancelOrder"
-        >{{ t('orders.cancel') }}</el-button>
+          >{{ t('orders.cancel') }}</el-button
+        >
         <el-button @click="statusDialog = true">{{ t('orders.changeStatus') }}</el-button>
       </el-space>
     </el-card>
 
-    <el-row :gutter="16" style="margin-top:16px">
+    <el-row :gutter="16" style="margin-top: 16px">
       <!-- 订单信息 -->
       <el-col :md="12">
         <el-card>
-          <template #header><span>{{ t('orders.orderInfo') }}</span></template>
+          <template #header
+            ><span>{{ t('orders.orderInfo') }}</span></template
+          >
           <el-descriptions :column="1" size="small" border>
             <el-descriptions-item :label="t('orders.orderNo')">{{ order.order_no }}</el-descriptions-item>
-            <el-descriptions-item :label="t('orders.product')">{{ order.product_name }} x{{ order.qty }}</el-descriptions-item>
-            <el-descriptions-item :label="t('orders.amount')">{{ money(order.amount_cents) }} {{ order.fiat }}</el-descriptions-item>
+            <el-descriptions-item :label="t('orders.product')"
+              >{{ order.product_name }} x{{ order.qty }}</el-descriptions-item
+            >
+            <el-descriptions-item :label="t('orders.amount')"
+              >{{ money(order.amount_cents) }} {{ order.fiat }}</el-descriptions-item
+            >
             <el-descriptions-item :label="t('orders.contact')">{{ order.buyer_contact }}</el-descriptions-item>
             <el-descriptions-item :label="t('orders.createdAt')">{{ date(order.created_at) }}</el-descriptions-item>
-            <el-descriptions-item v-if="order.paid_at" :label="t('orders.paidAt')">{{ date(order.paid_at) }}</el-descriptions-item>
+            <el-descriptions-item v-if="order.paid_at" :label="t('orders.paidAt')">{{
+              date(order.paid_at)
+            }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-col>
@@ -51,7 +66,9 @@
       <!-- 支付信息 -->
       <el-col :md="12">
         <el-card>
-          <template #header><span>{{ t('orders.paymentInfo') }}</span></template>
+          <template #header
+            ><span>{{ t('orders.paymentInfo') }}</span></template
+          >
           <el-descriptions :column="1" size="small" border>
             <el-descriptions-item :label="t('orders.tradeId')">
               <code class="mono">{{ order.trade_id || '-' }}</code>
@@ -61,7 +78,9 @@
             </el-descriptions-item>
             <el-descriptions-item :label="t('orders.tradeType')">{{ order.trade_type || '-' }}</el-descriptions-item>
             <el-descriptions-item :label="t('orders.checkout')">
-              <a v-if="order.payment_url" :href="order.payment_url" target="_blank" rel="noopener" class="link">{{ order.payment_url }}</a>
+              <a v-if="order.payment_url" :href="order.payment_url" target="_blank" rel="noopener" class="link">{{
+                order.payment_url
+              }}</a>
               <span v-else>-</span>
             </el-descriptions-item>
           </el-descriptions>
@@ -70,17 +89,23 @@
     </el-row>
 
     <!-- 卡密信息 -->
-    <el-card style="margin-top:16px">
-      <template #header><span>{{ t('orders.cards') }} ({{ cards.length }})</span></template>
+    <el-card style="margin-top: 16px">
+      <template #header
+        ><span>{{ t('orders.cards') }} ({{ cards.length }})</span></template
+      >
       <ul class="card-list">
-        <li v-for="c in cards" :key="c.id"><code>{{ c.content }}</code></li>
+        <li v-for="c in cards" :key="c.id">
+          <code>{{ c.content }}</code>
+        </li>
       </ul>
       <div v-if="!cards.length" class="empty-tip">{{ t('orders.noCards') }}</div>
     </el-card>
 
     <!-- 日志 / 通知记录 -->
-    <el-card style="margin-top:16px">
-      <template #header><span>{{ t('orders.logs') }}</span></template>
+    <el-card style="margin-top: 16px">
+      <template #header
+        ><span>{{ t('orders.logs') }}</span></template
+      >
       <el-timeline v-if="logs.length">
         <el-timeline-item
           v-for="log in logs"
@@ -100,7 +125,7 @@
     <el-dialog v-model="statusDialog" :title="t('orders.changeStatus')" width="420px">
       <el-form label-position="top">
         <el-form-item :label="t('common.status')">
-          <el-select v-model="newStatus" style="width:100%">
+          <el-select v-model="newStatus" style="width: 100%">
             <el-option v-for="(label, key) in statusOptions" :key="key" :label="label" :value="key" />
           </el-select>
         </el-form-item>
@@ -161,10 +186,6 @@ async function load() {
     loading.value = false
   }
 }
-async function expire() {
-  await api.post('/admin/orders/' + route.params.id + '/expire', {})
-  await load()
-}
 async function resend() {
   await api.post('/admin/orders/' + route.params.id + '/resend', {})
   ElMessage.success(t('orders.resendSent'))
@@ -216,9 +237,16 @@ function statusText(status: string) {
 }
 function statusType(status: string): any {
   const m: any = {
-    paid: 'success', processing: 'success', delivered: 'success', completed: 'success',
-    waiting_payment: 'warning', created: 'info',
-    expired: 'danger', payment_failed: 'danger', delivery_failed: 'danger', cancelled: 'info',
+    paid: 'success',
+    processing: 'success',
+    delivered: 'success',
+    completed: 'success',
+    waiting_payment: 'warning',
+    created: 'info',
+    expired: 'danger',
+    payment_failed: 'danger',
+    delivery_failed: 'danger',
+    cancelled: 'info',
   }
   return m[status] || 'info'
 }

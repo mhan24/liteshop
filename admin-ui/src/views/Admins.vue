@@ -1,10 +1,10 @@
 <template>
   <div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
       <h2>{{ t('admins.title') }}</h2>
       <el-button type="primary" @click="dialog = true">{{ t('admins.add') }}</el-button>
     </div>
-    <el-table :data="admins" v-loading="loading" size="large">
+    <el-table v-loading="loading" :data="admins" size="large">
       <el-table-column prop="id" :label="t('common.id')" width="80" />
       <el-table-column prop="username" :label="t('admins.username')" />
       <el-table-column :label="t('admins.role')" width="140">
@@ -20,13 +20,15 @@
           <el-select
             :model-value="row.role"
             size="small"
-            style="width:110px"
+            style="width: 110px"
             :disabled="row.id === store.username ? false : false"
             @change="(v: string) => setRole(row, v)"
           >
             <el-option v-for="(label, key) in roleOptions" :key="key" :label="label" :value="key" />
           </el-select>
-          <el-button size="small" type="danger" text :disabled="row.id === currentId" @click="remove(row)">{{ t('admins.delete') }}</el-button>
+          <el-button size="small" type="danger" text :disabled="row.id === currentId" @click="remove(row)">{{
+            t('admins.delete')
+          }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -34,9 +36,11 @@
     <el-dialog v-model="dialog" :title="t('admins.add')" width="400px">
       <el-form label-position="top">
         <el-form-item :label="t('admins.username')"><el-input v-model="form.username" /></el-form-item>
-        <el-form-item :label="t('admins.password')"><el-input v-model="form.password" type="password" show-password /></el-form-item>
+        <el-form-item :label="t('admins.password')"
+          ><el-input v-model="form.password" type="password" show-password
+        /></el-form-item>
         <el-form-item :label="t('admins.role')">
-          <el-select v-model="form.role" style="width:100%">
+          <el-select v-model="form.role" style="width: 100%">
             <el-option v-for="(label, key) in roleOptions" :key="key" :label="label" :value="key" />
           </el-select>
         </el-form-item>

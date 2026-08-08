@@ -749,8 +749,10 @@ const messages = {
     system: {
       title: 'System',
       backup: 'Backup / Restore',
-      backupNote: 'Back up site/payment/notification config (excludes products, cards, orders). Restore overwrites same keys.',
-      backupWarning: 'The backup excludes secret keys (payment/email/notify); restore keeps current secrets; set them on a fresh deployment.',
+      backupNote:
+        'Back up site/payment/notification config (excludes products, cards, orders). Restore overwrites same keys.',
+      backupWarning:
+        'The backup excludes secret keys (payment/email/notify); restore keeps current secrets; set them on a fresh deployment.',
       downloadBackup: 'Download backup',
       restore: 'Restore',
       chooseBackup: 'Choose backup file',

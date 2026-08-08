@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
       <h2>{{ t('cards.title') }}</h2>
       <div>
         <el-button @click="exportCsv">{{ t('cards.export') }}</el-button>
@@ -9,12 +9,14 @@
     </div>
     <el-card :header="t('cards.import')">
       <el-input v-model="cardsText" type="textarea" :rows="6" placeholder="CARD-001&#10;CARD-002" />
-      <div style="margin-top:12px">
+      <div style="margin-top: 12px">
         <el-checkbox v-model="dedupe">{{ t('cards.dedupe') }}</el-checkbox>
       </div>
-      <el-button type="primary" style="margin-top:12px" :loading="importing" @click="importCards">{{ t('cards.importBtn') }}</el-button>
+      <el-button type="primary" style="margin-top: 12px" :loading="importing" @click="importCards">{{
+        t('cards.importBtn')
+      }}</el-button>
     </el-card>
-    <el-table :data="cards" style="margin-top:16px" v-loading="loading" size="large">
+    <el-table v-loading="loading" :data="cards" style="margin-top: 16px" size="large">
       <el-table-column prop="id" :label="t('common.id')" width="80" />
       <el-table-column prop="content" :label="t('cards.content')" />
       <el-table-column :label="t('common.status')">
@@ -34,7 +36,9 @@
       </el-table-column>
       <el-table-column :label="t('common.actions')" width="100">
         <template #default="{ row }">
-          <el-button v-if="row.status === 'available'" size="small" type="danger" @click="remove(row.id)">{{ t('common.delete') }}</el-button>
+          <el-button v-if="row.status === 'available'" size="small" type="danger" @click="remove(row.id)">{{
+            t('common.delete')
+          }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -67,7 +71,10 @@ async function load() {
 async function importCards() {
   importing.value = true
   try {
-    const res = await api.post('/admin/products/' + route.params.id + '/cards', { cards: cardsText.value, dedupe: dedupe.value })
+    const res = await api.post('/admin/products/' + route.params.id + '/cards', {
+      cards: cardsText.value,
+      dedupe: dedupe.value,
+    })
     const msg = dedupe.value
       ? `${t('cards.added')}: ${res.added}, ${t('cards.skipped')}: ${res.skipped}`
       : `${t('cards.imported')}: ${res.added}`

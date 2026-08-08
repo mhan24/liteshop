@@ -26,11 +26,13 @@
     </el-row>
 
     <!-- 待处理告警 -->
-    <el-row :gutter="16" style="margin-top:16px">
+    <el-row :gutter="16" style="margin-top: 16px">
       <el-col :xs="12" :md="8">
         <el-card shadow="hover" @click="$router.push('/orders')">
           <div class="alert-row">
-            <div class="alert-icon warn"><el-icon><Clock /></el-icon></div>
+            <div class="alert-icon warn">
+              <el-icon><Clock /></el-icon>
+            </div>
             <div>
               <div class="alert-title">{{ t('dashboard.pendingOrders') }}</div>
               <div class="alert-value">{{ stats.pending_orders || 0 }}</div>
@@ -41,7 +43,9 @@
       <el-col :xs="12" :md="8">
         <el-card shadow="hover" @click="$router.push('/orders?status=payment_failed')">
           <div class="alert-row">
-            <div class="alert-icon danger"><el-icon><Warning /></el-icon></div>
+            <div class="alert-icon danger">
+              <el-icon><Warning /></el-icon>
+            </div>
             <div>
               <div class="alert-title">{{ t('dashboard.paymentFailed') }}</div>
               <div class="alert-value">{{ stats.payment_failed || 0 }}</div>
@@ -52,7 +56,9 @@
       <el-col :xs="12" :md="8">
         <el-card shadow="hover" @click="$router.push('/orders?status=delivery_failed')">
           <div class="alert-row">
-            <div class="alert-icon danger"><el-icon><Failed /></el-icon></div>
+            <div class="alert-icon danger">
+              <el-icon><Failed /></el-icon>
+            </div>
             <div>
               <div class="alert-title">{{ t('dashboard.deliveryFailed') }}</div>
               <div class="alert-value">{{ stats.delivery_failed || 0 }}</div>
@@ -62,7 +68,7 @@
       </el-col>
     </el-row>
 
-    <el-row :gutter="16" style="margin-top:16px">
+    <el-row :gutter="16" style="margin-top: 16px">
       <!-- 库存不足 -->
       <el-col :md="12">
         <el-card>
@@ -84,7 +90,9 @@
             </el-table-column>
             <el-table-column label="" width="80">
               <template #default="{ row }">
-                <el-button size="small" @click="$router.push('/products/' + row.id + '/cards')">{{ t('common.edit') }}</el-button>
+                <el-button size="small" @click="$router.push('/products/' + row.id + '/cards')">{{
+                  t('common.edit')
+                }}</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -95,17 +103,27 @@
       <!-- 系统状态 -->
       <el-col :md="12">
         <el-card>
-          <template #header><span>{{ t('dashboard.systemStatus') }}</span></template>
+          <template #header
+            ><span>{{ t('dashboard.systemStatus') }}</span></template
+          >
           <el-descriptions :column="1" size="small" border>
-            <el-descriptions-item :label="t('dashboard.goVersion')">{{ stats.system?.go_version }}</el-descriptions-item>
+            <el-descriptions-item :label="t('dashboard.goVersion')">{{
+              stats.system?.go_version
+            }}</el-descriptions-item>
             <el-descriptions-item :label="t('dashboard.uptime')">{{ uptimeText }}</el-descriptions-item>
             <el-descriptions-item :label="t('dashboard.dbSize')">{{ dbSizeText }}</el-descriptions-item>
             <el-descriptions-item :label="t('dashboard.products')">{{ stats.products || 0 }}</el-descriptions-item>
             <el-descriptions-item :label="t('dashboard.cardStock')">
               <span>
-                <el-tag size="small" type="success">{{ t('cards.status.available') }}: {{ stats.available_cards || 0 }}</el-tag>
-                <el-tag size="small" type="warning" style="margin-left:6px">{{ t('cards.status.locked') }}: {{ stats.locked_cards || 0 }}</el-tag>
-                <el-tag size="small" type="info" style="margin-left:6px">{{ t('cards.status.sold') }}: {{ stats.sold_cards || 0 }}</el-tag>
+                <el-tag size="small" type="success"
+                  >{{ t('cards.status.available') }}: {{ stats.available_cards || 0 }}</el-tag
+                >
+                <el-tag size="small" type="warning" style="margin-left: 6px"
+                  >{{ t('cards.status.locked') }}: {{ stats.locked_cards || 0 }}</el-tag
+                >
+                <el-tag size="small" type="info" style="margin-left: 6px"
+                  >{{ t('cards.status.sold') }}: {{ stats.sold_cards || 0 }}</el-tag
+                >
               </span>
             </el-descriptions-item>
           </el-descriptions>
@@ -114,24 +132,30 @@
     </el-row>
 
     <!-- 销售报表 -->
-    <el-row :gutter="16" style="margin-top:16px">
+    <el-row :gutter="16" style="margin-top: 16px">
       <el-col :md="12">
         <el-card>
-          <template #header><span>{{ t('dashboard.salesTrend') }}</span></template>
-          <div ref="trendChart" style="height:260px"></div>
+          <template #header
+            ><span>{{ t('dashboard.salesTrend') }}</span></template
+          >
+          <div ref="trendChart" style="height: 260px"></div>
         </el-card>
       </el-col>
       <el-col :md="12">
         <el-card>
-          <template #header><span>{{ t('dashboard.productShare') }}</span></template>
-          <div ref="shareChart" style="height:260px"></div>
+          <template #header
+            ><span>{{ t('dashboard.productShare') }}</span></template
+          >
+          <div ref="shareChart" style="height: 260px"></div>
         </el-card>
       </el-col>
     </el-row>
 
     <!-- 最近交易 -->
-    <el-card style="margin-top:16px">
-      <template #header><span>{{ t('dashboard.recentOrders') }}</span></template>
+    <el-card style="margin-top: 16px">
+      <template #header
+        ><span>{{ t('dashboard.recentOrders') }}</span></template
+      >
       <el-table :data="stats.recent_orders || []" size="small">
         <el-table-column prop="order_no" :label="t('orders.orderNo')" width="220" />
         <el-table-column prop="product_name" :label="t('orders.product')" />
@@ -186,9 +210,16 @@ function statusText(status: string) {
 }
 function statusType(status: string): any {
   const m: any = {
-    paid: 'success', processing: 'success', delivered: 'success', completed: 'success',
-    waiting_payment: 'warning', created: 'info',
-    expired: 'danger', payment_failed: 'danger', delivery_failed: 'danger', cancelled: 'info',
+    paid: 'success',
+    processing: 'success',
+    delivered: 'success',
+    completed: 'success',
+    waiting_payment: 'warning',
+    created: 'info',
+    expired: 'danger',
+    payment_failed: 'danger',
+    delivery_failed: 'danger',
+    cancelled: 'info',
   }
   return m[status] || 'info'
 }
@@ -210,12 +241,8 @@ const shareChart = ref<HTMLElement | null>(null)
 
 async function loadCharts() {
   if (!trendChart.value || !shareChart.value) return
-  let report: any = {}
-  try {
-    report = await api.get('/admin/sales-report?days=14')
-  } catch {
-    return
-  }
+  const report: any = await api.get('/admin/sales-report?days=14').catch(() => null)
+  if (!report) return
   const daily = report.daily || []
   const trend = echarts.init(trendChart.value)
   trend.setOption({
@@ -223,7 +250,15 @@ async function loadCharts() {
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: daily.map((d: any) => d.Date) },
     yAxis: { type: 'value' },
-    series: [{ name: t('dashboard.todayRevenue'), type: 'line', smooth: true, areaStyle: { opacity: 0.15 }, data: daily.map((d: any) => (d.Revenue / 100).toFixed(2)) }],
+    series: [
+      {
+        name: t('dashboard.todayRevenue'),
+        type: 'line',
+        smooth: true,
+        areaStyle: { opacity: 0.15 },
+        data: daily.map((d: any) => (d.Revenue / 100).toFixed(2)),
+      },
+    ],
   })
   const products = report.products || []
   const share = echarts.init(shareChart.value)

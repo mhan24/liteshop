@@ -1,17 +1,47 @@
 <template>
   <PageCard :title="t('notify.title')" :loading="loading">
-    <el-form label-position="top" :model="form" style="max-width:960px">
+    <el-form label-position="top" :model="form" style="max-width: 960px">
       <el-form-item :label="t('notify.smtpHost')"><el-input v-model="form.smtp_host" /></el-form-item>
       <el-form-item :label="t('notify.smtpPort')"><el-input-number v-model="form.smtp_port" :min="1" /></el-form-item>
-      <el-form-item :label="t('notify.smtpUsername')"><el-input v-model="form.smtp_username" :placeholder="t('notify.smtpUsernamePlaceholder')" /></el-form-item>
-      <el-form-item :label="t('notify.smtpPassword')"><el-input v-model="form.smtp_password" type="password" :placeholder="t('notify.smtpPasswordPlaceholder')" show-password /></el-form-item>
+      <el-form-item :label="t('notify.smtpUsername')"
+        ><el-input v-model="form.smtp_username" :placeholder="t('notify.smtpUsernamePlaceholder')"
+      /></el-form-item>
+      <el-form-item :label="t('notify.smtpPassword')"
+        ><el-input
+          v-model="form.smtp_password"
+          type="password"
+          :placeholder="t('notify.smtpPasswordPlaceholder')"
+          show-password
+      /></el-form-item>
       <el-form-item :label="t('notify.smtpFrom')"><el-input v-model="form.smtp_from" /></el-form-item>
-      <el-form-item><el-button @click="testEmail" :loading="testing === 'email'">{{ t('notify.testEmail') }}</el-button></el-form-item>
+      <el-form-item
+        ><el-button :loading="testing === 'email'" @click="testEmail">{{
+          t('notify.testEmail')
+        }}</el-button></el-form-item
+      >
       <el-form-item :label="t('notify.telegramChatId')"><el-input v-model="form.telegram_chat_id" /></el-form-item>
-      <el-form-item :label="t('notify.telegramToken')"><el-input v-model="form.telegram_bot_token" type="password" :placeholder="t('notify.telegramTokenPlaceholder')" show-password /></el-form-item>
-      <el-form-item><el-button @click="testTelegram" :loading="testing === 'telegram'">{{ t('notify.testTelegram') }}</el-button></el-form-item>
-      <el-form-item :label="t('notify.webhookUrl')"><el-input v-model="form.webhook_url" :placeholder="t('notify.webhookPlaceholder')" /></el-form-item>
-      <el-form-item :label="t('notify.webhookSecret')"><el-input v-model="form.webhook_secret" type="password" :placeholder="t('notify.webhookSecretPlaceholder')" show-password /></el-form-item>
+      <el-form-item :label="t('notify.telegramToken')"
+        ><el-input
+          v-model="form.telegram_bot_token"
+          type="password"
+          :placeholder="t('notify.telegramTokenPlaceholder')"
+          show-password
+      /></el-form-item>
+      <el-form-item
+        ><el-button :loading="testing === 'telegram'" @click="testTelegram">{{
+          t('notify.testTelegram')
+        }}</el-button></el-form-item
+      >
+      <el-form-item :label="t('notify.webhookUrl')"
+        ><el-input v-model="form.webhook_url" :placeholder="t('notify.webhookPlaceholder')"
+      /></el-form-item>
+      <el-form-item :label="t('notify.webhookSecret')"
+        ><el-input
+          v-model="form.webhook_secret"
+          type="password"
+          :placeholder="t('notify.webhookSecretPlaceholder')"
+          show-password
+      /></el-form-item>
       <el-form-item :label="t('notify.events')">
         <el-checkbox-group v-model="events">
           <el-checkbox value="order_created">{{ t('notify.eventOrderCreated') }}</el-checkbox>
@@ -28,18 +58,30 @@
       <el-collapse>
         <el-collapse-item v-for="ev in eventList" :key="ev.key" :title="ev.label">
           <el-form-item :label="t('notify.eventTelegram')">
-            <el-input v-model="form.event_templates[ev.key].telegram" type="textarea" :rows="5" :autosize="{ minRows: 5, maxRows: 14 }" />
+            <el-input
+              v-model="form.event_templates[ev.key].telegram"
+              type="textarea"
+              :rows="5"
+              :autosize="{ minRows: 5, maxRows: 14 }"
+            />
           </el-form-item>
           <template v-if="ev.key === 'order_created' || ev.key === 'delivered'">
             <el-form-item :label="t('notify.eventMailSubject')">
               <el-input v-model="form.event_templates[ev.key].mail_subject" />
             </el-form-item>
             <el-form-item :label="t('notify.eventMailBody')">
-              <el-input v-model="form.event_templates[ev.key].mail_body" type="textarea" :rows="9" :autosize="{ minRows: 9, maxRows: 20 }" />
+              <el-input
+                v-model="form.event_templates[ev.key].mail_body"
+                type="textarea"
+                :rows="9"
+                :autosize="{ minRows: 9, maxRows: 20 }"
+              />
             </el-form-item>
           </template>
           <el-form-item>
-            <el-button size="small" @click="testEvent(ev.key)" :loading="testing === ev.key">{{ t('notify.test') }}</el-button>
+            <el-button size="small" :loading="testing === ev.key" @click="testEvent(ev.key)">{{
+              t('notify.test')
+            }}</el-button>
           </el-form-item>
         </el-collapse-item>
       </el-collapse>
@@ -77,7 +119,9 @@ onMounted(async () => {
     form.value.smtp_password = ''
     form.value.telegram_bot_token = ''
     form.value.webhook_secret = ''
-    events.value = String(form.value.notify_events || '').split(',').filter(Boolean)
+    events.value = String(form.value.notify_events || '')
+      .split(',')
+      .filter(Boolean)
     if (!form.value.event_templates) form.value.event_templates = {}
   } finally {
     loading.value = false
@@ -106,7 +150,8 @@ async function testEvent(ev: string) {
   }
 }
 async function testEmail() {
-  const to = String(form.value.notify_admin_email || '').trim() || window.prompt(t('notify.testEmailPrompt') || '') || ''
+  const to =
+    String(form.value.notify_admin_email || '').trim() || window.prompt(t('notify.testEmailPrompt') || '') || ''
   if (!to) {
     ElMessage.warning(t('notify.testEmailNeedAddr'))
     return
