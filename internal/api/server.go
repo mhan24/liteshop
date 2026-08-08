@@ -21,10 +21,12 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"shop/internal/payment"
 	"shop/internal/config"
 	"shop/internal/db"
 	"shop/internal/jobs"
+	"shop/internal/logging"
 	"shop/internal/repository"
 	"shop/internal/models"
 	"shop/internal/notify"
@@ -536,16 +538,38 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	params, err := payment.ParseAndVerifyCallback(body, payCfg.BepusdtToken)
 	if err != nil {
-		log.Printf("bepusdt notify verify failed: %v (body %d bytes)", err, len(body))
+		logging.Payment().Warn("bepusdt callback verify failed",
+			zap.Int("body_bytes", len(body)),
+			zap.String("result", "verify_failed"),
+			zap.Error(err),
+		)
 		http.Error(w, "invalid signature", 400)
 		return
 	}
+	logging.Payment().Info("bepusdt callback",
+		zap.String("order_no", params["order_id"]),
+		zap.String("trade_id", params["trade_id"]),
+		zap.String("block_transaction_id", params["block_transaction_id"]),
+		zap.String("status", params["status"]),
+		zap.Time("callback_time", time.Now()),
+	)
 	switch params["status"] {
 	case "2":
 		order, cards, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], params["trade_id"], params["block_transaction_id"])
 		if err != nil {
-			log.Printf("mark paid %s: %v", params["order_id"], err)
+			logging.Payment().Error("payment callback error",
+				zap.String("order_no", params["order_id"]),
+				zap.String("result", "error"),
+				zap.Error(err),
+			)
 			go s.notifier.NotifySystemError("支付回调处理异常 order=" + params["order_id"] + ": " + err.Error())
+		} else {
+			logging.Payment().Info("payment delivered",
+				zap.String("order_no", order.OrderNo),
+				zap.Int64("amount_cents", order.AmountCents),
+				zap.String("trade_id", order.TradeID),
+				zap.String("result", map[bool]string{true: "ok", false: "noop"}[changed]),
+			)
 		}
 		if changed {
 			payPayload := s.notifier.OrderPayload(notify.EventPaymentSuccess, order, nil, nil)

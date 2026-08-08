@@ -4,9 +4,10 @@ package jobs
 
 import (
 	"context"
-	"log"
 
 	"shop/internal/models"
+
+	"shop/internal/logging"
 )
 
 // 任务类型。
@@ -48,7 +49,7 @@ func (b *Bus) Publish(j Job) {
 	select {
 	case b.ch <- j:
 	default:
-		log.Printf("task: queue full, dropped job kind=%s", j.Kind)
+		logging.App().Sugar().Warnf("task: queue full, dropped job kind=%s", j.Kind)
 	}
 }
 

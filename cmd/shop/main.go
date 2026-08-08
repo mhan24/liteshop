@@ -10,10 +10,14 @@ import (
 	"shop/internal/config"
 	"shop/internal/db"
 	"shop/internal/api"
+	"shop/internal/logging"
 )
 
 func main() {
 	cfg := config.Load()
+	if err := logging.Init(cfg.LogDir); err != nil {
+		log.Fatalf("init logging: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(cfg.DatabasePath), 0o755); err != nil {
 		log.Fatal(err)
 	}
@@ -35,9 +39,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("shop listening on %s", cfg.ListenAddr)
-	log.Printf("admin entry: %s/admin", cfg.PublicBaseURL)
-	log.Printf("bepusdt notify url: %s", cfg.NotifyURL)
+	logging.App().Sugar().Infof("shop listening on %s", cfg.ListenAddr)
+	logging.App().Sugar().Infof("admin entry: %s/admin", cfg.PublicBaseURL)
+	logging.App().Sugar().Infof("bepusdt notify url: %s", cfg.NotifyURL)
 	// 显式超时，防止慢速请求（slowloris 等）长期占用连接。
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,

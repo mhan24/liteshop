@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +16,8 @@ import (
 	"shop/internal/db"
 	"shop/internal/models"
 	"shop/internal/jobs"
+
+	"shop/internal/logging"
 )
 
 // 统一事件类型。
@@ -181,7 +182,7 @@ func (n *Notifier) sendWebhook(event string, payload map[string]string, site str
 	raw, _ := json.Marshal(body)
 	req, err := http.NewRequest(http.MethodPost, n.CurrentConfig().WebhookURL, bytes.NewReader(raw))
 	if err != nil {
-		log.Printf("notify webhook req error event=%s err=%v", event, err)
+		logging.App().Sugar().Warnf("notify webhook req error event=%s err=%v", event, err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -195,12 +196,12 @@ func (n *Notifier) sendWebhook(event string, payload map[string]string, site str
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("notify webhook failed event=%s err=%v", event, err)
+		logging.App().Sugar().Warnf("notify webhook failed event=%s err=%v", event, err)
 		return
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		log.Printf("notify webhook http %d event=%s", resp.StatusCode, event)
+		logging.App().Sugar().Warnf("notify webhook http %d event=%s", resp.StatusCode, event)
 	}
 }
 
@@ -301,7 +302,7 @@ func (n *Notifier) NotifyLowStock(productID int64, productName string, available
 		ON CONFLICT(product_id) DO UPDATE SET notified_at = excluded.notified_at
 		WHERE low_stock_reminders.notified_at < excluded.notified_at - 1800`, productID, now)
 	if err != nil {
-		log.Printf("low stock reminder: %v", err)
+		logging.App().Sugar().Warnf("low stock reminder: %v", err)
 		return
 	}
 	if affected, _ := res.RowsAffected(); affected == 0 {

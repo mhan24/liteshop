@@ -2,9 +2,10 @@ package jobs
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
+
+	"shop/internal/logging"
 )
 
 // Job 一个周期任务。
@@ -48,7 +49,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 					func() {
 						defer func() {
 							if r := recover(); r != nil {
-								log.Printf("job %s panic: %v", j.Name, r)
+								logging.App().Sugar().Errorf("job %s panic: %v", j.Name, r)
 							}
 						}()
 						j.Run()

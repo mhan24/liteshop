@@ -42,10 +42,17 @@ An automated digital-goods delivery (card / activation-code) shop built with **G
 - Config system: `settings` (system config) + `secrets` (AES-GCM encrypted: BEpusdt token / SMTP password / Telegram token / Webhook secret / Turnstile secret / maintenance password)
 - Task system: in-process goroutine + channel workers (mail / Telegram / Webhook); HTTP layer only publishes events
 - Background jobs (cron + worker): auto-expire unpaid orders, retry failed emails, session/log cleanup, daily database backup
+- Logging (zap): `logs/app.log` / `logs/payment.log` / `logs/security.log`, 50MB rotation, keep 7
 - BEpusdt integration: create / cancel transactions, callback verification (MD5), idempotent single-transaction delivery
 - Admin security: PBKDF2-SHA256 passwords, TOTP 2FA, **account lockout after 5 failed logins for 10 minutes**, timing-equalized login
 - Security: RBAC, audit logs, rate limiting across endpoints, Turnstile, CSP, HSTS, security headers, CSV injection guard, parameterized SQL
 - Health check `/health`, first-time setup `/setup`
+
+### Logging
+
+- `app.log`: startup, background jobs, internal errors
+- `payment.log`: payment create/callback (order number, amount, trade ID, callback time, result) for troubleshooting
+- `security.log`: admin logins (success/failure/lockout), TOTP verification
 
 ---
 

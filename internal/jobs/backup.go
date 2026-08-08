@@ -2,7 +2,6 @@ package jobs
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +9,8 @@ import (
 	"time"
 
 	"shop/internal/db"
+
+	"shop/internal/logging"
 )
 
 // BackupJob 定期备份 SQLite 数据库（VACUUM INTO 一致性快照），保留最近 keep 份。
@@ -17,25 +18,25 @@ func BackupJob(databasePath string, keep int) func() {
 	return func() {
 		dir := filepath.Join(filepath.Dir(databasePath), "backups")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
-			log.Printf("job backup mkdir: %v", err)
+			logging.App().Sugar().Errorf("job backup mkdir: %v", err)
 			return
 		}
 		name := fmt.Sprintf("shop-%s.db", time.Now().Format("20060102-150405"))
 		target := filepath.Join(dir, name)
 		d, err := db.Open(databasePath)
 		if err != nil {
-			log.Printf("job backup open: %v", err)
+			logging.App().Sugar().Errorf("job backup open: %v", err)
 			return
 		}
 		_, err = d.Exec(fmt.Sprintf("VACUUM INTO '%s'", strings.ReplaceAll(target, "'", "''")))
 		d.Close()
 		if err != nil {
-			log.Printf("job backup vacuum: %v", err)
+			logging.App().Sugar().Errorf("job backup vacuum: %v", err)
 			return
 		}
 		_ = os.Chmod(target, 0o600)
 		pruneOldBackups(dir, keep)
-		log.Printf("job backup: %s", target)
+		logging.App().Sugar().Infof("job backup: %s", target)
 	}
 }
 

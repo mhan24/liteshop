@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"runtime"
+	"go.uber.org/zap"
 	"shop/internal/db"
+	"shop/internal/logging"
 	"shop/internal/models"
 	"shop/internal/notify"
 	"shop/internal/service"
@@ -47,7 +48,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // writeInternalError 记录完整错误到日志，仅向客户端返回通用文案（避免泄露内部细节）。
 func writeInternalError(w http.ResponseWriter, err error) {
 	if err != nil {
-		log.Printf("internal error: %v", err)
+		logging.App().Error("internal error", zap.Error(err))
 	}
 	writeError(w, 500, "internal server error")
 }
@@ -436,6 +437,12 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	orderNo, paymentURL, _, _, err := s.orders.CreateOrder(p, input.Qty, input.Contact, tradeType, input.CouponCode)
 	if err != nil {
 		go s.notifier.NotifySystemError("创建支付交易失败: " + err.Error())
+		logging.Payment().Warn("payment create failed",
+			zap.String("order_no", orderNo),
+			zap.String("trade_type", tradeType),
+			zap.String("result", "error"),
+			zap.String("error", err.Error()),
+		)
 		// 业务错误（券码/库存/数量）可回显给买家；系统错误（网关/DB）只写日志并返回通用文案。
 		msg := "下单失败，请重试或联系客服"
 		var biz *service.BusinessError
@@ -462,6 +469,12 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if o, oerr := s.orders.Repo().GetOrderByNo(orderNo); oerr == nil {
 		token = o.ViewToken
+		logging.Payment().Info("payment create",
+			zap.String("order_no", orderNo),
+			zap.Int64("amount_cents", o.AmountCents),
+			zap.String("trade_type", o.TradeType),
+			zap.String("result", "ok"),
+		)
 	}
 	writeJSON(w, 200, map[string]any{"order_no": orderNo, "payment_url": paymentURL, "token": token})
 }
@@ -675,8 +688,10 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	username := strings.TrimSpace(input.Username)
+	ip := clientIP(r)
 	// 账号锁定：连续失败 5 次锁定 10 分钟。
 	if s.loginLocked(username) {
+		logging.Security().Warn("admin login locked", zap.String("username", username), zap.String("ip", ip))
 		writeError(w, 403, "尝试次数过多，账号已锁定，请 10 分钟后再试")
 		return
 	}
@@ -684,6 +699,7 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 	if err == db.ErrAdminNotFound {
 		// 恒定时间：对不存在用户也执行一次 PBKDF2，避免用户名枚举时间侧信道。
 		_ = models.HashPassword(input.Password)
+		logging.Security().Warn("admin login failed", zap.String("username", username), zap.String("ip", ip), zap.String("reason", "not_found"))
 		writeError(w, 403, "invalid credentials")
 		return
 	}
@@ -694,16 +710,21 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 	if !models.CheckPassword(input.Password, hash) {
 		s.recordLoginFail(username)
 		msg := "invalid credentials"
+		reason := "bad_password"
 		if s.loginLocked(username) {
 			msg = "尝试次数过多，账号已锁定，请 10 分钟后再试"
+			reason = "locked"
 		}
+		logging.Security().Warn("admin login failed", zap.String("username", username), zap.String("ip", ip), zap.String("reason", reason))
 		writeError(w, 403, msg)
 		return
 	}
 	s.clearLoginFails(username)
+	logging.Security().Info("admin login ok", zap.String("username", username), zap.String("ip", ip))
 	if totpEnabled {
 		if strings.TrimSpace(input.Otp) == "" {
 			// 未提供 OTP，返回待验证状态
+			logging.Security().Info("admin totp required", zap.String("username", username), zap.String("ip", ip))
 			token := models.RandomToken(24)
 			s.sessMu.Lock()
 			s.sessions["2fa:"+token] = sessionInfo{AdminID: adminID, Expiry: time.Now().Add(5 * time.Minute)}
@@ -717,9 +738,11 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !security.VerifyTotp(decrypted, input.Otp, time.Now()) {
+			logging.Security().Warn("admin totp failed", zap.String("username", username), zap.String("ip", ip))
 			writeError(w, 403, "invalid otp")
 			return
 		}
+		logging.Security().Info("admin totp ok", zap.String("username", username), zap.String("ip", ip))
 		// 旧明文升级为加密存储（首次验证成功后回写）；失败须中断，防止迁移失败被掩盖
 		if !s.totpCipher.IsEncrypted(totpSecret) {
 			enc, err := s.totpCipher.Encrypt(decrypted)

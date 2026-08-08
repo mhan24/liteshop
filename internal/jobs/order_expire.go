@@ -1,9 +1,10 @@
 package jobs
 
 import (
-	"log"
 
 	"shop/internal/service"
+
+	"shop/internal/logging"
 )
 
 // OrderExpireJob 定时关闭超时未支付订单（created/waiting_payment），释放卡密并回滚优惠券。
@@ -15,9 +16,9 @@ func OrderExpireJob(orders *service.OrderService, timeoutSec func() int) func() 
 			timeout = t
 		}
 		if n, err := orders.ExpireStale(timeout); err != nil {
-			log.Printf("job order_expire: %v", err)
+			logging.App().Sugar().Errorf("job order_expire: %v", err)
 		} else if n > 0 {
-			log.Printf("job order_expire: expired %d stale orders", n)
+			logging.App().Sugar().Infof("job order_expire: expired %d stale orders", n)
 		}
 	}
 }

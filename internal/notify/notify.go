@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"mime"
 	"net"
 	"net/http"
@@ -21,6 +20,8 @@ import (
 	"shop/internal/models"
 	"shop/internal/security"
 	"shop/internal/jobs"
+
+	"shop/internal/logging"
 )
 
 type Notifier struct {
@@ -163,7 +164,7 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 	telegramSent := false
 	if cfg.SMTPHost != "" && strings.Contains(order.BuyerContact, "@") {
 		if err := n.sendMailWithConfig(cfg, order.BuyerContact, subject, mailBody); err != nil {
-			log.Printf("send paid mail failed: order=%s to=%s err=%v", order.OrderNo, order.BuyerContact, err)
+			logging.App().Sugar().Warnf("send paid mail failed: order=%s to=%s err=%v", order.OrderNo, order.BuyerContact, err)
 			n.enqueueFailedMail(order.BuyerContact, subject, mailBody, order.ID)
 			_ = db.AddOrderLog(n.db, order.ID, "notify_failed", "邮件通知发送失败: "+err.Error(), order.Status, order.Status, 0, "smtp")
 		} else {
@@ -172,7 +173,7 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 	}
 	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
 		if err := n.sendTelegramWithConfig(cfg, telegramBody); err != nil {
-			log.Printf("send paid telegram failed: order=%s err=%v", order.OrderNo, err)
+			logging.App().Sugar().Warnf("send paid telegram failed: order=%s err=%v", order.OrderNo, err)
 			_ = db.AddOrderLog(n.db, order.ID, "notify_failed", "Telegram 通知发送失败: "+err.Error(), order.Status, order.Status, 0, "telegram")
 		} else {
 			telegramSent = true
@@ -199,13 +200,13 @@ func (n *Notifier) Handler() func(jobs.Job) {
 		case jobs.KindMail:
 			cfg := n.CurrentConfig()
 			if err := n.sendMailWithConfig(cfg, j.To, j.Subject, j.Body); err != nil {
-				log.Printf("notify mail failed to=%s err=%v", j.To, err)
+				logging.App().Sugar().Warnf("notify mail failed to=%s err=%v", j.To, err)
 				n.enqueueFailedMail(j.To, j.Subject, j.Body, 0)
 			}
 		case jobs.KindTelegram:
 			cfg := n.CurrentConfig()
 			if err := n.sendTelegramWithConfig(cfg, j.Text); err != nil {
-				log.Printf("notify telegram failed err=%v", err)
+				logging.App().Sugar().Warnf("notify telegram failed err=%v", err)
 			}
 		case jobs.KindWebhook:
 			n.sendWebhook(j.Event, j.Payload, n.siteTitle())

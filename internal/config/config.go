@@ -5,6 +5,7 @@ import "strings"
 type Config struct {
 	ListenAddr        string
 	DatabasePath      string
+	LogDir            string
 	PublicBaseURL     string
 	NotifyURL         string
 	AdminUsername     string
@@ -53,6 +54,7 @@ func Load() Config {
 	return Config{
 		ListenAddr:        ":8080",
 		DatabasePath:      "data/shop.db",
+		LogDir:            "logs",
 		PublicBaseURL:     "http://localhost:8080",
 		NotifyURL:         "http://localhost:8080/notify/bepusdt",
 		AdminUsername:     "admin",
