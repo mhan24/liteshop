@@ -155,9 +155,9 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 			s.linkMu.Unlock()
 			// 清理登录锁定记录（超过 10 分钟）
 			s.loginMu.Lock()
-			now := time.Now().Unix()
+			lnow := time.Now().Unix()
 			for k, v := range s.loginFails {
-				if now-v.lastAttempt > 600 {
+				if lnow-v.lastAttempt > 600 {
 					delete(s.loginFails, k)
 				}
 			}
