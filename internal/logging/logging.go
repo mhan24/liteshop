@@ -27,6 +27,9 @@ func Init(logDir string) error {
 	appLog = newLogger(filepath.Join(logDir, "app.log"))
 	paymentLog = newLogger(filepath.Join(logDir, "payment.log"))
 	securityLog = newLogger(filepath.Join(logDir, "security.log"))
+	appLog.Info("app logger initialized")
+	paymentLog.Info("payment logger initialized")
+	securityLog.Info("security logger initialized")
 	return nil
 }
 
