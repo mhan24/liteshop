@@ -31,7 +31,7 @@ func main() {
 		log.Printf("no admin configured; open /setup or /admin to initialize")
 	}
 
-	handler, err := web.NewHandler(cfg, database)
+	handler, err := api.NewHandler(cfg, database)
 	if err != nil {
 		log.Fatal(err)
 	}
