@@ -80,6 +80,13 @@ HTTP handler (internal/api)
 - `OrderRepository` / `ProductRepository` / `KeyRepository` (cards) own all SQL;
 - no scattered `db.Exec` in business code; switching databases only needs a new driver + migration dialect.
 
+### Database migrations
+
+- Migration files live in `internal/db/migrations/`, numbered (`001_init.sql`, `002_...`, …), applied in order;
+- Every applied migration is recorded in `schema_migrations` and **runs exactly once** — never on every startup;
+- Policy: **new schema changes must be new numbered .sql migration files**; no startup "table checks / auto column creation";
+- Go migration steps are reserved for legacy upgrades SQLite cannot express in pure SQL (conditional ALTER / table rebuild / data migration).
+
 ---
 
 ## Payment flow

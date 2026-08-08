@@ -1,3 +1,3 @@
 -- 008: 订单成本来源标注（区分下单时真实快照与迁移估算）
--- 由 Go 迁移器执行（legacyUpgrades["008_cost_snapshot_source"] -> ensureCostSnapshotSource）
--- 使用条件 ALTER，保证幂等，支持旧库全量重跑。
+ALTER TABLE orders ADD COLUMN cost_snapshot_source TEXT NOT NULL DEFAULT 'unknown';
+UPDATE orders SET cost_snapshot_source = 'migration_estimate' WHERE cost_cents > 0;

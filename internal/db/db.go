@@ -33,51 +33,6 @@ func ensureAdminColumns(db *sql.DB) error {
 	return nil
 }
 
-// ensureAdminSecurity 补充管理员 TOTP 列（SQLite 需条件 ALTER）。
-func ensureAdminSecurity(db *sql.DB) error {
-	additions := []struct {
-		column string
-		ddl    string
-	}{
-		{"totp_secret", "ALTER TABLE admins ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''"},
-		{"totp_enabled", "ALTER TABLE admins ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"},
-	}
-	for _, a := range additions {
-		exists, err := columnExists(db, "admins", a.column)
-		if err != nil {
-			return err
-		}
-		if exists {
-			continue
-		}
-		if _, err := db.Exec(a.ddl); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ensureOrderCostSnapshot 补充 orders.cost_cents 成本快照列（条件 ALTER，幂等）。
-func ensureOrderCostSnapshot(db *sql.DB) error {
-	return addColumnIfMissing(db, "orders", "cost_cents", "ALTER TABLE orders ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0")
-}
-
-// ensureCostSnapshotSource 补充 orders.cost_snapshot_source 来源列，并回填估算来源（幂等）。
-func ensureCostSnapshotSource(db *sql.DB) error {
-	if err := addColumnIfMissing(db, "orders", "cost_snapshot_source", "ALTER TABLE orders ADD COLUMN cost_snapshot_source TEXT NOT NULL DEFAULT 'unknown'"); err != nil {
-		return err
-	}
-	if _, err := db.Exec(`UPDATE orders SET cost_snapshot_source = 'migration_estimate' WHERE cost_cents > 0`); err != nil {
-		return err
-	}
-	return nil
-}
-
-// ensureOrderViewToken 补充 orders.view_token 列（订单查看令牌，空值表示旧订单走邮箱回退）。
-func ensureOrderViewToken(db *sql.DB) error {
-	return addColumnIfMissing(db, "orders", "view_token", "ALTER TABLE orders ADD COLUMN view_token TEXT NOT NULL DEFAULT ''")
-}
-
 // addColumnIfMissing 仅当列不存在时执行 ALTER，保证迁移幂等。
 func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
 	exists, err := columnExists(db, table, column)

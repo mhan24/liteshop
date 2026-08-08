@@ -80,6 +80,13 @@ HTTP handler (internal/api)
 - `OrderRepository` / `ProductRepository` / `KeyRepository`（卡密）集中所有 SQL；
 - 业务代码不散落 `db.Exec`；换数据库只需换驱动 + 迁移方言。
 
+### 数据库迁移（Migrations）
+
+- 迁移文件位于 `internal/db/migrations/`，编号命名（`001_init.sql`、`002_...`、…），按序执行；
+- 每个已执行迁移记录在 `schema_migrations`，**只执行一次**，重启不重复执行；
+- 规范：**新增 schema 变更必须新增编号 .sql 迁移文件**，禁止在启动时"检查表 / 自动补列"；
+- 仅 SQLite 无法用纯 SQL 表达的存量升级（条件 ALTER / 表重建 / 数据迁移）使用 Go 迁移步骤。
+
 ---
 
 ## 支付流程

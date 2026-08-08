@@ -14,15 +14,15 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-// legacyUpgrades 为需要 Go 条件判断的存量库升级（SQLite 不支持 ADD COLUMN IF NOT EXISTS）。
+// 迁移策略（Laravel/Django 风格）：
+//   - 所有 schema 变更必须新增"编号 .sql 迁移文件"，按序执行并记录到 schema_migrations；
+//   - 迁移只执行一次，禁止在启动时做"检查表/自动补列"；
+//   - legacyUpgrades 仅用于 SQLite 无法用纯 SQL 表达的存量升级（条件 ALTER / 表重建 / 数据迁移）。
+//
 // key 为迁移文件 basename（含 .sql 后缀），与 listMigrationFiles 的 basename 匹配。
 var legacyUpgrades = map[string]func(*sql.DB) error{
 	"002_legacy_upgrade.sql":       legacyUpgrade,
 	"004_product_columns.sql":      ensureProductColumns,
-	"005_security.sql":             ensureAdminSecurity,
-	"006_order_cost_snapshot.sql":  ensureOrderCostSnapshot,
-	"008_cost_snapshot_source.sql": ensureCostSnapshotSource,
-	"009_order_view_token.sql":     ensureOrderViewToken,
 	"015_secrets.sql":              ensureSecretsTable,
 }
 
@@ -93,7 +93,7 @@ func migrationApplied(db *sql.DB, name string) (bool, error) {
 
 // isGoOnlyMigration 标记仅含 Go 逻辑、无独立 SQL 的迁移文件。
 func isGoOnlyMigration(name string) bool {
-	return strings.Contains(name, "legacy_upgrade") || strings.Contains(name, "004_product_columns") || strings.Contains(name, "005_security") || strings.Contains(name, "006_order_cost_snapshot") || strings.Contains(name, "008_cost_snapshot_source") || strings.Contains(name, "009_order_view_token") || strings.Contains(name, "015_secrets")
+	return strings.Contains(name, "legacy_upgrade") || strings.Contains(name, "004_product_columns") || strings.Contains(name, "015_secrets")
 }
 
 func runSQLMigration(db *sql.DB, name string) error {

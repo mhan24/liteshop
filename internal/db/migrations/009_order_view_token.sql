@@ -1,3 +1,2 @@
 -- 009_order_view_token.sql - 订单查看令牌
--- 由 Go 迁移器执行（legacyUpgrades["009_order_view_token"] -> ensureOrderViewToken）
--- 使用条件 ALTER，保证幂等。存量订单 view_token 为空，继续使用"邮箱匹配"回退。
+ALTER TABLE orders ADD COLUMN view_token TEXT NOT NULL DEFAULT '';

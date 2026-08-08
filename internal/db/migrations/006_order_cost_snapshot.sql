@@ -1,3 +1,2 @@
 -- 006: 订单成本快照（历史毛利不随商品成本变动漂移）
--- 由 Go 迁移器执行（legacyUpgrades["006_order_cost_snapshot"] -> ensureOrderCostSnapshot）
--- 使用条件 ALTER，保证幂等（列已存在时跳过），支持旧库全量重跑。
+ALTER TABLE orders ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0;

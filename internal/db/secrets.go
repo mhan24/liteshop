@@ -68,13 +68,6 @@ func upsertSecret(d *sql.DB, key, encrypted string) error {
 
 // ensureSecretsTable 建 secrets 表，并把存量 settings 中的敏感配置迁移为 AES 加密存储。
 func ensureSecretsTable(d *sql.DB) error {
-	if _, err := d.Exec(`CREATE TABLE IF NOT EXISTS secrets (
-		key TEXT PRIMARY KEY,
-		value TEXT NOT NULL,
-		updated_at INTEGER NOT NULL
-	)`); err != nil {
-		return err
-	}
 	cipher := security.NewCipher(EnsureSessionSecret(d))
 	if cipher == nil {
 		return errors.New("cipher init failed")

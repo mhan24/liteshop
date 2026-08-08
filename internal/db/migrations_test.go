@@ -54,4 +54,40 @@ func TestMigrationIdempotent(t *testing.T) {
 	if cols == 0 {
 		t.Fatalf("products.faq missing after re-open")
 	}
+	_ = d2.QueryRow(`SELECT COUNT(1) FROM pragma_table_info('admins') WHERE name='totp_secret'`).Scan(&cols)
+	if cols == 0 {
+		t.Fatalf("admins.totp_secret missing after re-open")
+	}
+	_ = d2.QueryRow(`SELECT COUNT(1) FROM pragma_table_info('orders') WHERE name='cost_cents'`).Scan(&cols)
+	if cols == 0 {
+		t.Fatalf("orders.cost_cents missing after re-open")
+	}
+	_ = d2.QueryRow(`SELECT COUNT(1) FROM pragma_table_info('orders') WHERE name='view_token'`).Scan(&cols)
+	if cols == 0 {
+		t.Fatalf("orders.view_token missing after re-open")
+	}
+}
+
+// TestAllMigrationsRecorded 验证每个迁移文件都按序记录。
+func TestAllMigrationsRecorded(t *testing.T) {
+	d, err := Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer d.Close()
+	names := listMigrationFiles()
+	var got int
+	if err := d.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&got); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got != len(names) {
+		t.Fatalf("recorded %d migrations, want %d", got, len(names))
+	}
+	for _, n := range names {
+		var c int
+		_ = d.QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = ?`, n).Scan(&c)
+		if c == 0 {
+			t.Fatalf("migration not recorded: %s", n)
+		}
+	}
 }
