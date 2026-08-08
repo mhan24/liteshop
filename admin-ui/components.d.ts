@@ -49,6 +49,7 @@ declare module 'vue' {
     ElTimeline: typeof import('element-plus/es')['ElTimeline']
     ElTimelineItem: typeof import('element-plus/es')['ElTimelineItem']
     ElUpload: typeof import('element-plus/es')['ElUpload']
+    PageCard: typeof import('./src/components/PageCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }

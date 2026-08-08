@@ -1,6 +1,5 @@
 <template>
-  <el-card v-loading="loading">
-    <template #header><h2>{{ t('payment.title') }}</h2></template>
+  <PageCard :title="t('payment.title')" :loading="loading">
     <el-form label-position="top" :model="form" style="max-width:640px">
       <el-form-item :label="t('payment.baseUrl')"><el-input v-model="form.bepusdt_base_url" /></el-form-item>
       <el-form-item :label="t('payment.apiToken')"><el-input v-model="form.bepusdt_api_token" type="password" :placeholder="t('payment.apiTokenPlaceholder')" show-password /></el-form-item>
@@ -11,7 +10,7 @@
       <el-form-item :label="t('payment.notifyUrl')"><el-input v-model="form.bepusdt_notify_url" /></el-form-item>
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>
-  </el-card>
+  </PageCard>
 </template>
 
 <script setup lang="ts">
@@ -19,6 +18,7 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api'
+import PageCard from '@/components/PageCard.vue'
 
 const { t } = useI18n()
 const loading = ref(false)

@@ -1,6 +1,5 @@
 <template>
-  <el-card v-loading="loading">
-    <template #header><h2>{{ t('notify.title') }}</h2></template>
+  <PageCard :title="t('notify.title')" :loading="loading">
     <el-form label-position="top" :model="form" style="max-width:960px">
       <el-form-item :label="t('notify.smtpHost')"><el-input v-model="form.smtp_host" /></el-form-item>
       <el-form-item :label="t('notify.smtpPort')"><el-input-number v-model="form.smtp_port" :min="1" /></el-form-item>
@@ -46,7 +45,7 @@
       </el-collapse>
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>
-  </el-card>
+  </PageCard>
 </template>
 
 <script setup lang="ts">
@@ -54,6 +53,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api'
+import PageCard from '@/components/PageCard.vue'
 
 const { t } = useI18n()
 const loading = ref(false)

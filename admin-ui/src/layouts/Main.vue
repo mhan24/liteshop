@@ -29,10 +29,10 @@
         <el-menu-item index="/account" @click="router.push('/account')">
           <el-icon><User /></el-icon><template #title>{{ t('nav.account') }}</template>
         </el-menu-item>
-        <el-menu-item v-if="store.isAdmin" index="/admins" @click="router.push('/admins')">
+        <el-menu-item v-if="isAdmin" index="/admins" @click="router.push('/admins')">
           <el-icon><Avatar /></el-icon><template #title>{{ t('nav.admins') }}</template>
         </el-menu-item>
-        <el-menu-item v-if="store.isAdmin" index="/audit" @click="router.push('/audit')">
+        <el-menu-item v-if="isAdmin" index="/audit" @click="router.push('/audit')">
           <el-icon><Document /></el-icon><template #title>{{ t('nav.audit') }}</template>
         </el-menu-item>
         <el-menu-item index="/system" @click="router.push('/system')">
@@ -74,11 +74,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import { HomeFilled, Goods, List, Wallet, Bell, Setting, User, Tools, Link, SwitchButton, Expand, Fold, Avatar, Document, Ticket } from '@element-plus/icons-vue'
-import { useSessionStore } from '@/stores/session'
+import { useSession } from '@/hooks/useSession'
 
 const route = useRoute()
 const router = useRouter()
-const store = useSessionStore()
+const { isAdmin, logout: doLogout } = useSession()
 const { t, locale } = useI18n()
 const collapsed = ref(false)
 const activeMenu = computed(() => {
@@ -93,7 +93,7 @@ onMounted(() => {
 
 async function logout() {
   await ElMessageBox.confirm(t('nav.logoutConfirm'), t('common.prompt'), { type: 'warning' })
-  await store.logout()
+  await doLogout()
   router.push('/login')
 }
 </script>
