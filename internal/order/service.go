@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"shop/internal/bepusdt"
+	"shop/internal/db/repository"
 	"shop/internal/models"
 )
 
@@ -20,7 +21,7 @@ type PaymentConfig struct {
 
 // Service 订单业务逻辑。
 type Service struct {
-	repo  *Repository
+	repo  *repository.OrderRepository
 	payFn func() *bepusdt.Client
 	cfgFn func() PaymentConfig
 	// SendPaid 发卡通知回调（注入 web 层的 notifier）。
@@ -41,14 +42,14 @@ func newBusinessErrorf(format string, args ...any) error {
 // 数据库等系统错误透传，由上层统一脱敏。
 func wrapCouponError(err error) error {
 	switch {
-	case errors.Is(err, ErrCouponNotFound), errors.Is(err, ErrCouponExpired),
-		errors.Is(err, ErrCouponUsedUp), errors.Is(err, ErrCouponNotApplicable):
+	case errors.Is(err, repository.ErrCouponNotFound), errors.Is(err, repository.ErrCouponExpired),
+		errors.Is(err, repository.ErrCouponUsedUp), errors.Is(err, repository.ErrCouponNotApplicable):
 		return newBusinessErrorf("%s", err.Error())
 	}
 	return err
 }
 
-func NewService(repo *Repository, payFn func() *bepusdt.Client, cfgFn func() PaymentConfig) *Service {
+func NewService(repo *repository.OrderRepository, payFn func() *bepusdt.Client, cfgFn func() PaymentConfig) *Service {
 	return &Service{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
 
@@ -156,7 +157,8 @@ func (s *Service) CreateOrder(p models.Product, qty int, contact, tradeType, cou
 		UpdatedAt:          now,
 	}
 	if err := s.repo.CreatePendingOrder(&order); err != nil {
-		if errors.Is(err, errInsufficient) {
+		var insufficient *repository.InsufficientError
+		if errors.As(err, &insufficient) {
 			return "", "", 0, 0, newBusinessErrorf("库存不足，请刷新后重试")
 		}
 		return "", "", 0, 0, err
@@ -379,4 +381,4 @@ func (s *Service) SetStatus(orderID int64, to, message string) error {
 }
 
 // Repository 暴露给上层查询。
-func (s *Service) Repo() *Repository { return s.repo }
+func (s *Service) Repo() *repository.OrderRepository { return s.repo }

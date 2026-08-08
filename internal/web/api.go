@@ -2,7 +2,6 @@ package web
 
 import (
 	"crypto/hmac"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -455,7 +454,7 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 			s.notifier.Notify(notify.EventOrderCreated, payload)
 		}
 		var remain int
-		_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE product_id = ? AND status = 'available'`, p.ID).Scan(&remain)
+		remain, _ = s.keys.AvailableCount(p.ID)
 		s.notifier.NotifyLowStock(p.ID, p.Name, remain, s.lowStockThreshold())
 	}()
 	token := ""
@@ -659,8 +658,7 @@ func (s *Server) apiAdminSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "unauthorized")
 		return
 	}
-	var username string
-	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&username)
+	username, _ := db.AdminUsername(s.db, id)
 	writeJSON(w, 200, map[string]any{"ok": true, "username": username, "role": role})
 }
 
@@ -674,11 +672,8 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	var adminID int64
-	var hash, totpSecret string
-	var totpEnabled bool
-	err := s.db.QueryRow(`SELECT id, password_hash, totp_secret, totp_enabled FROM admins WHERE username = ?`, strings.TrimSpace(input.Username)).Scan(&adminID, &hash, &totpSecret, &totpEnabled)
-	if err == sql.ErrNoRows {
+	adminID, hash, totpSecret, totpEnabled, err := db.AdminByUsername(s.db, strings.TrimSpace(input.Username))
+	if err == db.ErrAdminNotFound {
 		// 恒定时间：对不存在用户也执行一次 PBKDF2，避免用户名枚举时间侧信道。
 		_ = models.HashPassword(input.Password)
 		writeError(w, 403, "invalid credentials")
@@ -718,7 +713,7 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 				writeError(w, 500, "totp secret encrypt failed")
 				return
 			}
-			if _, err := s.db.Exec(`UPDATE admins SET totp_secret = ? WHERE id = ?`, enc, adminID); err != nil {
+			if err := db.SetAdminTOTPSecret(s.db, adminID, enc); err != nil {
 				s.notifier.NotifySystemError("TOTP 旧明文升级失败 admin=" + fmt.Sprint(adminID) + ": " + err.Error())
 				writeError(w, 500, "totp secret upgrade failed")
 				return
@@ -751,8 +746,11 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "invalid or expired token")
 		return
 	}
-	var totpSecret string
-	_ = s.db.QueryRow(`SELECT totp_secret FROM admins WHERE id = ?`, info.AdminID).Scan(&totpSecret)
+	_, totpSecret, err := db.AdminTOTP(s.db, info.AdminID)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
 	decrypted, err := s.totpCipher.Decrypt(totpSecret)
 	if err != nil {
 		writeError(w, 500, "totp secret decrypt failed")
@@ -769,7 +767,7 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "totp secret encrypt failed")
 			return
 		}
-		if _, err := s.db.Exec(`UPDATE admins SET totp_secret = ? WHERE id = ?`, enc, info.AdminID); err != nil {
+		if err := db.SetAdminTOTPSecret(s.db, info.AdminID, enc); err != nil {
 			s.notifier.NotifySystemError("TOTP 旧明文升级失败 admin=" + fmt.Sprint(info.AdminID) + ": " + err.Error())
 			writeError(w, 500, "totp secret upgrade failed")
 			return
@@ -784,7 +782,7 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
 	if id, ok := s.sessionID(r); ok {
-		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
+		_ = db.DeleteSession(s.db, id)
 		s.sessMu.Lock()
 		delete(s.sessions, id)
 		s.sessMu.Unlock()
@@ -804,18 +802,14 @@ func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	var todayPaidCards int
-	_ = s.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'sold' AND sold_at >= ?`, dayStart).Scan(&todayPaidCards)
+	todayPaidCards, _ := s.keys.SoldCountSince(dayStart)
 
 	// 今日毛利 = 今日营收 - 今日售出卡密的商品成本
-	var todayCost int64
-	_ = s.db.QueryRow(`SELECT COALESCE(SUM(cost_cents * qty), 0)
-		FROM orders
-		WHERE status IN ('paid','processing','delivered','completed') AND paid_at >= ?`, dayStart).Scan(&todayCost)
+	todayCost, _ := s.orders.Repo().CostSince(dayStart)
 	todayProfit := todayRevenue - todayCost
 
 	// 商品/卡密库存（商品仓储）
-	products, availableCards, soldCards, lockedCards, err := s.products.Repo().CardStockStats()
+	products, availableCards, soldCards, lockedCards, err := s.keys.StockStats()
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -887,31 +881,8 @@ func (s *Server) apiAdminSalesReport(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	// 成本来源统计：区分下单真实快照/迁移估算/未知，供财务口径警示
-	var orderTime, migrationEstimate, unknown int
-	rows, err := s.db.Query(`SELECT cost_snapshot_source, COUNT(1) FROM orders WHERE status IN ('paid','processing','delivered','completed') GROUP BY cost_snapshot_source`)
+	orderTime, migrationEstimate, unknown, err := s.orders.Repo().CostSourceStats()
 	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var src string
-		var cnt int
-		if err := rows.Scan(&src, &cnt); err != nil {
-			writeInternalError(w, err)
-			return
-		}
-		switch src {
-		case "order_time":
-			orderTime += cnt
-		case "migration_estimate":
-			migrationEstimate += cnt
-		default:
-			unknown += cnt
-		}
-	}
-	if err := rows.Err(); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1115,7 +1086,7 @@ func (s *Server) apiAdminCards(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	cards, err := s.orders.Repo().ListCardsByProduct(id)
+	cards, err := s.keys.ListByProduct(id)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1145,7 +1116,7 @@ func (s *Server) apiAdminCardsImport(w http.ResponseWriter, r *http.Request) {
 			lines = append(lines, line)
 		}
 	}
-	added, skipped, err := s.orders.Repo().AddCards(id, lines, input.Dedupe)
+	added, skipped, err := s.keys.Add(id, lines, input.Dedupe)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1161,7 +1132,7 @@ func (s *Server) apiAdminCardsExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	cards, err := s.orders.Repo().ListCardsByProduct(id)
+	cards, err := s.keys.ListByProduct(id)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1185,7 +1156,7 @@ func (s *Server) apiAdminCardDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	_ = s.orders.Repo().DeleteAvailableCard(id)
+	_ = s.keys.DeleteAvailable(id)
 	s.audit(r, "card_delete", "card", fmt.Sprintf("%d", id), "", "deleted")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -1771,8 +1742,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminAccount(w http.ResponseWriter, r *http.Request) {
 	id := s.currentAdminID(r)
-	var username string
-	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&username)
+	username, _ := db.AdminUsername(s.db, id)
 	writeJSON(w, 200, map[string]any{"username": username})
 }
 
@@ -1788,8 +1758,8 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	var hash string
-	if err := s.db.QueryRow(`SELECT password_hash FROM admins WHERE id = ?`, id).Scan(&hash); err != nil {
+	hash, err := db.AdminPasswordHash(s.db, id)
+	if err != nil {
 		writeError(w, 500, "no admin")
 		return
 	}
@@ -1802,8 +1772,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "username empty")
 		return
 	}
-	var oldUsername string
-	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&oldUsername)
+	oldUsername, _ := db.AdminUsername(s.db, id)
 	if input.NewPassword != "" {
 		if err := models.ValidatePasswordStrength(input.NewPassword); err != nil {
 			writeError(w, 400, err.Error())
@@ -1819,7 +1788,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "username too long")
 		return
 	}
-	if _, err := s.db.Exec(`UPDATE admins SET username = ?, password_hash = ? WHERE id = ?`, username, hash, id); err != nil {
+	if err := db.UpdateAdminAccount(s.db, id, username, hash); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1831,9 +1800,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminTotpStatus(w http.ResponseWriter, r *http.Request) {
 	id := s.currentAdminID(r)
-	var enabled bool
-	var secret string
-	_ = s.db.QueryRow(`SELECT totp_enabled, totp_secret FROM admins WHERE id = ?`, id).Scan(&enabled, &secret)
+	enabled, secret, _ := db.AdminTOTP(s.db, id)
 	resp := map[string]any{"enabled": enabled, "issuer": s.siteSettings().Title}
 	if !enabled && secret != "" {
 		if plain, err := s.totpCipher.Decrypt(secret); err == nil {
@@ -1862,7 +1829,11 @@ func (s *Server) apiAdminTotpEnable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "totp secret encrypt failed")
 		return
 	}
-	if _, err := s.db.Exec(`UPDATE admins SET totp_secret = ?, totp_enabled = 1 WHERE id = ?`, encrypted, id); err != nil {
+	if err := db.SetAdminTOTPSecret(s.db, id, encrypted); err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	if err := db.SetAdminTOTPEnabled(s.db, id, true); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1876,8 +1847,11 @@ func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 		Otp string `json:"otp"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
-	var secret string
-	_ = s.db.QueryRow(`SELECT totp_secret FROM admins WHERE id = ?`, id).Scan(&secret)
+	_, secret, err := db.AdminTOTP(s.db, id)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
 	decrypted, err := s.totpCipher.Decrypt(secret)
 	if err != nil {
 		writeError(w, 500, "totp secret decrypt failed")
@@ -1887,7 +1861,7 @@ func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "invalid otp")
 		return
 	}
-	if _, err := s.db.Exec(`UPDATE admins SET totp_enabled = 0 WHERE id = ?`, id); err != nil {
+	if err := db.SetAdminTOTPEnabled(s.db, id, false); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1898,7 +1872,7 @@ func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 // ---------- 管理员管理 (仅 admin) ----------
 
 func (s *Server) apiAdminListAdmins(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(`SELECT id, username, role, created_at FROM admins ORDER BY id`)
+	rows, err := db.ListAdmins(s.db)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1945,7 +1919,7 @@ func (s *Server) apiAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
 	if role != models.RoleAdmin && role != models.RoleOperator && role != models.RoleViewer {
 		role = models.RoleOperator
 	}
-	if _, err := s.db.Exec(`INSERT INTO admins(username, password_hash, role, created_at) VALUES(?, ?, ?, ?)`, username, models.HashPassword(input.Password), role, models.Now()); err != nil {
+	if err := db.CreateAdmin(s.db, username, models.HashPassword(input.Password), role); err != nil {
 		writeError(w, 400, "create failed (username may exist)")
 		return
 	}
@@ -1968,38 +1942,16 @@ func (s *Server) apiAdminSetRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid role")
 		return
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	defer tx.Rollback()
-	var before string
-	if err := tx.QueryRow(`SELECT role FROM admins WHERE id = ?`, id).Scan(&before); err != nil {
-		if err == sql.ErrNoRows {
+	before, _ := db.AdminRole(s.db, id)
+	if err := db.SetAdminRoleGuarded(s.db, id, role); err != nil {
+		if err == db.ErrAdminNotFound {
 			writeError(w, 404, "admin not found")
 			return
 		}
-		writeInternalError(w, err)
-		return
-	}
-	// 防止取消最后一个 admin（检查与更新在同一事务内，避免并发清零）
-	if role != models.RoleAdmin {
-		var admins int
-		if err := tx.QueryRow(`SELECT COUNT(1) FROM admins WHERE role = 'admin'`).Scan(&admins); err != nil {
-			writeInternalError(w, err)
-			return
-		}
-		if admins <= 1 && before == models.RoleAdmin {
+		if err == db.ErrLastAdmin {
 			writeError(w, 400, "cannot demote the last admin")
 			return
 		}
-	}
-	if _, err := tx.Exec(`UPDATE admins SET role = ? WHERE id = ?`, role, id); err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	if err := tx.Commit(); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -2017,19 +1969,16 @@ func (s *Server) apiAdminDeleteAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "cannot delete yourself")
 		return
 	}
-	var cur string
-	_ = s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, id).Scan(&cur)
+	cur, _ := db.AdminRole(s.db, id)
 	if cur == models.RoleAdmin {
-		var admins int
-		_ = s.db.QueryRow(`SELECT COUNT(1) FROM admins WHERE role = 'admin'`).Scan(&admins)
+		admins, _ := db.AdminCountByRole(s.db, models.RoleAdmin)
 		if admins <= 1 {
 			writeError(w, 400, "cannot delete the last admin")
 			return
 		}
 	}
-	var uname string
-	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&uname)
-	if _, err := s.db.Exec(`DELETE FROM admins WHERE id = ?`, id); err != nil {
+	uname, _ := db.AdminUsername(s.db, id)
+	if err := db.DeleteAdmin(s.db, id); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -2221,7 +2170,7 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 	s.sessMu.Lock()
 	s.sessions = make(map[string]sessionInfo)
 	s.sessMu.Unlock()
-	_, _ = s.db.Exec(`DELETE FROM sessions`)
+	_ = db.DeleteAllSessions(s.db)
 	// 配置恢复后清空限流器，避免旧 IP 限制残留影响管理员操作
 	s.limitersMu.Lock()
 	s.limiters = make(map[string]*RateLimiter)
@@ -2246,12 +2195,10 @@ func (s *Server) apiAdminSystemReset(w http.ResponseWriter, r *http.Request) {
 	s.sessMu.Lock()
 	s.sessions = make(map[string]sessionInfo)
 	s.sessMu.Unlock()
-	_, _ = s.db.Exec(`DELETE FROM sessions`)
+	_ = db.DeleteAllSessions(s.db)
 	s.audit(r, "system_reset", "system", "all", "all data", "reset")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
-
-var _ = sql.ErrNoRows
 
 func (s *Server) apiSetupStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"initialized": db.HasAdmin(s.db), "site_title": s.siteSettings().Title})

@@ -8,6 +8,7 @@ import (
 
 	"shop/internal/bepusdt"
 	"shop/internal/db"
+	"shop/internal/db/repository"
 	"shop/internal/models"
 	"shop/internal/order"
 )
@@ -32,7 +33,7 @@ func TestOrderStateMachineFlow(t *testing.T) {
 		}
 	}
 
-	repo := order.NewRepository(d)
+	repo := repository.NewOrderRepository(d)
 
 	orderRec := models.Order{
 		OrderNo:      models.NewOrderNo(),
@@ -121,7 +122,7 @@ func TestOrderCancelFreesCards(t *testing.T) {
 	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&productID)
 	_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,'C1','available',?,?)`, productID, now, now)
 
-	repo := order.NewRepository(d)
+	repo := repository.NewOrderRepository(d)
 	svc := order.NewService(repo, func() *bepusdt.Client { return nil }, nil)
 
 	orderRec := models.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now}
@@ -159,7 +160,7 @@ func TestFreeOrderWith100PercentCoupon(t *testing.T) {
 	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&productID)
 	_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,'C1','available',?,?)`, productID, now, now)
 
-	repo := order.NewRepository(d)
+	repo := repository.NewOrderRepository(d)
 	svc := order.NewService(repo, func() *bepusdt.Client {
 		t.Fatal("payFn must not be called for a free order")
 		return nil
@@ -211,7 +212,7 @@ func TestRedeliverFromStock(t *testing.T) {
 		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,?, 'available', ?, ?)`, productID, "C"+string(rune('0'+i)), now, now)
 	}
 
-	repo := order.NewRepository(d)
+	repo := repository.NewOrderRepository(d)
 	svc := order.NewService(repo, func() *bepusdt.Client { return nil }, nil)
 
 	// 创建订单占用 1 张（模拟：直接建订单 + 锁定一张）
@@ -260,7 +261,7 @@ func TestRedeliverIdempotent(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,?, 'available', ?, ?)`, productID, "C"+string(rune('0'+i)), now, now)
 	}
-	repo := order.NewRepository(d)
+	repo := repository.NewOrderRepository(d)
 	svc := order.NewService(repo, func() *bepusdt.Client { return nil }, nil)
 	orderRec := models.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreatePendingOrder(&orderRec); err != nil {
@@ -296,7 +297,7 @@ func TestOrderCountsWithTimezone(t *testing.T) {
 	}
 	defer d.Close()
 	// 用 UTC 时区仓库
-	repo := order.NewRepositoryWithTZ(d, time.UTC)
+	repo := repository.NewOrderRepositoryWithTZ(d, time.UTC)
 	// 插入一笔"今天"的订单（UTC 当天）
 	now := time.Now().In(time.UTC)
 	if _, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('t','',100,'active',?,?)`, now.Unix(), now.Unix()); err != nil {
@@ -334,7 +335,7 @@ func TestCouponAndWholesale(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,?, 'available', ?, ?)`, pid, "C"+string(rune('0'+i)), now, now)
 	}
-	repo := order.NewRepository(d)
+	repo := repository.NewOrderRepository(d)
 	svc := order.NewService(repo, func() *bepusdt.Client { return &bepusdt.Client{} }, func() order.PaymentConfig { return order.PaymentConfig{} })
 
 	// 固定券：满 1 元减 10 元（用于 1.8 元订单，可抵扣到 0 为止）
@@ -400,7 +401,7 @@ func TestCouponConcurrentMaxUses(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	repo := order.NewRepository(d)
+	repo := repository.NewOrderRepository(d)
 	if err := repo.CreateCoupon(models.Coupon{Code: "RACE", Type: "fixed", ValueCents: 50, MinAmountCents: 0, MaxUses: 1, ProductID: 0, Active: true}); err != nil {
 		t.Fatalf("create coupon: %v", err)
 	}
@@ -449,7 +450,7 @@ func TestOrderCostSnapshot(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?, 'C', 'available', ?, ?)`, pid, now, now)
 	}
-	repo := order.NewRepository(d)
+	repo := repository.NewOrderRepository(d)
 	now = models.Now()
 	if err := repo.CreatePendingOrder(&models.Order{
 		OrderNo: "SNAP1", ProductID: pid, ProductName: "t", Qty: 2, AmountCents: 200, CostCents: 40,
@@ -470,7 +471,7 @@ func TestCouponRefundIdempotent(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	repo := order.NewRepository(d)
+	repo := repository.NewOrderRepository(d)
 	if err := repo.CreateCoupon(models.Coupon{Code: "REF", Type: "fixed", ValueCents: 50, MinAmountCents: 0, MaxUses: 0, ProductID: 0, Active: true}); err != nil {
 		t.Fatalf("create coupon: %v", err)
 	}

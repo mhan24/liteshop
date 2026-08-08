@@ -23,6 +23,7 @@ import (
 	"shop/internal/bepusdt"
 	"shop/internal/config"
 	"shop/internal/db"
+	"shop/internal/db/repository"
 	"shop/internal/models"
 	"shop/internal/notify"
 	"shop/internal/order"
@@ -38,6 +39,7 @@ type Server struct {
 	notifier  *notify.Notifier
 	orders    *order.Service
 	products  *product.Service
+	keys      *repository.KeyRepository
 	dbPath    string
 	startTime time.Time
 
@@ -89,12 +91,13 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 	}
 	s.totpCipher = security.NewCipher(s.sessionSecret())
 	s.orders = order.NewService(
-		order.NewRepositoryWithTZ(db, models.LocationFromTimezone(s.siteSettings().Timezone)),
+		repository.NewOrderRepositoryWithTZ(db, models.LocationFromTimezone(s.siteSettings().Timezone)),
 		s.payClient,
 		s.paymentConfigForService,
 	)
 	s.orders.SendPaid = s.notifier.SendPaid
-	s.products = product.NewService(product.NewRepository(db))
+	s.products = product.NewService(repository.NewProductRepository(db))
+	s.keys = repository.NewKeyRepository(db)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -113,15 +116,15 @@ func NewHandler(cfg config.Config, db *sql.DB) (http.Handler, error) {
 		defer ticker.Stop()
 		for range ticker.C {
 			// 清理持久化会话
-			if _, err := s.db.Exec(`DELETE FROM sessions WHERE expires_at < ?`, time.Now().Unix()); err != nil {
+			if err := db.DeleteExpiredSessions(s.db, time.Now().Unix()); err != nil {
 				log.Printf("cleanup sessions: %v", err)
 			}
 			// 日志保留 180 天，防止无限增长
 			retention := time.Now().Add(-180 * 24 * time.Hour).Unix()
-			if _, err := s.db.Exec(`DELETE FROM audit_logs WHERE created_at < ?`, retention); err != nil {
+			if err := db.DeleteOldAuditLogs(s.db, retention); err != nil {
 				log.Printf("cleanup audit_logs: %v", err)
 			}
-			if _, err := s.db.Exec(`DELETE FROM order_logs WHERE created_at < ?`, retention); err != nil {
+			if err := db.DeleteOldOrderLogs(s.db, retention); err != nil {
 				log.Printf("cleanup order_logs: %v", err)
 			}
 			// 清理链接邮件冷却记录
@@ -593,7 +596,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 	id := models.RandomToken(24)
 	expiry := time.Now().Add(12 * time.Hour)
 	// 会话持久化到数据库，服务重启不丢登录态。
-	if _, err := s.db.Exec(`INSERT INTO sessions(id, admin_id, expires_at) VALUES(?, ?, ?)`, id, adminID, expiry.Unix()); err != nil {
+	if err := db.CreateSession(s.db, id, adminID, expiry.Unix()); err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
 	// HTTPS 下使用 __Host- 前缀（强制 Secure + Path=/ + 无 Domain）；
@@ -692,7 +695,7 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 	}
 	var adminID int64
 	var expiresAt int64
-	err := s.db.QueryRow(`SELECT admin_id, expires_at FROM sessions WHERE id = ?`, id).Scan(&adminID, &expiresAt)
+	adminID, expiresAt, err = db.SessionAdminID(s.db, id)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			log.Printf("session lookup: %v", err)
@@ -700,18 +703,18 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 		return 0, "", false
 	}
 	if time.Now().Unix() >= expiresAt {
-		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
+		_ = db.DeleteSession(s.db, id)
 		return 0, "", false
 	}
 	// 滑动续期：仅在剩余不足 1 小时时刷新，减少每次请求的写放大。
 	if expiresAt-time.Now().Unix() < 3600 {
-		_, _ = s.db.Exec(`UPDATE sessions SET expires_at = ? WHERE id = ?`, time.Now().Add(12*time.Hour).Unix(), id)
+		_ = db.SlideSessionExpiry(s.db, id, time.Now().Add(12*time.Hour).Unix())
 	}
 	var role string
-	err = s.db.QueryRow(`SELECT role FROM admins WHERE id = ?`, adminID).Scan(&role)
+	role, err = db.AdminRole(s.db, adminID)
 	if err != nil {
 		// 管理员已被删除：吊销其会话，避免降级为 viewer 继续访问。
-		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
+		_ = db.DeleteSession(s.db, id)
 		return 0, "", false
 	}
 	return adminID, role, true
@@ -719,7 +722,7 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 
 // purgeAdminSessions 删除某管理员的全部会话（删除账号时调用）。
 func (s *Server) purgeAdminSessions(adminID int64) {
-	_, _ = s.db.Exec(`DELETE FROM sessions WHERE admin_id = ?`, adminID)
+	_ = db.DeleteSessionsByAdmin(s.db, adminID)
 }
 
 // currentAdminID 返回当前管理员 ID。
@@ -734,8 +737,7 @@ func (s *Server) currentAdminName(r *http.Request) string {
 	if !ok {
 		return ""
 	}
-	var name string
-	_ = s.db.QueryRow(`SELECT username FROM admins WHERE id = ?`, id).Scan(&name)
+	name, _ := db.AdminUsername(s.db, id)
 	return name
 }
 

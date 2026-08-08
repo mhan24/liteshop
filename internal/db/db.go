@@ -6,25 +6,7 @@ import (
 	"strings"
 
 	"shop/internal/models"
-
-	_ "modernc.org/sqlite"
 )
-
-func Open(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, err
-	}
-	db.SetMaxOpenConns(1)
-	if err := db.Ping(); err != nil {
-		return nil, err
-	}
-	if err := migrate(db); err != nil {
-		return nil, err
-	}
-	return db, nil
-}
 
 func migrate(db *sql.DB) error {
 	return migrateDB(db)

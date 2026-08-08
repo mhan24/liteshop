@@ -3,6 +3,7 @@ package product
 import (
 	"strings"
 
+	"shop/internal/db/repository"
 	"shop/internal/models"
 )
 
@@ -15,10 +16,10 @@ type CategoryView struct {
 
 // Service 商品业务逻辑。
 type Service struct {
-	repo *Repository
+	repo *repository.ProductRepository
 }
 
-func NewService(repo *Repository) *Service {
+func NewService(repo *repository.ProductRepository) *Service {
 	return &Service{repo: repo}
 }
 
@@ -123,10 +124,5 @@ func (s *Service) AllCategories() ([]string, error) {
 	return s.repo.AllCategories()
 }
 
-// AvailableCount 返回商品可用库存。
-func (s *Service) AvailableCount(productID int64) (int, error) {
-	return s.repo.AvailableCount(productID)
-}
-
 // Repo 暴露仓储给上层查询。
-func (s *Service) Repo() *Repository { return s.repo }
+func (s *Service) Repo() *repository.ProductRepository { return s.repo }

@@ -1,6 +1,6 @@
 // Package product 提供商品领域的仓储与业务逻辑。
 // 分层: web handler → product.Service → product.Repository → db
-package product
+package repository
 
 import (
 	"database/sql"
@@ -18,16 +18,16 @@ type View struct {
 }
 
 // Repository 封装商品与卡密的数据访问。
-type Repository struct {
+type ProductRepository struct {
 	db *sql.DB
 }
 
-func NewRepository(db *sql.DB) *Repository {
+func NewProductRepository(db *sql.DB) *ProductRepository {
 	return &Repository{db: db}
 }
 
 // ListViews 返回商品视图（可选仅上架）。
-func (r *Repository) ListViews(activeOnly bool) ([]View, error) {
+func (r *ProductRepository) ListViews(activeOnly bool) ([]View, error) {
 	where := ""
 	if activeOnly {
 		where = "WHERE p.status = 'active'"
@@ -56,7 +56,7 @@ func (r *Repository) ListViews(activeOnly bool) ([]View, error) {
 }
 
 // GetByID 按 ID 查商品视图。
-func (r *Repository) GetByID(id int64) (View, error) {
+func (r *ProductRepository) GetByID(id int64) (View, error) {
 	var v View
 	var faqRaw, wholeRaw string
 	err := r.db.QueryRow(`SELECT p.id, p.name, p.description, p.image_url, p.price_cents, p.status, p.category, p.sort_order, p.is_pinned, p.faq, p.wholesale, p.min_qty, p.max_qty, p.cost_cents, p.created_at, p.updated_at,
@@ -71,7 +71,7 @@ func (r *Repository) GetByID(id int64) (View, error) {
 }
 
 // GetBySlug 按 slug 查上架商品。
-func (r *Repository) GetBySlug(slug string) (View, error) {
+func (r *ProductRepository) GetBySlug(slug string) (View, error) {
 	views, err := r.ListViews(true)
 	if err != nil {
 		return View{}, err
@@ -85,7 +85,7 @@ func (r *Repository) GetBySlug(slug string) (View, error) {
 }
 
 // GetActiveByID 查上架商品（前台用）。
-func (r *Repository) GetActiveByID(id int64) (View, error) {
+func (r *ProductRepository) GetActiveByID(id int64) (View, error) {
 	v, err := r.GetByID(id)
 	if err != nil {
 		return v, err
@@ -97,7 +97,7 @@ func (r *Repository) GetActiveByID(id int64) (View, error) {
 }
 
 // Create 创建商品。
-func (r *Repository) Create(p models.Product) error {
+func (r *ProductRepository) Create(p models.Product) error {
 	now := models.Now()
 	_, err := r.db.Exec(`INSERT INTO products(name, description, image_url, price_cents, status, category, sort_order, is_pinned, faq, wholesale, min_qty, max_qty, cost_cents, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), wholesaleJSON(p.Wholesale), p.MinQty, p.MaxQty, p.CostCents, now, now)
@@ -105,28 +105,21 @@ func (r *Repository) Create(p models.Product) error {
 }
 
 // Update 更新商品。
-func (r *Repository) Update(p models.Product, id int64) error {
+func (r *ProductRepository) Update(p models.Product, id int64) error {
 	_, err := r.db.Exec(`UPDATE products SET name = ?, description = ?, image_url = ?, price_cents = ?, status = ?, category = ?, sort_order = ?, is_pinned = ?, faq = ?, wholesale = ?, min_qty = ?, max_qty = ?, cost_cents = ?, updated_at = ? WHERE id = ?`,
 		p.Name, p.Description, p.ImageURL, p.PriceCents, p.Status, p.Category, p.SortOrder, p.IsPinned, faqJSON(p.FAQ), wholesaleJSON(p.Wholesale), p.MinQty, p.MaxQty, p.CostCents, models.Now(), id)
 	return err
 }
 
 // GetName 返回商品名（审计用）。
-func (r *Repository) GetName(id int64) string {
+func (r *ProductRepository) GetName(id int64) string {
 	var name string
 	_ = r.db.QueryRow(`SELECT name FROM products WHERE id = ?`, id).Scan(&name)
 	return name
 }
 
-// AvailableCount 返回商品可用卡密数。
-func (r *Repository) AvailableCount(productID int64) (int, error) {
-	var n int
-	err := r.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE product_id = ? AND status = 'available'`, productID).Scan(&n)
-	return n, err
-}
-
 // AllCategories 返回上架商品分类（去重）。
-func (r *Repository) AllCategories() ([]string, error) {
+func (r *ProductRepository) AllCategories() ([]string, error) {
 	views, err := r.ListViews(true)
 	if err != nil {
 		return nil, err
@@ -146,25 +139,8 @@ func (r *Repository) AllCategories() ([]string, error) {
 	return out, nil
 }
 
-// CardStockStats 返回卡密库存统计（总可用/售出/锁定）。
-func (r *Repository) CardStockStats() (products, available, sold, locked int, err error) {
-	if err = r.db.QueryRow(`SELECT COUNT(1) FROM products`).Scan(&products); err != nil {
-		return
-	}
-	if err = r.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'available'`).Scan(&available); err != nil {
-		return
-	}
-	if err = r.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'sold'`).Scan(&sold); err != nil {
-		return
-	}
-	if err = r.db.QueryRow(`SELECT COUNT(1) FROM cards WHERE status = 'locked'`).Scan(&locked); err != nil {
-		return
-	}
-	return
-}
-
 // LowStock 返回库存不足的商品（可用 < threshold）。
-func (r *Repository) LowStock(threshold int) ([]View, error) {
+func (r *ProductRepository) LowStock(threshold int) ([]View, error) {
 	if threshold <= 0 {
 		threshold = 10
 	}
