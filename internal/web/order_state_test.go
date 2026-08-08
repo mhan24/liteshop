@@ -347,21 +347,30 @@ func TestCouponAndWholesale(t *testing.T) {
 		t.Fatalf("qty below min should fail")
 	}
 	// 批发价：买 2 件单价 9 折 = 100*2*90/100 = 180
-	// 固定券满 100 减 1000，抵扣后 180-1000<=0 → 0 元订单被拒绝
+	// 固定券满 100 减 1000，抵扣后 180-1000 → 0 元订单直接完成（跳过支付）
 	orderNo, _, discount, couponID, err := svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10, Wholesale: []models.WholesaleTier{{MinQty: 2, Discount: 90}}}, 2, "a@b.com", "usdt-trc20", "TEST10")
-	if err == nil {
-		t.Fatalf("0-amount order should be rejected")
+	if err != nil {
+		t.Fatalf("0-amount order should complete directly: %v", err)
 	}
-	if orderNo != "" {
-		t.Fatalf("orderNo should be empty when 0-amount order rejected, got %s", orderNo)
+	if orderNo == "" {
+		t.Fatalf("orderNo should be non-empty for free order")
 	}
-	if discount != 0 || couponID != 0 {
-		t.Fatalf("discount/couponID should be zero when rejected, got %d/%d", discount, couponID)
+	if discount == 0 || couponID == 0 {
+		t.Fatalf("discount/couponID should be applied, got %d/%d", discount, couponID)
 	}
-	// 券用量不应增加
+	// 免费订单应已交付、卡密售出、券用量 +1
 	c, _ := repo.GetCouponByCode("TEST10")
-	if c.UsedCount != 0 {
-		t.Fatalf("coupon used = %d, want 0", c.UsedCount)
+	if c.UsedCount != 1 {
+		t.Fatalf("coupon used = %d, want 1", c.UsedCount)
+	}
+	fo, _ := repo.GetOrderByNo(orderNo)
+	if fo.Status != models.OrderDelivered {
+		t.Fatalf("free order status = %s, want delivered", fo.Status)
+	}
+	var sold int
+	_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE status='sold' AND sold_order=?`, fo.ID).Scan(&sold)
+	if sold != 2 {
+		t.Fatalf("free order sold = %d, want 2", sold)
 	}
 
 	// 用更小面额券避免 0 元：满 100 减 10 → 180-10=170，然后 payFn nil 支付失败
