@@ -49,7 +49,7 @@ func wrapCouponError(err error) error {
 	return err
 }
 
-func NewOrderService(repo *repository.OrderRepository, payFn func() *payment.Client, cfgFn func() PaymentConfig) *Service {
+func NewOrderService(repo *repository.OrderRepository, payFn func() *payment.Client, cfgFn func() PaymentConfig) *OrderService {
 	return &OrderService{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
 
