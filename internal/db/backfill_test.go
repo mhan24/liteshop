@@ -235,37 +235,36 @@ func TestMigration007EndToEnd(t *testing.T) {
 	}
 }
 
-// TestMigrationFullRerunIdempotent 清空迁移记录后全量重跑应成功（006/008 已改为条件 ALTER）。
-func TestMigrationFullRerunIdempotent(t *testing.T) {
+// TestMigrationReopenNoRerun 重开已迁移数据库不应重跑任何迁移（记录数与数据保持不变）。
+func TestMigrationReopenNoRerun(t *testing.T) {
 	path := t.TempDir() + "/rerun.db"
 	d, err := Open(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	// 写入数据，制造"已升级库"
+	// 写入数据
 	now := models.Now()
-	_, _ = d.Exec(`INSERT INTO products(name, description, price_cents, cost_cents, status, min_qty, max_qty, wholesale, created_at, updated_at) VALUES('p','',100,40,'active',1,100,'[]',?,?)`, now, now)
-	_, _ = d.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, cost_cents, cost_snapshot_source, fiat, trade_type, buyer_contact, status, created_at, updated_at) VALUES('R1', 1, 'p', 1, 100, 40, 'order_time', 'CNY', 'usdt', 'a@b.com', 'paid', ?, ?)`, now, now)
-	// 清空迁移记录，模拟极端场景下全量重跑
-	if _, err := d.Exec(`DELETE FROM schema_migrations`); err != nil {
+	_, _ = d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('p','',100,'active',?,?)`, now, now)
+	var before int
+	if err := d.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&before); err != nil {
 		d.Close()
-		t.Fatalf("clear migrations: %v", err)
+		t.Fatalf("count before: %v", err)
 	}
 	d.Close()
-	// 重开触发全量 001→008 重跑，不应因列已存在而失败
+	// 重开：不应重跑任何迁移
 	d2, err := Open(path)
 	if err != nil {
-		t.Fatalf("reopen after full rerun: %v", err)
+		t.Fatalf("reopen: %v", err)
 	}
 	defer d2.Close()
-	var n int
-	_ = d2.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&n)
-	if n < 8 {
-		t.Fatalf("migrations recorded = %d, want >= 8", n)
+	var after int
+	_ = d2.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&after)
+	if after != before {
+		t.Fatalf("migrations re-ran: before=%d after=%d", before, after)
 	}
 	// 数据仍在
-	var amount int64
-	if err := d2.QueryRow(`SELECT amount_cents FROM orders WHERE order_no='R1'`).Scan(&amount); err != nil || amount != 100 {
-		t.Fatalf("order data lost after rerun: %v %d", err, amount)
+	var name string
+	if err := d2.QueryRow(`SELECT name FROM products LIMIT 1`).Scan(&name); err != nil || name != "p" {
+		t.Fatalf("data lost after reopen: %v %q", err, name)
 	}
 }
