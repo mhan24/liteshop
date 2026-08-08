@@ -28,7 +28,6 @@ import (
 	"shop/internal/models"
 	"shop/internal/notify"
 	"shop/internal/service"
-	"shop/internal/service"
 	"shop/internal/security"
 	"shop/internal/jobs"
 )
