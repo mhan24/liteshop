@@ -192,6 +192,8 @@ UMask=0077
 WorkingDirectory=/opt/cardshop
 ExecStart=/opt/cardshop/shop
 Environment="SHOP_SETUP_TOKEN=${SHOP_SETUP_TOKEN}"
+Environment="SHOP_PUBLIC_BASE_URL=${SHOP_PUBLIC_BASE_URL:-${SITE_SCHEME}://${DOMAIN}}"
+Environment="BEPUSDT_NOTIFY_URL=${BEPUSDT_NOTIFY_URL:-${SITE_SCHEME}://${DOMAIN}/notify/bepusdt}"
 Restart=always
 RestartSec=2
 
