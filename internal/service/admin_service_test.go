@@ -7,7 +7,7 @@ import (
 
 func TestLoginLockout(t *testing.T) {
 	s := &AdminService{loginFails: map[string]loginGuard{}}
-	u := "admin"
+	u := "1.2.3.4|admin"
 	for i := 0; i < 4; i++ {
 		s.RecordLoginFail(u)
 		if s.LoginLocked(u) {

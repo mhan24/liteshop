@@ -350,12 +350,16 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 ## Security notes
 
 - Passwords: PBKDF2-SHA256 (100k) + constant-time compare; timing-equalized login; **lockout after 5 failed attempts for 10 minutes**
+- Login lockout is keyed by **IP + username** (prevents cross-IP account-lock DoS); stale failure records are cleaned periodically
+- Rate-limit trust boundary: `CF-Connecting-IP` is only honored when the peer is a Cloudflare edge IP, so direct clients cannot forge the header to bypass limits
+- Admin non-idempotent requests validate Origin same-origin (CSRF defense in depth)
 - TOTP 2FA secrets AES-GCM encrypted; sensitive config (payment / mail / notifications / maintenance password) AES-encrypted in the `secrets` table
 - Order view tokens delivered only by email; persisted sessions revoked immediately on logout / admin deletion / restore / reset
 - Atomic order state machine (deliver/cancel/expire in single transactions); 100% coupons complete orders automatically
 - Fully parameterized SQL; markdown disables HTML; CSV formula-injection guard; CSP / HSTS / security headers
 - Config backups exclude secrets; explicit HTTP server timeouts; async tasks never block payment callbacks; worker panics are isolated
 - security.log records login success/failure/lockout and TOTP verification
+- The session master key (`session_secret`) is stored in plaintext in `settings` (a deliberate no-env tradeoff): protect DB access strictly; a server-local key file is planned via a future settings migration (v2), and startup logs a reminder
 
 ---
 

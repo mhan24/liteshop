@@ -616,7 +616,7 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	username := strings.TrimSpace(input.Username)
 	ip := clientIP(r)
-	adminID, totpEnabled, err := s.admin.Login(username, input.Password)
+	adminID, totpEnabled, err := s.admin.Login(username, input.Password, ip)
 	if err != nil {
 		reason := "internal"
 		msg := ""

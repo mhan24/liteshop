@@ -61,7 +61,7 @@ func Load() Config {
 		AdminPassword:     "",
 		SessionSecret:     "",
 		TurnstileSecret:   "",
-		TurnstileSiteKey:  "0x4AAAAAAD-83GuuhsY2-KeZ",
+		TurnstileSiteKey:  "",
 		BepusdtBaseURL:    "http://localhost:8081",
 		BepusdtToken:      "",
 		BepusdtFiat:       "CNY",

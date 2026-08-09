@@ -81,3 +81,42 @@ func TestSessionCookieSecure(t *testing.T) {
 		t.Fatalf("session cookie must be __Host- + Secure on HTTPS: %q", setCookie)
 	}
 }
+
+// TestClientIPTrustBoundary 仅对端为 Cloudflare 时才采信 CF-Connecting-IP，
+// 直连客户端伪造该头不能绕过限流。
+func TestClientIPTrustBoundary(t *testing.T) {
+	// 直连（非 CF 对端）：伪造的 CF-Connecting-IP 必须被忽略
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "1.2.3.4:5555"
+	r.Header.Set("CF-Connecting-IP", "9.9.9.9")
+	r.Header.Set("X-Forwarded-For", "8.8.8.8, 1.2.3.4")
+	if got := clientIP(r); got != "1.2.3.4" {
+		t.Fatalf("direct peer: clientIP = %q, want 1.2.3.4 (forged CF header ignored)", got)
+	}
+	// 经 Cloudflare（对端为 CF 段）：采信 CF-Connecting-IP
+	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r2.RemoteAddr = "104.16.1.1:443"
+	r2.Header.Set("CF-Connecting-IP", "9.9.9.9")
+	if got := clientIP(r2); got != "9.9.9.9" {
+		t.Fatalf("cf peer: clientIP = %q, want 9.9.9.9", got)
+	}
+}
+
+// TestSameOrigin CSRF 同源校验：同源放行、跨源拒绝、无 Origin 的 API 客户端放行。
+func TestSameOrigin(t *testing.T) {
+	if !sameOrigin(httptest.NewRequest(http.MethodPost, "/", nil)) {
+		t.Fatal("request without Origin should be allowed (API client)")
+	}
+	ok := httptest.NewRequest(http.MethodPost, "/", nil)
+	ok.Host = "shop.3737.de"
+	ok.Header.Set("Origin", "https://shop.3737.de")
+	if !sameOrigin(ok) {
+		t.Fatal("same-origin request should be allowed")
+	}
+	bad := httptest.NewRequest(http.MethodPost, "/", nil)
+	bad.Host = "shop.3737.de"
+	bad.Header.Set("Origin", "https://evil.example")
+	if sameOrigin(bad) {
+		t.Fatal("cross-origin request must be rejected")
+	}
+}

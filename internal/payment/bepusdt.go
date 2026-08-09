@@ -2,6 +2,7 @@ package payment
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -193,7 +194,8 @@ func ParseAndVerifyCallback(payload []byte, token string) (map[string]string, er
 	}
 	got, _ := raw["signature"].(string)
 	want := Sign(params, token)
-	if !strings.EqualFold(got, want) {
+	// 恒定时间比较（hex 先统一小写），避免时序侧信道。
+	if !hmac.Equal([]byte(strings.ToLower(got)), []byte(strings.ToLower(want))) {
 		return nil, fmt.Errorf("invalid signature")
 	}
 	return params, nil

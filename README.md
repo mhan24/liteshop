@@ -349,12 +349,16 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 ## 安全说明
 
 - 密码 PBKDF2-SHA256（10 万次）+ 恒定时间；登录时序均摊；**失败 5 次锁 10 分钟**
+- 登录锁定按 **IP+用户名** 计（防跨 IP 刷他人账号锁定）；登录失败记录定期清理
+- 限流信任边界：仅当对端为 Cloudflare 边缘 IP 时才采信 `CF-Connecting-IP`，直连伪造头部无法绕过限流
+- 管理接口非幂等请求校验 Origin 同源（CSRF 纵深防御）
 - TOTP 2FA 密钥 AES-GCM 加密；敏感配置（支付/邮件/通知/维护密码）AES 加密存储于 `secrets` 表
 - 订单查看令牌只经邮件下发；会话持久化 + 删号/登出/恢复/重置即时吊销
 - 状态机原子化（发卡/取消/过期单事务）；100% 券订单直接完成
 - SQL 全参数化；markdown 关闭 HTML；CSV 公式注入防护；CSP/HSTS/安全头
 - 配置备份不含密钥；HTTP 服务显式超时；异步任务不阻塞支付回调；worker panic 隔离
 - security.log 记录登录成功/失败/锁定与 TOTP 验证
+- 会话主密钥（`session_secret`）明文存 `settings` 表（无环境变量设计取舍）：请严格保护数据库访问权限；服务器本地密钥文件的方案已列入 settings 迁移规划（v2），启动日志会给出提示
 
 ---
 

@@ -59,6 +59,8 @@
 - 健康检查 `/health` 必须保留 database（size/migration_version/last_backup/integrity）与 jobs（queue_size/last_success）指标；
 - 安全响应头（nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / CSP / HSTS / Cookie Secure）改动必须同步 `internal/api/security_test.go`；
 - 审计日志索引（admin_id/action/target）为查询基线，新增审计查询必须走索引；限流分级约定：公共严格、管理接口 300/min/IP，新接口按分级挂 `rateLimitMiddleware`；
+- 限流信任边界：仅当对端为 Cloudflare 边缘 IP 才采信 `CF-Connecting-IP`（cloudflare_ips.go 段位需随官方更新）；登录锁定键必须含 IP；
+- 管理接口非幂等请求必须保留 Origin 同源校验；`session_secret` 主密钥迁移到服务器本地文件时走 settings_version v2（勿破坏存量加密值）；
 - 正式发布走 `v*` tag（CI 生成 tgz + SHA256 + GitHub Release），禁止手动拼包；
 - SSR 缓存策略：动态页面与商品列表保持 no-store，ISR/edge cache 暂不实施；
 - 数据库连接启动即确认 `journal_mode=WAL` / `busy_timeout=5000` / `foreign_keys=ON`；服务必须支持 SIGTERM 优雅停机（停止接收 → 排空 → worker 退出 → 关库）；

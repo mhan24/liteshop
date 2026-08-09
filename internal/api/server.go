@@ -148,6 +148,7 @@ func (s *Server) logStartupInfo() {
 	logging.App().Sugar().Infof("listen: %s", s.cfg.ListenAddr)
 	logging.App().Sugar().Infof("admin entry: %s/admin", s.cfg.PublicBaseURL)
 	logging.App().Sugar().Infof("notify url: %s", payCfg.NotifyURL)
+	logging.App().Sugar().Warn("security: session master key is stored in the database (plaintext) — protect DB access; server-local key file is planned via a future settings migration")
 }
 
 // notifyEventConsumer 模板事件消费者（订单创建/支付成功/发货/低库存 → 通知模板）。
@@ -266,6 +267,7 @@ func latestBackupFile(dbPath string) (string, int64, bool) {
 func (s *Server) cleanupMemory() {
 	// 2FA 待验证令牌与登录锁定由 AdminService 管理，此处仅清理限流器与邮件冷却。
 	s.admin.ClearPendingTotps()
+	s.admin.CleanupStaleLoginFails(time.Now().Unix())
 	cutoff := time.Now().Add(-10 * time.Minute).Unix()
 	s.linkMu.Lock()
 	for k, v := range s.linkSent {
@@ -380,9 +382,12 @@ func (s *Server) verifyTurnstileToken(token, remoteIP, host string) error {
 }
 
 func clientIP(r *http.Request) string {
-	// 优先信任 CF-Connecting-IP（由 Cloudflare 设置，站点经 CF 时不可伪造）。
-	if ip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); ip != "" && net.ParseIP(ip) != nil {
-		return ip
+	// 仅当对端确为 Cloudflare 边缘时才信任 CF-Connecting-IP：
+	// 直连（绕过 CF）的客户端可伪造该头，若无条件信任会绕过所有按 IP 限流。
+	if peer := net.ParseIP(remoteIP(r)); peer != nil && isCloudflareIP(peer) {
+		if ip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); ip != "" && net.ParseIP(ip) != nil {
+			return ip
+		}
 	}
 	// 否则取 X-Forwarded-For 最右侧的合法 IP：该条目由离服务最近的代理（如 Caddy）追加，
 	// 客户端无法通过伪造头部改变已存在条目的位置，避免"取第一个值"导致的限流绕过。
@@ -395,10 +400,19 @@ func clientIP(r *http.Request) string {
 			}
 		}
 	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
+	return remoteIP(r)
+}
+
+// remoteIP 返回 TCP 对端 IP 字符串（去除端口）。
+func remoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
 	}
-	return r.RemoteAddr
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return host
 }
 
 func validEmail(v string) bool {
@@ -499,9 +513,32 @@ func (s *Server) requireRole(min string, next http.Handler) http.Handler {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 			return
 		}
+		// CSRF 纵深防御：非幂等请求校验 Origin 与 Host 同源（浏览器跨站请求被拦截；
+		// 无 Origin 的 API 客户端如 curl 不受影响）。
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOrigin(r) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request rejected"})
+			return
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		limited(w, r)
 	})
+}
+
+// sameOrigin 校验请求 Origin 与 Host 同源（无 Origin 视为非浏览器客户端，放行）。
+func sameOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.EqualFold(u.Host, host)
 }
 
 // audit 记录一条管理员审计日志（记录谁/何时/改了什么/前后值）。

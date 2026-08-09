@@ -65,8 +65,10 @@ func (s *AdminService) SeedAdmin(username, password string) (bool, error) {
 
 // Login 校验用户名/密码；成功返回 adminID 与是否启用 TOTP。
 // 错误为 ErrLoginLocked / ErrBadCredentials / 系统错误。
-func (s *AdminService) Login(username, password string) (int64, bool, error) {
-	if s.LoginLocked(username) {
+// ip 参与锁定键（IP+用户名），避免攻击者用他人用户名刷失败锁定目标账号。
+func (s *AdminService) Login(username, password, ip string) (int64, bool, error) {
+	lockKey := lockoutKey(ip, username)
+	if s.LoginLocked(lockKey) {
 		return 0, false, ErrLoginLocked
 	}
 	adminID, hash, totpSecret, totpEnabled, err := s.store.AdminByUsername(username)
@@ -79,15 +81,20 @@ func (s *AdminService) Login(username, password string) (int64, bool, error) {
 		return 0, false, err
 	}
 	if !models.CheckPassword(password, hash) {
-		s.RecordLoginFail(username)
-		if s.LoginLocked(username) {
+		s.RecordLoginFail(lockKey)
+		if s.LoginLocked(lockKey) {
 			return 0, false, ErrLoginLocked
 		}
 		return 0, false, ErrBadCredentials
 	}
-	s.ClearLoginFails(username)
+	s.ClearLoginFails(lockKey)
 	_ = totpSecret
 	return adminID, totpEnabled, nil
+}
+
+// lockoutKey 锁定键 = IP + 用户名（防止跨 IP 的账号锁定 DoS）。
+func lockoutKey(ip, username string) string {
+	return ip + "|" + username
 }
 
 // VerifyLoginTotp 校验登录 TOTP（含旧明文升级为加密存储）。
@@ -152,30 +159,41 @@ func (s *AdminService) ClearPendingTotps() {
 	s.mu.Unlock()
 }
 
-func (s *AdminService) LoginLocked(username string) bool {
+func (s *AdminService) LoginLocked(key string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.loginFails[username].lockedUntil > time.Now().Unix()
+	return s.loginFails[key].lockedUntil > time.Now().Unix()
 }
 
 // RecordLoginFail 记录一次登录失败；连续失败 5 次锁定 10 分钟。
-func (s *AdminService) RecordLoginFail(username string) {
+func (s *AdminService) RecordLoginFail(key string) {
 	now := time.Now().Unix()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g := s.loginFails[username]
+	g := s.loginFails[key]
 	g.fails++
 	g.lastAttempt = now
 	if g.fails >= 5 {
 		g.lockedUntil = now + 600
 		g.fails = 0
 	}
-	s.loginFails[username] = g
+	s.loginFails[key] = g
 }
 
 // ClearLoginFails 登录成功后清除失败记录。
-func (s *AdminService) ClearLoginFails(username string) {
+func (s *AdminService) ClearLoginFails(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.loginFails, username)
+	delete(s.loginFails, key)
+}
+
+// CleanupStaleLoginFails 清理长时间无活动的锁定记录（防 map 无限增长）。
+func (s *AdminService) CleanupStaleLoginFails(now int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, g := range s.loginFails {
+		if now-g.lastAttempt > 600 {
+			delete(s.loginFails, k)
+		}
+	}
 }
