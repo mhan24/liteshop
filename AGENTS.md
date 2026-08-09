@@ -18,6 +18,11 @@
 - 按职责拆分为小文件，例如订单：`order_create.go` / `order_cancel.go` / `order_deliver.go` / `order_query.go` / `order_status.go` / `order_coupon.go` / `order_links.go`；
 - 单文件建议不超过 300 行；接近上限时先拆文件，再考虑子目录（如 `service/order/`）。
 
+## repository 小文件原则（P0）
+
+- `internal/db/repository` 同样禁止单文件膨胀：订单仓储按职责拆分（`order_query.go` / `order_create.go` / `order_state.go` / `order_stats.go` / `order_log.go`）；
+- 单文件建议不超过 300 行；订单/商品逻辑只会越来越复杂（创建、锁库存、支付、取消、过期、发货、重发），接近上限时先拆文件，再考虑子目录（如 `repository/order/`）。
+
 ## 数据库
 
 - schema 变更必须新增编号 .sql 迁移（`internal/db/schema/migrations/`），禁止启动时"检查表/自动补列"；

@@ -149,7 +149,7 @@ internal/service/       business logic (small files per domain: order_create.go 
 internal/service/repository.go    data-access interfaces consumed by service (Order/Product/Key/SettingsStore/AdminStore)
 internal/db/            database connection layer: sqlite.go / postgres.go (future)
 internal/db/schema/     schema evolution: migration runner + migrations/*.sql (single entry for schema changes)
-internal/db/repository/ all data access: SQLite implementations + Store (settings/secrets/admin/session/audit)
+internal/db/repository/ all data access: SQLite implementations + Store; order split into small files (order_query.go / order_create.go / order_state.go / order_stats.go / order_log.go)
 internal/models/        models, shared types (ProductView/AdminRow/…) and domain errors
 internal/payment/       payment gateway abstraction: interface.go (Gateway) + bepusdt.go (BEPusdt impl)
 internal/notify/        notifications (event templates / mail / Telegram / Webhook)
@@ -218,6 +218,7 @@ cd admin-ui && npm run lint && npm run format
 ### Code conventions (see AGENTS.md)
 
 - **Small service files**: split by responsibility (e.g. `order_create.go` / `order_cancel.go` / `order_deliver.go`); keep each file under ~300 lines;
+- **Small repository files**: the order repository is split by responsibility (query / create / state / stats / log), also keeping each file under ~300 lines;
 - **Interface-based repositories**: service depends only on interfaces, never concrete SQLite; shared types/domain errors live in `internal/models`;
 - New schema changes must be new numbered .sql migrations; sensitive config always goes into the encrypted `secrets` table;
 - API changes must be reflected in `internal/api/api_docs/openapi.json` (YAML generated from the JSON);

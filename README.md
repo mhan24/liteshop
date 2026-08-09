@@ -149,7 +149,7 @@ internal/service/       业务逻辑（按领域拆小文件：order_create.go /
 internal/service/repository.go    service 依赖的数据访问接口（Order/Product/Key/SettingsStore/AdminStore）
 internal/db/            数据库连接层：sqlite.go / postgres.go（未来备用）
 internal/db/schema/     schema 演进：迁移执行器 + migrations/*.sql（唯一 schema 变更入口）
-internal/db/repository/ 全部数据访问：SQLite 实现 + Store（settings/secrets/admin/session/audit）
+internal/db/repository/ 全部数据访问：SQLite 实现 + Store；订单按职责拆小文件（order_query.go / order_create.go / order_state.go / order_stats.go / order_log.go）
 internal/models/        模型、共享类型（ProductView/AdminRow/…）与领域错误
 internal/payment/       支付网关抽象：interface.go（Gateway）+ bepusdt.go（BEPusdt 实现）
 internal/notify/        通知（事件模板 / 邮件 / Telegram / Webhook）
@@ -218,6 +218,7 @@ cd admin-ui && npm run lint && npm run format
 ### 代码规范（详见 AGENTS.md）
 
 - **service 小文件原则**：按职责拆分（如 `order_create.go` / `order_cancel.go` / `order_deliver.go`），单文件建议不超过 300 行；
+- **repository 小文件原则**：订单仓储按职责拆分（query / create / state / stats / log），同样建议单文件不超过 300 行；
 - **repository 接口化**：service 只依赖接口，不依赖具体 SQLite；共享类型/领域错误放 `internal/models`；
 - 新增 schema 变更必须新增编号 .sql 迁移；敏感配置一律走 `secrets` 表加密存储；
 - API 变更必须同步更新 `internal/api/api_docs/openapi.json`（yaml 由 json 生成）；
