@@ -119,6 +119,7 @@ Order → lock cards → create transaction (payment.Gateway) → open checkout 
 ```
 
 - Cancel / expire: release stock + call the gateway `cancel-transaction` to close the trade;
+- Transaction boundaries: checkout is a single transaction (create order + lock cards + decrement stock); failures atomically mark `payment_failed` and release cards; payment success is a single transaction (paid + deliver) and notifications are sent asynchronously **only after COMMIT** — never inside a DB transaction;
 - The callback path is configurable (default `/notify/bepusdt`), stored in the database;
 - Switching gateways (other USDT / Stripe / PayPal) only requires a new `Gateway` adapter; business and callback handling stay unchanged;
 - **payment.log** records every creation/callback: order number, amount, trade ID, callback time, result — for payment-chain troubleshooting.

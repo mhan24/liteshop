@@ -2,6 +2,7 @@ package integration
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -160,5 +161,61 @@ func TestExpireStaleClosesTimeoutOrders(t *testing.T) {
 	avail, _ := keyRepo.AvailableCount(pid)
 	if avail != 3 {
 		t.Fatalf("available after expire = %d, want 3 (all released)", avail)
+	}
+}
+
+// TestPaymentCreateFailureReleasesCards 建单失败（网关错误）原子释放卡密，不泄漏库存。
+func TestPaymentCreateFailureReleasesCards(t *testing.T) {
+	svc, keyRepo, gw, _, _, pid := newOrderService(t)
+	gw.CreateErr = errors.New("gateway down")
+
+	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
+	if err == nil {
+		t.Fatal("create order should fail when gateway errors")
+	}
+	if orderNo == "" {
+		t.Fatal("order number should still exist for audit trail")
+	}
+	o, err := svc.GetOrderByNo(orderNo)
+	if err != nil || o.Status != models.OrderPaymentFailed {
+		t.Fatalf("order status = %v (%v), want payment_failed", o.Status, err)
+	}
+	if o.PaymentStatus != models.PaymentFailed {
+		t.Fatalf("payment status = %q, want failed", o.PaymentStatus)
+	}
+	avail, _ := keyRepo.AvailableCount(pid)
+	if avail != 3 {
+		t.Fatalf("available after failed create = %d, want 3 (locked cards must be released)", avail)
+	}
+}
+
+// TestCallbackAfterCancelNoEffect 支付回调打在已取消订单上：不产生任何变更（事务条件更新拦截）。
+func TestCallbackAfterCancelNoEffect(t *testing.T) {
+	svc, keyRepo, gw, _, _, pid := newOrderService(t)
+
+	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
+	if err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+	o, _ := svc.GetOrderByNo(orderNo)
+	if err := svc.CancelWithGateway(o.ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	availAfterCancel, _ := keyRepo.AvailableCount(pid)
+
+	_, cards, changed, err := svc.MarkPaidAndDeliver(orderNo, gw.TradeID, "block-late")
+	if err != nil {
+		t.Fatalf("late callback: %v", err)
+	}
+	if changed || len(cards) != 0 {
+		t.Fatalf("late callback changed=%v cards=%d, want no effect", changed, len(cards))
+	}
+	o2, _ := svc.GetOrderByNo(orderNo)
+	if o2.Status != models.OrderCancelled {
+		t.Fatalf("order status = %s, want cancelled", o2.Status)
+	}
+	avail, _ := keyRepo.AvailableCount(pid)
+	if avail != availAfterCancel {
+		t.Fatalf("available after late callback = %d, want %d", avail, availAfterCancel)
 	}
 }

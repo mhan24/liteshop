@@ -169,6 +169,25 @@ func (r *OrderRepository) SetOrderStatusFrom(orderID int64, from, to string) err
 	return nil
 }
 
+// MarkPaymentFailed 原子完成"支付失败"：订单置 payment_failed、支付状态置 failed，
+// 并释放该订单锁定的卡密（单事务，避免残留锁定卡密/库存泄漏）。
+func (r *OrderRepository) MarkPaymentFailed(orderID int64) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE orders SET status = 'payment_failed', payment_status = 'failed', updated_at = ? WHERE id = ?`,
+		models.Now(), orderID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE cards SET status = 'available', reserved_order = 0, updated_at = ? WHERE reserved_order = ? AND status = 'locked'`,
+		models.Now(), orderID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SetPaymentStatus 更新支付状态（与订单状态解耦，单独维护）。
 func (r *OrderRepository) SetPaymentStatus(orderID int64, status string) error {
 	_, err := r.db.Exec(`UPDATE orders SET payment_status = ?, updated_at = ? WHERE id = ?`, status, models.Now(), orderID)

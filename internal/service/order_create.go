@@ -91,9 +91,8 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 	_ = s.repo.AddLog(order.ID, "order_created", "订单已创建", "", models.OrderCreated, 0)
 	if discount > 0 {
 		if err := s.repo.UseCoupon(couponID, order.OrderNo, discount); err != nil {
-			_ = s.repo.ReleaseLockedCards(order.ID)
-			_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
-			_ = s.repo.SetPaymentStatus(order.ID, models.PaymentFailed)
+			// 原子：订单失败 + 释放卡密（单事务），不残留锁定库存。
+			_ = s.repo.MarkPaymentFailed(order.ID)
 			_ = s.repo.AddLog(order.ID, "coupon_failed", "优惠券占用失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
 			return order.OrderNo, "", 0, 0, wrapCouponError(err)
 		}
@@ -117,8 +116,8 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 		TimeoutSec:  cfg.TimeoutSec,
 	})
 	if err != nil {
-		_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
-		_ = s.repo.SetPaymentStatus(order.ID, models.PaymentFailed)
+		// 原子：订单失败 + 释放卡密（单事务），避免每次建单失败泄漏库存。
+		_ = s.repo.MarkPaymentFailed(order.ID)
 		_ = s.repo.AddLog(order.ID, "payment_failed", "创建支付交易失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
 		// 回滚优惠券用量（支付失败，券不应被消耗）
 		if discount > 0 {

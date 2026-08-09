@@ -25,6 +25,7 @@ type OrderRepository interface {
 	ExpireOrder(orderID int64) (string, bool, error)
 	ReserveCardsFromStock(productID int64, qty int, orderID int64) (int, error)
 	SetOrderStatus(orderID int64, status string) error
+	MarkPaymentFailed(orderID int64) error
 	SetPaymentStatus(orderID int64, status string) error
 	GetPaymentStatus(orderID int64) (string, error)
 	GetOrderStatus(orderID int64) (string, error)

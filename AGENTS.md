@@ -28,6 +28,13 @@
 - schema 变更必须新增编号 .sql 迁移（`internal/db/schema/migrations/`），禁止启动时"检查表/自动补列"；
 - 敏感配置（Token / 密码 / 密钥）一律写入 `secrets` 表（AES-GCM 加密），禁止明文进 `settings`。
 
+## 事务边界（P0）
+
+- **下单**：单事务完成"创建订单 + 锁卡密 + 扣库存"，成功 COMMIT、失败 ROLLBACK；优惠券/网关失败路径必须原子置 `payment_failed` 并**释放锁定卡密**（`MarkPaymentFailed`），禁止残留锁定库存；
+- **支付成功**：单事务完成"订单 waiting_payment→paid + 卡密 locked→sold"，COMMIT 之后才发布发卡通知（异步）；**禁止在数据库事务内发送邮件/通知**；
+- **取消/过期/回调**：一律用条件状态迁移（`WHERE status IN (...)`）防并发覆盖已支付订单；晚到回调不得产生任何变更；
+- 任何新的失败路径都要在同一个事务里把状态与库存改一致。
+
 ## 其他
 
 - `jobs` 不直接依赖 `service`（用接口/回调解耦），避免 import 环；
