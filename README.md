@@ -2,7 +2,7 @@
 
 English: [README.en.md](README.en.md)
 
-基于 **Go + SQLite** 的自动发卡系统，对接 [BEpusdt](https://github.com/v03413/BEpusdt) 加密货币收单网关。买家前台使用 Nuxt 3 SSR + Tailwind，管理后台使用 Vue 3 + TypeScript + Element Plus + Pinia，Go 提供 JSON API、支付回调、内嵌后台与后台任务。
+**LiteShop v0.1.0** —— 基于 **Go + SQLite** 的自动发卡系统，对接 [BEpusdt](https://github.com/v03413/BEpusdt) 加密货币收单网关。买家前台使用 Nuxt 3 SSR + Tailwind；管理后台使用 Vue 3 + TypeScript + Element Plus + Pinia；Go 提供 JSON API、支付回调、内嵌后台与后台任务。
 
 > 本项目与 BEpusdt 作者无隶属关系。BEpusdt 遵循 GPL-3.0，本项目采用 MIT 协议。
 
@@ -14,21 +14,21 @@ English: [README.en.md](README.en.md)
 
 - 商品列表：分类 / 置顶 / 排序 / 搜索 / 价格筛选
 - 商品详情 + Cloudflare Turnstile 人机验证
-- 下单：新标签页打开 BEpusdt 收银台，当前页跳转订单详情
-- 订单详情：待支付自动轮询、支付成功自动显示卡密、支持取消订单（同步关闭 BEpusdt 交易）
-- 订单查询：仅邮箱找回 + "发送查看链接到邮箱"
-- 访问说明：所有订单（含存量）凭随邮件发送的查看令牌访问卡密/取消；令牌只发往登记邮箱，邮箱查询接口不返回订单号与链接
+- 下单：新标签页打开收银台，当前页跳转订单详情
+- 订单详情：待支付自动轮询、支付成功自动显示卡密、支持取消订单（同步关闭网关交易）
+- 订单查询：仅邮箱找回 + "发送查看链接到邮箱"（模糊响应，不泄露邮箱是否下过单）
+- 访问凭证：所有订单（含存量回填）凭随邮件发送的**查看令牌**访问卡密/取消；令牌只发往登记邮箱，邮箱查询接口不返回订单号与链接
 - 隐私 / 服务条款 / 首次初始化 `/setup`
 - SEO：canonical / OG / JSON-LD / sitemap / robots / favicon
 
 ### 后台（Vue 3 SPA）
 
-- 仪表盘：商品 / 卡密 / 订单统计、销售趋势与商品占比、毛利（成本快照）
-- 商品：新建 / 编辑 / 分类 / 置顶 / 排序 / 价格 / 上下架 / FAQ / 批发阶梯价
+- 仪表盘：商品 / 卡密 / 订单统计、销售趋势与商品占比、毛利（成本快照）、低库存告警
+- 商品：新建 / 编辑 / 分类 / 置顶 / 排序 / 价格 / 上下架 / FAQ / 批发阶梯价 / 限购
 - 卡密：导入（去重）/ 删除 / 导出
-- 订单：查看 / CSV 导出 / 标记过期 / 重发 / 批量重发 / 补发
+- 订单：查看 / CSV 导出 / 标记过期 / 取消 / 改状态 / 重发 / 批量重发 / 补发
 - 优惠券：固定 / 百分比、最低金额、使用次数、适用商品、有效期；**100% 券订单自动完成并直接发卡**
-- 支付：BEpusdt Base URL / Token / 收款类型 / 超时 / 回调地址
+- 支付：网关 Base URL / Token / 收款类型 / 超时 / 回调地址
 - 通知：SMTP / Telegram / Webhook + **事件模板**（订单创建 / 付款成功 / 发货 / 库存不足 / 系统异常）+ 管理员通知邮箱 + 测试按钮
 - 站点：标题 / 公告 / **公开地址** / Logo / Favicon / SEO / 链接 / 版权 / 隐私 / 条款 / Turnstile
 - 维护模式：开关 + 提示文案 + 解锁密码（哈希 + 加密存储）
@@ -41,13 +41,14 @@ English: [README.en.md](README.en.md)
 - SQLite 存储（纯 Go，无 CGO）；无应用级环境变量，**全部配置在初始化与管理后台写入数据库**
 - 配置系统：`settings`（系统配置）+ `secrets`（敏感配置 AES-GCM 加密）
 - 分层：api（handler）→ service（业务）→ db/repository（数据）→ db/schema（schema 演进）；payment / notify / jobs / logging 按职责独立
+- 支付抽象：订单业务只依赖 `payment.Gateway` 接口，当前实现为 BEpusdt，换网关不改业务
 - 任务系统：进程内 goroutine + channel（邮件 / Telegram / Webhook），HTTP 层只发布事件
-- 后台任务（cron + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份
+- 后台任务（ticker + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份
 - 日志（zap）：app / payment / security 三通道，50MB 轮转保留 7 份
 - 迁移体系：编号 .sql 迁移（`internal/db/schema/migrations/`），只执行一次并记录
 - 管理员安全：PBKDF2-SHA256、TOTP 2FA、**登录失败 5 次锁定 10 分钟**、登录时序均摊防枚举
 - 安全：RBAC、审计日志、全接口限流、Turnstile、CSP、HSTS、安全响应头、CSV 注入防护、SQL 全参数化
-- 组件级健康检查 `/health`（版本 + database/payment 状态，DB 故障返回 503）、首次初始化 `/setup`
+- 可观测性：组件级健康检查 `/health`（database / payment）、版本注入、结构化启动横幅
 
 ---
 
@@ -71,19 +72,20 @@ Caddy (反向代理 :443)
 | 前台 SSR | Nuxt 3 + Tailwind | 3001 |
 | 后台 SPA | Vue 3 + TS + Element Plus + Pinia | 内嵌进 Go |
 
-### 分层与数据访问
+### 分层
 
 ```
 HTTP handler (internal/api)
     → service (internal/service)
     → repository (internal/db/repository)
-    → database/sql (internal/db)
+    → database/sql (internal/db: sqlite.go / postgres.go 未来备用)
 ```
 
 - handler 只做请求解析/响应与 HTTP 安全（Turnstile / 限流 / Cookie / 鉴权中间件）；
 - 订单、支付、通知、配置、管理员等业务全部经 `service`（Order / Product / Admin / Settings / Notify / Stats），handler 不直连数据库、不调支付网关、不发送通知；
-- `internal/db/repository` 集中全部 SQL：Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log，业务不散落 `db.Exec`；
-- 换数据库只需换驱动（sqlite.go / postgres.go 未来备用）+ 迁移方言。
+- `internal/db/repository` 集中全部 SQL：Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log；
+- 支付走 `payment.Gateway` 接口（BEpusdt 实现），业务不绑定具体网关；
+- 通知经 `internal/notify` + 任务总线异步执行；后台任务经 `internal/jobs` 调度。
 
 ### 数据库迁移（Laravel 风格）
 
@@ -107,15 +109,16 @@ HTTP handler (internal/api)
 ## 支付流程
 
 ```
-下单 → 锁定卡密 → 创建 BEpusdt 交易 → 新标签页打开收银台
+下单 → 锁定卡密 → 创建交易（payment.Gateway）→ 新标签页打开收银台
   → 原页跳订单详情页（自动轮询）
-  → 用户转账 → BEpusdt 回调 /notify/bepusdt → 验签 → 订单 paid
-  → 发布任务 → worker 发卡通知（邮件/Telegram）→ 前台显示卡密
+  → 用户转账 → 网关回调 → 验签（Gateway.VerifyCallback）→ 订单 paid
+  → 发布任务 → worker 发卡通知（邮件/Telegram/Webhook）→ 前台显示卡密
 ```
 
-取消 / 过期：释放库存 + 调用 BEpusdt `cancel-transaction` 关闭交易。
-
-**payment.log** 记录每次创建/回调：订单号、金额、交易 ID、回调时间、结果，便于排查支付链路。
+- 取消 / 过期：释放库存 + 调用网关 `cancel-transaction` 关闭交易；
+- 支付回调路径可自定义（默认 `/notify/bepusdt`），配置存于数据库；
+- 换网关（其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器，业务与回调处理无需改动；
+- **payment.log** 记录每次创建/回调：订单号、金额、交易 ID、回调时间、结果，便于排查支付链路。
 
 ---
 
@@ -127,10 +130,11 @@ HTTP handler (internal/api)
 | 后台 | Vue 3 + Vite + TypeScript + Element Plus + Pinia + VueUse + unplugin-auto-import |
 | 后台质量 | ESLint（flat config + typescript-eslint + eslint-plugin-vue）+ Prettier |
 | 后端 | Go 1.25+ |
-| 数据库 | SQLite (modernc.org/sqlite) |
+| 数据库 | SQLite (modernc.org/sqlite)，迁移 + 仓储分层 |
 | 日志 | go.uber.org/zap + lumberjack |
+| 任务 | goroutine + channel + ticker（无 MQ） |
 | 反向代理 | Caddy |
-| 支付 | BEpusdt（Gateway 接口抽象） |
+| 支付 | BEpusdt（`payment.Gateway` 接口抽象） |
 | 安全 | Cloudflare Turnstile |
 
 ---
@@ -139,8 +143,8 @@ HTTP handler (internal/api)
 
 ```
 cmd/shop/               Go 程序入口
-internal/api/           HTTP 路由、JSON API、支付回调、内嵌后台（handler 层）
-internal/service/       业务逻辑（OrderService / ProductService / AdminService / SettingsService / NotifyService / StatsService）
+internal/api/           HTTP 路由、JSON API、支付回调、内嵌后台（handler 层，只做 HTTP 适配）
+internal/service/       业务逻辑（Order / Product / Admin / Settings / Notify / Stats）
 internal/db/            数据库连接层：sqlite.go / postgres.go（未来备用）
 internal/db/schema/     schema 演进：迁移执行器 + migrations/*.sql（唯一 schema 变更入口）
 internal/db/repository/ 全部数据访问（Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log）
@@ -150,6 +154,7 @@ internal/notify/        通知（事件模板 / 邮件 / Telegram / Webhook）
 internal/jobs/          任务总线 + 调度器 + order_expire / email_retry / cleanup / backup
 internal/logging/       zap 日志（app / payment / security）
 internal/security/      TOTP 与 AES-GCM 加密
+internal/version/       构建版本信息（-ldflags 注入）
 internal/config/        配置默认值
 admin-ui/               Element Plus 后台（src/api|views|stores|hooks|utils|components）
 storefront/             Nuxt 3 SSR 前台
@@ -164,7 +169,7 @@ logs/                   运行日志（app.log / payment.log / security.log）
 
 - Go 1.25+
 - Node.js 18+ / npm
-- BEpusdt 实例
+- 一个 BEpusdt 实例（或接入其他 `Gateway` 实现）
 
 ### 本地开发
 
@@ -195,8 +200,8 @@ cd admin-ui && npm install && npm run build && cd ..
 # 前台 SSR 产物 → storefront/.output
 cd storefront && npm install && npm run build && cd ..
 
-# 单二进制（内嵌后台）
-go build -o shop ./cmd/shop
+# 单二进制（内嵌后台），可带版本信息
+go build -ldflags "-X shop/internal/version.Version=0.1.0 -X shop/internal/version.Commit=$(git rev-parse --short HEAD)" -o shop ./cmd/shop
 ./shop
 
 # 后台代码质量
@@ -224,12 +229,12 @@ curl -sSL https://raw.githubusercontent.com/mhan24/liteshop/main/install.sh | \
 
 安装期变量：`DOMAIN`（必填）、`EMAIL`、`BRANCH`、`SKIP_SSL=1`（纯 http）、`BUILD_ARTIFACT`、`SHOP_USER`。
 
-> 运行时配置（站点地址、支付、通知等）在 `/setup` 初始化与后台写入数据库，应用不读取任何环境变量。
+> 运行时配置（站点地址、支付、通知等）在 `/setup` 初始化与后台写入数据库，应用不读取任何环境变量。项目不依赖 Docker。
 
 ### 构建部署（build-release.sh）
 
 ```bash
-bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制 + storefront/.output
+bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注入 git tag/commit/date）+ storefront/.output
 ```
 
 ### 手动部署
@@ -242,7 +247,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制 + storefront/
 
 ## 测试与 CI
 
-- Go：`go test ./...`（迁移、签名验签、密码哈希、状态机、优惠券/免费订单、会话、登录锁定、任务总线、调度器、备份、邮件重试）
+- Go：`go test ./...`（迁移、签名验签、密码哈希、状态机、优惠券/免费订单、会话、登录锁定、任务总线、调度器、worker panic 隔离、备份、邮件重试、健康检查）
 - CI（`.github/workflows/ci.yml`）：Go `vet` / `build` / `test` + 后台/前台构建
 
 ---
@@ -260,28 +265,10 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制 + storefront/
 
 ---
 
-## BEpusdt 对接
-
-- 支付模块只依赖 `payment.Gateway` 接口（创建交易 / 取消交易 / 校验回调），订单业务不绑定 BEpusdt；
-- 换网关（其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器，业务与回调处理无需改动；
-- 后台获取 API Token（加密存储）
-- 创建交易 → 跳转收银台；取消/过期调用 `cancel-transaction`
-- 支付成功回调 `/notify/bepusdt`（路径可自定义）
-- 签名：参数排序拼接 + Token 后 MD5（协议固定要求，空值不参与）
-
----
-
-## Cloudflare Turnstile
-
-- 前台下单/订单查询嵌入 Turnstile
-- 后端 canonical siteverify 校验（含 hostname 匹配，IP/本地放宽）
-
----
-
 ## 可观测性
 
 - 日志（zap）：`logs/app.log` / `logs/payment.log` / `logs/security.log`，50MB 轮转保留 7 份
-- 健康检查 `GET /health`：返回应用名、版本、运行时长与组件状态（`database` / `payment`），DB 故障返回 503
+- 健康检查 `GET /health`：返回应用名、版本、构建标识、运行时长与组件状态（`database` / `payment`），DB 故障返回 503
 - 启动横幅：启动时输出 `LiteShop vX.Y.Z (commit, date)` 及 database / payment / listen / admin / notify 信息
 - 版本号由 `internal/version` 统一管理，构建时经 `-ldflags` 注入（build-release.sh 自动带 git tag / commit / date）
 - 后台 `/api/v1/admin/version` 返回版本与构建信息
@@ -295,7 +282,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制 + storefront/
 - 订单查看令牌只经邮件下发；会话持久化 + 删号/登出/恢复/重置即时吊销
 - 状态机原子化（发卡/取消/过期单事务）；100% 券订单直接完成
 - SQL 全参数化；markdown 关闭 HTML；CSV 公式注入防护；CSP/HSTS/安全头
-- 配置备份不含密钥；HTTP 服务显式超时；异步任务不阻塞支付回调
+- 配置备份不含密钥；HTTP 服务显式超时；异步任务不阻塞支付回调；worker panic 隔离
 - security.log 记录登录成功/失败/锁定与 TOTP 验证
 
 ---

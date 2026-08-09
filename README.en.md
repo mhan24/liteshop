@@ -2,7 +2,7 @@
 
 中文版：[README.md](README.md)
 
-An automated digital-goods delivery (card / activation code) shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) crypto payment gateway. The buyer storefront uses Nuxt 3 SSR + Tailwind; the admin panel uses Vue 3 + TypeScript + Element Plus + Pinia; Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
+**LiteShop v0.1.0** — an automated digital-goods delivery (card / activation-code) shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) crypto payment gateway. The buyer storefront uses Nuxt 3 SSR + Tailwind; the admin panel uses Vue 3 + TypeScript + Element Plus + Pinia; Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
 
 > This project is not affiliated with the BEpusdt author. BEpusdt is GPL-3.0; this project is MIT.
 
@@ -14,21 +14,21 @@ An automated digital-goods delivery (card / activation code) shop built with **G
 
 - Product listing: categories / pinned / sorting / search / price filter
 - Product detail + Cloudflare Turnstile
-- Checkout: open the BEpusdt checkout in a new tab, redirect to the order page
-- Order detail: auto-poll while pending, cards revealed on payment success, cancel order (synchronously closes the BEpusdt transaction)
-- Order lookup: email-only recovery + "send view link to my email"
-- Access note: every order (including legacy ones) uses a view token sent by email to view cards / cancel; tokens are only mailed to the registered address, and the lookup API never returns order numbers or links
+- Checkout: open the checkout in a new tab, redirect to the order page
+- Order detail: auto-poll while pending, cards revealed on payment success, cancel order (synchronously closes the gateway transaction)
+- Order lookup: email-only recovery + "send view link to my email" (blurred response — never reveals whether an email has ordered)
+- Access credentials: every order (including legacy backfilled ones) uses a **view token** sent by email to view cards / cancel; tokens are only mailed to the registered address, and the lookup API never returns order numbers or links
 - Privacy / Terms / first-time `/setup`
 - SEO: canonical / OG / JSON-LD / sitemap / robots / favicon
 
 ### Admin panel (Vue 3 SPA)
 
-- Dashboard: products / cards / orders stats, sales trend & product share, profit (cost snapshot)
-- Products: create / edit / category / pinned / sorting / price / status / FAQ / wholesale tiers
+- Dashboard: products / cards / orders stats, sales trend & product share, profit (cost snapshot), low-stock alerts
+- Products: create / edit / category / pinned / sorting / price / status / FAQ / wholesale tiers / purchase limits
 - Cards: import (dedupe) / delete / export
-- Orders: view / CSV export / mark expired / resend / batch resend / redeliver
+- Orders: view / CSV export / mark expired / cancel / set status / resend / batch resend / redeliver
 - Coupons: fixed / percent, minimum amount, max uses, product scope, validity window; **100% coupons complete the order automatically and deliver cards immediately**
-- Payment: BEpusdt base URL / token / trade types / timeout / callback URL
+- Payment: gateway base URL / token / trade types / timeout / callback URL
 - Notifications: SMTP / Telegram / Webhook + **event templates** (order created / payment success / delivered / low stock / system error) + admin notification email + test buttons
 - Site: title / announcement / **public base URL** / logo / favicon / SEO / links / copyright / privacy / terms / Turnstile
 - Maintenance mode: toggle + notice + unlock password (hashed + AES-encrypted storage)
@@ -41,13 +41,14 @@ An automated digital-goods delivery (card / activation code) shop built with **G
 - SQLite storage (pure Go, no CGO); no application-level environment variables — **all configuration is written to the database** during `/setup` and from the admin panel
 - Config system: `settings` (system config) + `secrets` (sensitive config AES-GCM encrypted)
 - Layering: api (handler) → service (business) → db/repository (data) → db/schema (schema evolution); payment / notify / jobs / logging each isolated by responsibility
+- Payment abstraction: order business depends only on the `payment.Gateway` interface (currently implemented by BEpusdt); switching gateways does not touch business code
 - Task system: in-process goroutine + channel (mail / Telegram / Webhook); the HTTP layer only publishes events
-- Background jobs (cron + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup
+- Background jobs (ticker + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files
 - Migration system: numbered .sql migrations (`internal/db/schema/migrations/`), each run exactly once and recorded
 - Admin security: PBKDF2-SHA256, TOTP 2FA, **lockout after 5 failed logins for 10 minutes**, timing-equalized login
 - Security: RBAC, audit logs, endpoint-wide rate limiting, Turnstile, CSP, HSTS, security headers, CSV injection guard, fully parameterized SQL
-- Component-level health check `/health` (version + database/payment status, 503 on DB failure), first-time setup `/setup`
+- Observability: component-level health check `/health` (database / payment), version injection, structured startup banner
 
 ---
 
@@ -71,19 +72,20 @@ Caddy (reverse proxy :443)
 | Storefront SSR | Nuxt 3 + Tailwind | 3001 |
 | Admin SPA | Vue 3 + TS + Element Plus + Pinia | embedded in Go |
 
-### Layering & data access
+### Layering
 
 ```
 HTTP handler (internal/api)
     → service (internal/service)
     → repository (internal/db/repository)
-    → database/sql (internal/db)
+    → database/sql (internal/db: sqlite.go / postgres.go future)
 ```
 
 - Handlers only parse requests, write responses, and enforce HTTP security (Turnstile / rate limiting / cookies / auth middleware);
 - Order, payment, notification, settings, and admin business logic all live in `service` (Order / Product / Admin / Settings / Notify / Stats); handlers never touch the database directly, call the payment gateway, or send notifications;
-- `internal/db/repository` centralizes all SQL: Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log; business code has no scattered `db.Exec`;
-- Switching databases only requires a new driver (sqlite.go / postgres.go future) + a migration dialect.
+- `internal/db/repository` centralizes all SQL: Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log;
+- Payments go through the `payment.Gateway` interface (BEpusdt implementation); business is not bound to a specific gateway;
+- Notifications run asynchronously via `internal/notify` + the task bus; background jobs are scheduled by `internal/jobs`.
 
 ### Database migrations (Laravel style)
 
@@ -107,15 +109,16 @@ HTTP handler (internal/api)
 ## Payment flow
 
 ```
-Order → lock cards → create BEpusdt transaction → open checkout in a new tab
+Order → lock cards → create transaction (payment.Gateway) → open checkout in a new tab
   → redirect to the order page (auto-polling)
-  → user pays → BEpusdt callback /notify/bepusdt → verify signature → order paid
-  → publish task → worker sends delivery notification (mail/Telegram) → cards shown
+  → user pays → gateway callback → verify signature (Gateway.VerifyCallback) → order paid
+  → publish task → worker sends delivery notification (mail/Telegram/Webhook) → cards shown
 ```
 
-Cancel / expire: release stock + call BEpusdt `cancel-transaction`.
-
-**payment.log** records every creation/callback: order number, amount, trade ID, callback time, result — for payment-chain troubleshooting.
+- Cancel / expire: release stock + call the gateway `cancel-transaction` to close the trade;
+- The callback path is configurable (default `/notify/bepusdt`), stored in the database;
+- Switching gateways (other USDT / Stripe / PayPal) only requires a new `Gateway` adapter; business and callback handling stay unchanged;
+- **payment.log** records every creation/callback: order number, amount, trade ID, callback time, result — for payment-chain troubleshooting.
 
 ---
 
@@ -127,10 +130,11 @@ Cancel / expire: release stock + call BEpusdt `cancel-transaction`.
 | Admin | Vue 3 + Vite + TypeScript + Element Plus + Pinia + VueUse + unplugin-auto-import |
 | Admin quality | ESLint (flat config + typescript-eslint + eslint-plugin-vue) + Prettier |
 | Backend | Go 1.25+ |
-| Database | SQLite (modernc.org/sqlite) |
+| Database | SQLite (modernc.org/sqlite), migrations + repository layering |
 | Logging | go.uber.org/zap + lumberjack |
+| Tasks | goroutine + channel + ticker (no MQ) |
 | Reverse proxy | Caddy |
-| Payment | BEpusdt (behind a Gateway interface) |
+| Payment | BEpusdt (behind the `payment.Gateway` interface) |
 | Security | Cloudflare Turnstile |
 
 ---
@@ -139,8 +143,8 @@ Cancel / expire: release stock + call BEpusdt `cancel-transaction`.
 
 ```
 cmd/shop/               Go entrypoint
-internal/api/           HTTP routes, JSON API, payment callback, embedded admin (handler layer)
-internal/service/       business logic (OrderService / ProductService / AdminService / SettingsService / NotifyService / StatsService)
+internal/api/           HTTP routes, JSON API, payment callback, embedded admin (handler layer, HTTP adaptation only)
+internal/service/       business logic (Order / Product / Admin / Settings / Notify / Stats)
 internal/db/            database connection layer: sqlite.go / postgres.go (future)
 internal/db/schema/     schema evolution: migration runner + migrations/*.sql (single entry for schema changes)
 internal/db/repository/ all data access (Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log)
@@ -150,6 +154,7 @@ internal/notify/        notifications (event templates / mail / Telegram / Webho
 internal/jobs/          task bus + scheduler + order_expire / email_retry / cleanup / backup
 internal/logging/       zap logging (app / payment / security)
 internal/security/      TOTP & AES-GCM cipher
+internal/version/       build version info (-ldflags injected)
 internal/config/        configuration defaults
 admin-ui/               Element Plus admin (src/api|views|stores|hooks|utils|components)
 storefront/             Nuxt 3 SSR storefront
@@ -164,7 +169,7 @@ logs/                   runtime logs (app.log / payment.log / security.log)
 
 - Go 1.25+
 - Node.js 18+ / npm
-- A BEpusdt instance
+- A BEpusdt instance (or another `Gateway` implementation)
 
 ### Local development
 
@@ -195,8 +200,8 @@ cd admin-ui && npm install && npm run build && cd ..
 # Storefront SSR output → storefront/.output
 cd storefront && npm install && npm run build && cd ..
 
-# Single binary (embeds the admin UI)
-go build -o shop ./cmd/shop
+# Single binary (embeds the admin UI), optionally with version info
+go build -ldflags "-X shop/internal/version.Version=0.1.0 -X shop/internal/version.Commit=$(git rev-parse --short HEAD)" -o shop ./cmd/shop
 ./shop
 
 # Admin code quality
@@ -224,12 +229,12 @@ curl -sSL https://raw.githubusercontent.com/mhan24/liteshop/main/install.sh | \
 
 Install-time variables: `DOMAIN` (required), `EMAIL`, `BRANCH`, `SKIP_SSL=1` (plain http), `BUILD_ARTIFACT`, `SHOP_USER`.
 
-> Runtime configuration (site URL, payment, notifications, etc.) is stored in the database via `/setup` and the admin panel; the app reads no application-level environment variables.
+> Runtime configuration (site URL, payment, notifications, etc.) is stored in the database via `/setup` and the admin panel; the app reads no application-level environment variables. The project does not rely on Docker.
 
 ### Build deployment (build-release.sh)
 
 ```bash
-bash build-release.sh /tmp/liteshop-release.tgz   # shop binary + storefront/.output
+bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/date injected) + storefront/.output
 ```
 
 ### Manual deployment
@@ -242,7 +247,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary + storefront/.ou
 
 ## Tests & CI
 
-- Go: `go test ./...` (migrations, signature verification, password hashing, state machine, coupons/free orders, sessions, login lockout, task bus, scheduler, backup, mail retry)
+- Go: `go test ./...` (migrations, signature verification, password hashing, state machine, coupons/free orders, sessions, login lockout, task bus, scheduler, worker panic isolation, backup, mail retry, health check)
 - CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + admin-ui and storefront builds
 
 ---
@@ -261,28 +266,10 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary + storefront/.ou
 
 ---
 
-## BEpusdt integration
-
-- The payment layer depends only on the `payment.Gateway` interface (create transaction / cancel transaction / verify callback); order business logic is not bound to BEpusdt;
-- Switching gateways (other USDT / Stripe / PayPal) only requires a new `Gateway` adapter; business and callback handling stay unchanged;
-- Get the API token from the BEpusdt admin panel (stored encrypted)
-- Create transaction → redirect to checkout; cancel/expire calls `cancel-transaction`
-- Payment success callback `/notify/bepusdt` (path customizable)
-- Signature: sorted params + token, MD5 (fixed protocol requirement; empty values excluded)
-
----
-
-## Cloudflare Turnstile
-
-- Storefront checkout / order lookup embed Turnstile
-- Backend verifies via canonical siteverify (with hostname match; relaxed for IP/local access)
-
----
-
 ## Observability
 
 - Logging (zap): `logs/app.log` / `logs/payment.log` / `logs/security.log`, 50MB rotation keeping 7 files
-- Health check `GET /health`: app name, version, uptime and component status (`database` / `payment`); returns 503 when the database is down
+- Health check `GET /health`: app name, version, build ID, uptime and component status (`database` / `payment`); returns 503 when the database is down
 - Startup banner: logs `LiteShop vX.Y.Z (commit, date)` plus database / payment / listen / admin / notify info on boot
 - Version lives in `internal/version` and is injected via `-ldflags` at build time (`build-release.sh` picks up git tag / commit / date automatically)
 - Admin endpoint `/api/v1/admin/version` returns version and build info
@@ -296,7 +283,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary + storefront/.ou
 - Order view tokens delivered only by email; persisted sessions revoked immediately on logout / admin deletion / restore / reset
 - Atomic order state machine (deliver/cancel/expire in single transactions); 100% coupons complete orders automatically
 - Fully parameterized SQL; markdown disables HTML; CSV formula-injection guard; CSP / HSTS / security headers
-- Config backups exclude secrets; explicit HTTP server timeouts; async tasks never block payment callbacks
+- Config backups exclude secrets; explicit HTTP server timeouts; async tasks never block payment callbacks; worker panics are isolated
 - security.log records login success/failure/lockout and TOTP verification
 
 ---
