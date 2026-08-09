@@ -43,7 +43,7 @@
 - Layering: api (handler) → service (business) → db/repository (data) → db/schema (schema evolution); payment / notify / jobs / logging each isolated by responsibility
 - Payment abstraction: order business depends only on the `payment.Gateway` interface (currently implemented by BEpusdt); switching gateways does not touch business code
 - Task system: in-process goroutine + channel (mail / Telegram / Webhook); the HTTP layer only publishes events
-- Background jobs (ticker + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup
+- Background jobs (ticker + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup (with integrity verification)
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files
 - Migration system: numbered .sql migrations (`internal/db/schema/migrations/`), each run exactly once and recorded
 - Admin security: PBKDF2-SHA256, TOTP 2FA, **lockout after 5 failed logins for 10 minutes**, timing-equalized login
@@ -78,14 +78,13 @@ Caddy (reverse proxy :443)
 ```
 HTTP handler (internal/api)
     → service (internal/service)
-    → repository (internal/db/repository)
-    → database/sql (internal/db: sqlite.go / postgres.go future)
+        → interfaces (OrderRepository / ProductRepository / KeyRepository / SettingsStore / AdminStore)
+        → internal/db/repository (SQLite implementation) + internal/db/schema (migrations)
 ```
 
-- Handlers only parse requests, write responses, and enforce HTTP security (Turnstile / rate limiting / cookies / auth middleware);
-- Order, payment, notification, settings, and admin business logic all live in `service` (Order / Product / Admin / Settings / Notify / Stats); handlers never touch the database directly, call the payment gateway, or send notifications;
-- `internal/db/repository` centralizes all SQL: Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log;
-- Service depends only on interfaces (OrderRepository / ProductRepository / KeyRepository / SettingsStore / AdminStore), never on concrete SQLite — tests use in-memory mocks; shared types and domain errors live in `internal/models`;
+- Handlers only parse requests, write responses, and enforce HTTP security (Turnstile / rate limiting / cookies / auth middleware); they never touch the database directly, call the payment gateway, or send notifications;
+- All business logic lives in `service` (Order / Product / Admin / Settings / Notify / Stats), which depends **only on interfaces** — never on concrete SQLite, so tests use in-memory mocks; shared types and domain errors live in `internal/models`;
+- `internal/db/repository` centralizes all SQL (Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log), plus a `Store` that turns config/admin/session/audit access into interface implementations;
 - Payments go through the `payment.Gateway` interface (BEpusdt implementation); business is not bound to a specific gateway;
 - Notifications run asynchronously via `internal/notify` + the task bus; background jobs are scheduled by `internal/jobs`.
 
@@ -132,7 +131,7 @@ Order → lock cards → create transaction (payment.Gateway) → open checkout 
 | Admin | Vue 3 + Vite + TypeScript + Element Plus + Pinia + VueUse + unplugin-auto-import |
 | Admin quality | ESLint (flat config + typescript-eslint + eslint-plugin-vue) + Prettier |
 | Backend | Go 1.25+ |
-| Database | SQLite (modernc.org/sqlite), migrations + repository layering |
+| Database | SQLite (modernc.org/sqlite), migrations + interface-based repository layering |
 | Logging | go.uber.org/zap + lumberjack |
 | Tasks | goroutine + channel + ticker (no MQ) |
 | Reverse proxy | Caddy |
@@ -145,12 +144,13 @@ Order → lock cards → create transaction (payment.Gateway) → open checkout 
 
 ```
 cmd/shop/               Go entrypoint
-internal/api/           HTTP routes, JSON API, payment callback, embedded admin (handler layer, HTTP adaptation only)
-internal/service/       business logic (Order / Product / Admin / Settings / Notify / Stats)
+internal/api/           HTTP routes, JSON API, payment callback, embedded admin, API docs (handler layer, HTTP adaptation only)
+internal/service/       business logic (small files per domain: order_create.go / settings_payment.go / admin_users.go …)
+internal/service/repository.go    data-access interfaces consumed by service (Order/Product/Key/SettingsStore/AdminStore)
 internal/db/            database connection layer: sqlite.go / postgres.go (future)
 internal/db/schema/     schema evolution: migration runner + migrations/*.sql (single entry for schema changes)
-internal/db/repository/ all data access (Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log)
-internal/models/        models & helpers
+internal/db/repository/ all data access: SQLite implementations + Store (settings/secrets/admin/session/audit)
+internal/models/        models, shared types (ProductView/AdminRow/…) and domain errors
 internal/payment/       payment gateway abstraction: interface.go (Gateway) + bepusdt.go (BEPusdt impl)
 internal/notify/        notifications (event templates / mail / Telegram / Webhook)
 internal/jobs/          task bus + scheduler + order_expire / email_retry / cleanup / backup
@@ -158,9 +158,12 @@ internal/logging/       zap logging (app / payment / security)
 internal/security/      TOTP & AES-GCM cipher
 internal/version/       build version info (-ldflags injected)
 internal/config/        configuration defaults
+internal/testutil/      integration test facilities: temp SQLite DB + MockGateway + NotifyRecorder
+internal/integration/   order integration tests (payment callback / duplicate / cancel / expiry)
 admin-ui/               Element Plus admin (src/api|views|stores|hooks|utils|components)
 storefront/             Nuxt 3 SSR storefront
 logs/                   runtime logs (app.log / payment.log / security.log)
+AGENTS.md               engineering conventions (layering / small files / interfaces / migrations / secrets / tests)
 ```
 
 ---
@@ -212,10 +215,13 @@ cd admin-ui && npm run lint && npm run format
 
 > `internal/api/admin-ui` is a build artifact, ignored by `.gitignore`, not committed.
 
-### Code conventions
+### Code conventions (see AGENTS.md)
 
 - **Small service files**: split by responsibility (e.g. `order_create.go` / `order_cancel.go` / `order_deliver.go`); keep each file under ~300 lines;
+- **Interface-based repositories**: service depends only on interfaces, never concrete SQLite; shared types/domain errors live in `internal/models`;
 - New schema changes must be new numbered .sql migrations; sensitive config always goes into the encrypted `secrets` table;
+- API changes must be reflected in `internal/api/api_docs/openapi.json` (YAML generated from the JSON);
+- Payment/notification changes must run the integration tests; backup logic must verify with `integrity_check`;
 - Keep tests and the bilingual README in sync with changes.
 
 ---
@@ -255,9 +261,12 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 
 ## Tests & CI
 
-- Go: `go test ./...` (migrations, signature verification, password hashing, state machine, coupons/free orders, sessions, login lockout, task bus, scheduler, worker panic isolation, backup, mail retry, health check)
-- Service layer can be tested without a database using mock repositories (e.g. settings save/validation)
-- **Integration tests**: `internal/testutil` (temp SQLite DB + MockGateway + NotifyRecorder) covers payment callback, duplicate-callback idempotency, cancel-order stock release + gateway cancellation, stale-order expiry, and the real HTTP callback route (signature verification + gateway stub)
+- Unit & integration: `go test ./...` (migrations, signature verification, password hashing, state machine, coupons/free orders, sessions, login lockout, task bus, scheduler, worker panic isolation, backup verification, mail retry, health check)
+- **Mock tests**: service depends on interfaces, so it can be tested without a database using in-memory stubs (e.g. settings save/validation)
+- **Integration tests** (`internal/integration` + `internal/testutil`):
+  - Temp SQLite test DB (full migrations + seeding)
+  - `MockGateway` (records create/cancel calls) and `NotifyRecorder` (collects notification callbacks)
+  - Coverage: payment callback delivery, **duplicate-callback idempotency** (no double delivery/notify), cancel-order stock release + gateway cancellation, stale-order expiry, and the real HTTP callback route (MD5 verification / status=3 gateway stub / bad-signature rejection)
 - CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + admin-ui and storefront builds
 
 ---

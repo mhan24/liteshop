@@ -43,7 +43,7 @@ English: [README.en.md](README.en.md)
 - 分层：api（handler）→ service（业务）→ db/repository（数据）→ db/schema（schema 演进）；payment / notify / jobs / logging 按职责独立
 - 支付抽象：订单业务只依赖 `payment.Gateway` 接口，当前实现为 BEpusdt，换网关不改业务
 - 任务系统：进程内 goroutine + channel（邮件 / Telegram / Webhook），HTTP 层只发布事件
-- 后台任务（ticker + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份
+- 后台任务（ticker + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份（含完整性校验）
 - 日志（zap）：app / payment / security 三通道，50MB 轮转保留 7 份
 - 迁移体系：编号 .sql 迁移（`internal/db/schema/migrations/`），只执行一次并记录
 - 管理员安全：PBKDF2-SHA256、TOTP 2FA、**登录失败 5 次锁定 10 分钟**、登录时序均摊防枚举
@@ -78,14 +78,13 @@ Caddy (反向代理 :443)
 ```
 HTTP handler (internal/api)
     → service (internal/service)
-    → repository (internal/db/repository)
-    → database/sql (internal/db: sqlite.go / postgres.go 未来备用)
+        → 接口（OrderRepository / ProductRepository / KeyRepository / SettingsStore / AdminStore）
+        → internal/db/repository（SQLite 实现）+ internal/db/schema（迁移）
 ```
 
-- handler 只做请求解析/响应与 HTTP 安全（Turnstile / 限流 / Cookie / 鉴权中间件）；
-- 订单、支付、通知、配置、管理员等业务全部经 `service`（Order / Product / Admin / Settings / Notify / Stats），handler 不直连数据库、不调支付网关、不发送通知；
-- `internal/db/repository` 集中全部 SQL：Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log；
-- service 只依赖接口（OrderRepository / ProductRepository / KeyRepository / SettingsStore / AdminStore），不绑定具体 SQLite，测试可用内存 mock；共享类型与领域错误在 `internal/models`；
+- handler 只做请求解析/响应与 HTTP 安全（Turnstile / 限流 / Cookie / 鉴权中间件），不直连数据库、不调支付网关、不发送通知；
+- 业务全部经 `service`（Order / Product / Admin / Settings / Notify / Stats），**service 只依赖接口**，不绑定具体 SQLite，测试可用内存 mock；共享类型与领域错误在 `internal/models`；
+- `internal/db/repository` 集中全部 SQL（Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log），另有 `Store` 把配置/管理员/会话/审计收敛为接口实现；
 - 支付走 `payment.Gateway` 接口（BEpusdt 实现），业务不绑定具体网关；
 - 通知经 `internal/notify` + 任务总线异步执行；后台任务经 `internal/jobs` 调度。
 
@@ -132,7 +131,7 @@ HTTP handler (internal/api)
 | 后台 | Vue 3 + Vite + TypeScript + Element Plus + Pinia + VueUse + unplugin-auto-import |
 | 后台质量 | ESLint（flat config + typescript-eslint + eslint-plugin-vue）+ Prettier |
 | 后端 | Go 1.25+ |
-| 数据库 | SQLite (modernc.org/sqlite)，迁移 + 仓储分层 |
+| 数据库 | SQLite (modernc.org/sqlite)，迁移 + 接口化仓储分层 |
 | 日志 | go.uber.org/zap + lumberjack |
 | 任务 | goroutine + channel + ticker（无 MQ） |
 | 反向代理 | Caddy |
@@ -145,22 +144,26 @@ HTTP handler (internal/api)
 
 ```
 cmd/shop/               Go 程序入口
-internal/api/           HTTP 路由、JSON API、支付回调、内嵌后台（handler 层，只做 HTTP 适配）
-internal/service/       业务逻辑（Order / Product / Admin / Settings / Notify / Stats）
+internal/api/           HTTP 路由、JSON API、支付回调、内嵌后台、API 文档（handler 层，只做 HTTP 适配）
+internal/service/       业务逻辑（按领域拆小文件：order_create.go / settings_payment.go / admin_users.go …）
+internal/service/repository.go    service 依赖的数据访问接口（Order/Product/Key/SettingsStore/AdminStore）
 internal/db/            数据库连接层：sqlite.go / postgres.go（未来备用）
 internal/db/schema/     schema 演进：迁移执行器 + migrations/*.sql（唯一 schema 变更入口）
-internal/db/repository/ 全部数据访问（Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log）
-internal/models/        模型与工具
-internal/payment/       支付网关抽象：interface.go（Gateway）+ bepusdt.go（BEpusdt 实现）
+internal/db/repository/ 全部数据访问：SQLite 实现 + Store（settings/secrets/admin/session/audit）
+internal/models/        模型、共享类型（ProductView/AdminRow/…）与领域错误
+internal/payment/       支付网关抽象：interface.go（Gateway）+ bepusdt.go（BEPusdt 实现）
 internal/notify/        通知（事件模板 / 邮件 / Telegram / Webhook）
 internal/jobs/          任务总线 + 调度器 + order_expire / email_retry / cleanup / backup
 internal/logging/       zap 日志（app / payment / security）
 internal/security/      TOTP 与 AES-GCM 加密
 internal/version/       构建版本信息（-ldflags 注入）
 internal/config/        配置默认值
+internal/testutil/      集成测试设施：临时 SQLite 测试库 + MockGateway + NotifyRecorder
+internal/integration/   订单集成测试（支付回调 / 重复回调 / 取消 / 超时）
 admin-ui/               Element Plus 后台（src/api|views|stores|hooks|utils|components）
 storefront/             Nuxt 3 SSR 前台
 logs/                   运行日志（app.log / payment.log / security.log）
+AGENTS.md               工程约定（分层 / 小文件 / 接口化 / 迁移 / 密钥 / 测试）
 ```
 
 ---
@@ -212,10 +215,13 @@ cd admin-ui && npm run lint && npm run format
 
 > `internal/api/admin-ui` 是后台构建产物，已被 `.gitignore` 忽略，不提交。
 
-### 代码规范
+### 代码规范（详见 AGENTS.md）
 
 - **service 小文件原则**：按职责拆分（如 `order_create.go` / `order_cancel.go` / `order_deliver.go`），单文件建议不超过 300 行；
+- **repository 接口化**：service 只依赖接口，不依赖具体 SQLite；共享类型/领域错误放 `internal/models`；
 - 新增 schema 变更必须新增编号 .sql 迁移；敏感配置一律走 `secrets` 表加密存储；
+- API 变更必须同步更新 `internal/api/api_docs/openapi.json`（yaml 由 json 生成）；
+- 支付/通知相关改动必须跑集成测试；备份逻辑必须带 `integrity_check` 校验；
 - 改动同步更新测试与中英文 README。
 
 ---
@@ -255,9 +261,12 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 
 ## 测试与 CI
 
-- Go：`go test ./...`（迁移、签名验签、密码哈希、状态机、优惠券/免费订单、会话、登录锁定、任务总线、调度器、worker panic 隔离、备份、邮件重试、健康检查）
-- service 层可脱离数据库用 mock 仓储测试（如设置保存/校验）
-- **集成测试**：`internal/testutil`（临时 SQLite 测试库 + MockGateway + NotifyRecorder）覆盖支付回调、重复回调幂等、取消订单释放库存并关闭网关交易、超时订单自动过期、真实 HTTP 回调路由（含验签/网关 stub）
+- 单元/集成：`go test ./...`（迁移、签名验签、密码哈希、状态机、优惠券/免费订单、会话、登录锁定、任务总线、调度器、worker panic 隔离、备份校验、邮件重试、健康检查）
+- **mock 测试**：service 依赖接口，可脱离数据库用内存 stub（如设置保存/校验）
+- **集成测试**（`internal/integration` + `internal/testutil`）：
+  - 临时 SQLite 测试库（完整迁移 + 造数）
+  - `MockGateway`（记录创建/取消调用）与 `NotifyRecorder`（收集通知回调）
+  - 覆盖：支付回调发卡、**重复回调幂等**（不重复发卡/通知）、取消订单释放库存并关闭网关交易、超时订单自动过期、真实 HTTP 回调路由（含 MD5 验签 / status=3 网关 stub / 错误签名拒绝）
 - CI（`.github/workflows/ci.yml`）：Go `vet` / `build` / `test` + 后台/前台构建
 
 ---
