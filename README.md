@@ -133,7 +133,7 @@ HTTP handler (internal/api)
 - 取消 / 过期：释放库存 + 调用网关 `cancel-transaction` 关闭交易；
 - 事务边界：下单 = 单事务（建单 + 锁卡 + 扣库存），失败原子置 `payment_failed` 并释放卡密；支付成功 = 单事务（paid + 发卡），**COMMIT 后才异步发通知**，事务内绝不发邮件；
 - 并发库存：SQLite `_txlock=immediate`（BEGIN 即取写锁）+ 单条条件 UPDATE 锁卡并校验受影响行数——两个用户同时买最后一张卡时恰好一人成功，不超卖、不重复锁定；
-- 支付回调路径可自定义（默认 `/notify/bepusdt`），配置存于数据库；
+- 支付回调路径可自定义（默认 `/notify/bepusdt`），配置存于数据库且**修改即时生效**（动态兜底路由，无需重启）；
 - 换网关（其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器，业务与回调处理无需改动；
 - **payment.log** 记录每次创建/回调：订单号、金额、交易 ID、回调时间、结果，便于排查支付链路。
 - 幂等：支付回调以 `transaction_id` 为唯一键登记 `processed_events`，与订单状态变更同事务提交，重复回调零副作用。

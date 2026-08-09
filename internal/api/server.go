@@ -111,6 +111,9 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST "+s.settings.NotifyPath(), s.handlePaymentNotify)
+	// 兜底：回调路径可在后台运行时修改，这里按"当前配置路径"动态匹配，
+	// 避免改路径后新交易回调 404（无需重启即生效）。
+	mux.HandleFunc("/{path...}", s.handleDynamicPath)
 	s.registerAPI(mux)
 	s.registerDocs(mux)
 	mux.Handle("GET /admin/assets/", http.StripPrefix("/admin", http.FileServer(adminAssetsFS())))
@@ -489,6 +492,15 @@ func (s *Server) handlePaymentNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+// handleDynamicPath 兜底路由：仅处理与当前配置一致的支付回调路径，其余 404。
+func (s *Server) handleDynamicPath(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && r.URL.Path == s.settings.NotifyPath() {
+		s.handlePaymentNotify(w, r)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {

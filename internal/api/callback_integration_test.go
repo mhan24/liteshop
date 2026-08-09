@@ -154,3 +154,34 @@ func TestPaymentCallbackBadSignature(t *testing.T) {
 		t.Fatalf("order must remain waiting_payment, got %s", o.Status)
 	}
 }
+
+// TestNotifyPathRuntimeChange 后台修改回调路径后，无需重启即可处理新路径回调；未知路径 404。
+func TestNotifyPathRuntimeChange(t *testing.T) {
+	s, d := newCallbackServer(t)
+	store := repository.NewStore(d)
+	if err := store.SetSetting("bepusdt_notify_path", "/cb/custom"); err != nil {
+		t.Fatalf("set path: %v", err)
+	}
+	pid := testutil.SeedProductWithCards(t, d, 1)
+	orderNo := testutil.SeedOrder(t, d, pid, models.OrderWaitingPayment, "TRC")
+	payload := signedCallbackPayload(t, "test-token", map[string]string{
+		"order_id": orderNo, "trade_id": "TRC", "status": "2",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/cb/custom", bytes.NewReader(payload))
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("new path callback status = %d, want 200", rec.Code)
+	}
+	repo := repository.NewOrderRepository(d)
+	o, err := repo.GetOrderByNo(orderNo)
+	if err != nil || o.Status != models.OrderDelivered {
+		t.Fatalf("order status = %v (%v), want delivered", o.Status, err)
+	}
+	// 未知路径必须 404（兜底路由只认当前配置的回调路径）
+	rec2 := httptest.NewRecorder()
+	s.ServeHTTP(rec2, httptest.NewRequest(http.MethodPost, "/nope/xyz", bytes.NewReader(payload)))
+	if rec2.Code != http.StatusNotFound {
+		t.Fatalf("unknown path status = %d, want 404", rec2.Code)
+	}
+}
