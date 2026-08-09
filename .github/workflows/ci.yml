@@ -23,13 +23,21 @@ jobs:
           cache-dependency-path: admin-ui/package-lock.json
 
       - run: npm ci
+      - name: Regenerate API types (OpenAPI → TS)
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/api/types.ts
       - run: npm run build
+      - name: Copy admin bundle into Go embed dir
+        run: |
+          mkdir -p ../internal/api/admin-ui
+          cp -r dist/* ../internal/api/admin-ui/
 
       - name: Upload admin bundle
         uses: actions/upload-artifact@v4
         with:
           name: admin-ui-dist
-          path: internal/web/admin-ui
+          path: internal/api/admin-ui
           retention-days: 1
 
   go:
@@ -43,7 +51,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: admin-ui-dist
-          path: internal/web/admin-ui
+          path: internal/api/admin-ui
 
       - uses: actions/setup-go@v5
         with:

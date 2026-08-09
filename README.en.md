@@ -45,6 +45,8 @@
 - Payment abstraction: order business depends only on the `payment.Gateway` interface (currently implemented by BEpusdt); switching gateways does not touch business code
 - Separated status models: **order status** (fulfillment lifecycle: created / waiting_payment / paid / processing / delivered / completed / cancelled / expired / payment_failed / delivery_failed) is decoupled from **payment status** (dedicated `payment_status` column: created / pending / confirmed / failed / cancelled); payment anomalies never pollute order semantics (e.g. "paid but delivery failed" = order `delivery_failed` + payment `confirmed`)
 - Task system: in-process goroutine + channel (mail / Telegram / Webhook); the HTTP layer only publishes events
+- Domain events: typed events in `internal/events` (OrderPaid / OrderExpired / DeliveryFailed / LowStock …); the service only publishes events — no scattered `bus.Publish` — and the composition root dispatches them
+- Idempotency ledger: external events (payment callbacks) register a unique key (`transaction_id`) in `processed_events` within the same transaction as the order state change, so duplicate notifications are processed once
 - Background jobs (ticker + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup (with integrity verification)
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files
 - Migration system: numbered .sql migrations (`internal/db/schema/migrations/`), each run exactly once and recorded
@@ -52,6 +54,8 @@
 - Security: RBAC, audit logs, endpoint-wide rate limiting, Turnstile, CSP, HSTS, security headers, CSV injection guard, fully parameterized SQL
 - Observability: component-level health check `/health` (database / payment), version injection, structured startup banner
 - Log correlation: every HTTP request gets an auto-generated `request_id` (response header `X-Request-ID`); payment logs carry `request_id` / `order_id` / `trace_id` (gateway trade ID), so one payment flow can be traced end to end
+- Database connection: `journal_mode=WAL` + `busy_timeout=5000` + `foreign_keys=ON` + `_txlock=immediate` applied at startup
+- Graceful shutdown: SIGTERM/SIGINT → stop accepting requests → drain in-flight → stop workers → close DB (systemd/Docker friendly)
 - API docs: `/docs` (OpenAPI 3.0, JSON + YAML, `/swagger` alias), admin-only
 
 ---
@@ -126,6 +130,7 @@ Order → lock cards → create transaction (payment.Gateway) → open checkout 
 - The callback path is configurable (default `/notify/bepusdt`), stored in the database;
 - Switching gateways (other USDT / Stripe / PayPal) only requires a new `Gateway` adapter; business and callback handling stay unchanged;
 - **payment.log** records every creation/callback: order number, amount, trade ID, callback time, result — for payment-chain troubleshooting.
+- Idempotency: payment callbacks register `transaction_id` as a unique key in `processed_events`, committed in the same transaction as the order state change — duplicate callbacks have zero side effects.
 
 ---
 
@@ -136,6 +141,7 @@ Order → lock cards → create transaction (payment.Gateway) → open checkout 
 | Storefront | Nuxt 3 SSR + Tailwind CSS |
 | Admin | Vue 3 + Vite + TypeScript + Element Plus + Pinia + VueUse + unplugin-auto-import |
 | Admin quality | ESLint (flat config + typescript-eslint + eslint-plugin-vue) + Prettier |
+| API types | OpenAPI → TS auto-generated (`admin-ui npm run gen:api` → `src/api/types.ts`), zero drift from the backend spec |
 | Backend | Go 1.25+ |
 | Database | SQLite (modernc.org/sqlite), migrations + interface-based repository layering |
 | Logging | go.uber.org/zap + lumberjack |

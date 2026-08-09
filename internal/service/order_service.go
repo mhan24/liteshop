@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"shop/internal/events"
 	"shop/internal/models"
 	"shop/internal/payment"
 )
@@ -24,13 +25,11 @@ type OrderService struct {
 	payFn func() payment.Gateway
 	cfgFn func() PaymentConfig
 
-	// 通知回调（由装配层注入，避免 service ↔ notify/jobs 循环依赖）。
+	// 领域事件发布器（装配层注入，service 不直接接触 jobs bus）。
+	events events.Publisher
+
+	// SendPaid 发卡邮件回调（管理员重发/补发路径使用；正常支付经 OrderPaidEvent）。
 	SendPaid          func(order models.Order, cards []models.Card)
-	OnOrderCreated    func(order models.Order)
-	OnPaymentSuccess  func(order models.Order, cards []models.Card)
-	OnDelivered       func(order models.Order, cards []models.Card)
-	OnLowStock        func(productID int64, productName string, available, threshold int)
-	OnSystemError     func(msg string)
 	SendLinks         func(contact string, links []string) error
 	LowStockThreshold func() int
 }
@@ -66,6 +65,18 @@ func NewOrderService(repo OrderRepository, payFn func() payment.Gateway, cfgFn f
 // SetKeyRepository 注入卡密仓储（低库存检查用）。
 func (s *OrderService) SetKeyRepository(keys KeyRepository) {
 	s.keys = keys
+}
+
+// SetEvents 注入领域事件发布器（装配层统一分发到通知/任务系统）。
+func (s *OrderService) SetEvents(pub events.Publisher) {
+	s.events = pub
+}
+
+// publish 发布领域事件（异步消费，不阻塞业务事务）。
+func (s *OrderService) publish(e events.Event) {
+	if s.events != nil {
+		go s.events.Publish(e)
+	}
 }
 
 func (s *OrderService) cfg() PaymentConfig {

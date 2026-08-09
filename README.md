@@ -45,6 +45,8 @@ English: [README.en.md](README.en.md)
 - 支付抽象：订单业务只依赖 `payment.Gateway` 接口，当前实现为 BEpusdt，换网关不改业务
 - 状态模型分离：**订单状态**（履约生命周期：created / waiting_payment / paid / processing / delivered / completed / cancelled / expired / payment_failed / delivery_failed）与**支付状态**（payment_status 独立列：created / pending / confirmed / failed / cancelled）解耦，支付异常不会污染订单语义（如"支付成功但发卡失败"= 订单 delivery_failed + 支付 confirmed）
 - 任务系统：进程内 goroutine + channel（邮件 / Telegram / Webhook），HTTP 层只发布事件
+- 领域事件：`internal/events` 类型化事件（OrderPaid / OrderExpired / DeliveryFailed / LowStock …），service 只发布事件、不散落 `bus.Publish`，装配层统一分发
+- 幂等台账：外部事件（支付回调）以网关交易号登记 `processed_events` 唯一键，与订单状态迁移同一事务，重复通知只处理一次
 - 后台任务（ticker + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份（含完整性校验）
 - 日志（zap）：app / payment / security 三通道，50MB 轮转保留 7 份
 - 迁移体系：编号 .sql 迁移（`internal/db/schema/migrations/`），只执行一次并记录
@@ -52,6 +54,8 @@ English: [README.en.md](README.en.md)
 - 安全：RBAC、审计日志、全接口限流、Turnstile、CSP、HSTS、安全响应头、CSV 注入防护、SQL 全参数化
 - 可观测性：组件级健康检查 `/health`（database / payment）、版本注入、结构化启动横幅
 - 日志关联：每个 HTTP 请求自动生成 `request_id`（响应头 `X-Request-ID`），支付日志携带 `request_id` / `order_id` / `trace_id`（网关交易号），一条支付链路可整线串起
+- 数据库连接：`journal_mode=WAL` + `busy_timeout=5000` + `foreign_keys=ON` + `_txlock=immediate`（启动即生效，并发读写友好）
+- 优雅停机：SIGTERM/SIGINT → 停止接收请求 → 等待在途请求 → worker 退出 → 关闭数据库（systemd/Docker 友好）
 - API 文档：`/docs`（OpenAPI 3.0，json + yaml 双格式，`/swagger` 别名），仅管理员可见
 
 ---
@@ -126,6 +130,7 @@ HTTP handler (internal/api)
 - 支付回调路径可自定义（默认 `/notify/bepusdt`），配置存于数据库；
 - 换网关（其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器，业务与回调处理无需改动；
 - **payment.log** 记录每次创建/回调：订单号、金额、交易 ID、回调时间、结果，便于排查支付链路。
+- 幂等：支付回调以 `transaction_id` 为唯一键登记 `processed_events`，与订单状态变更同事务提交，重复回调零副作用。
 
 ---
 
@@ -136,6 +141,7 @@ HTTP handler (internal/api)
 | 前台 | Nuxt 3 SSR + Tailwind CSS |
 | 后台 | Vue 3 + Vite + TypeScript + Element Plus + Pinia + VueUse + unplugin-auto-import |
 | 后台质量 | ESLint（flat config + typescript-eslint + eslint-plugin-vue）+ Prettier |
+| API 类型 | OpenAPI → TS 自动生成（`admin-ui npm run gen:api` → `src/api/types.ts`），与后端规范零漂移 |
 | 后端 | Go 1.25+ |
 | 数据库 | SQLite (modernc.org/sqlite)，迁移 + 接口化仓储分层 |
 | 日志 | go.uber.org/zap + lumberjack |

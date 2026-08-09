@@ -44,7 +44,7 @@ func testProduct(pid int64) models.Product {
 
 // TestPaymentCallbackAndDuplicate 支付回调 + 重复回调幂等。
 func TestPaymentCallbackAndDuplicate(t *testing.T) {
-	svc, keyRepo, gw, rec, _, pid := newOrderService(t)
+	svc, keyRepo, gw, rec, d, pid := newOrderService(t)
 
 	orderNo, paymentURL, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
 	if err != nil {
@@ -99,6 +99,12 @@ func TestPaymentCallbackAndDuplicate(t *testing.T) {
 	o3, _ := svc.GetOrderByNo(orderNo)
 	if o3.PaymentStatus != models.PaymentConfirmed {
 		t.Fatalf("payment status after duplicate = %q, want confirmed", o3.PaymentStatus)
+	}
+	// 幂等台账：同一网关交易号只登记一次
+	var processed int
+	_ = d.QueryRow(`SELECT COUNT(1) FROM processed_events WHERE event_key = ?`, "bepusdt:"+gw.TradeID).Scan(&processed)
+	if processed != 1 {
+		t.Fatalf("processed_events count = %d, want 1", processed)
 	}
 	avail, _ = keyRepo.AvailableCount(pid)
 	if avail != 2 {

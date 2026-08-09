@@ -476,4 +476,5 @@ var (
 	ErrCouponNotApplicable = errors.New("优惠券不适用于该商品或金额不足")
 	ErrAdminNotFound       = errors.New("admin not found")
 	ErrLastAdmin           = errors.New("cannot demote the last admin")
+	ErrAlreadyProcessed    = errors.New("event already processed")
 )

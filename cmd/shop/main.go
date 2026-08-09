@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"shop/internal/api"
@@ -36,7 +39,10 @@ func main() {
 		log.Printf("no admin configured; open /setup or /admin to initialize")
 	}
 
-	handler, err := api.NewHandler(cfg, database)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	handler, err := api.NewHandler(ctx, cfg, database)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -49,5 +55,22 @@ func main() {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	log.Fatal(srv.ListenAndServe())
+	// Graceful Shutdown：SIGTERM/SIGINT → 停止接收请求 → 等待在途请求 → worker 退出 → 关闭数据库。
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	select {
+	case err := <-errCh:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	case <-ctx.Done():
+		logging.App().Sugar().Info("shutdown signal received, draining...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			logging.App().Sugar().Errorf("graceful shutdown: %v", err)
+		}
+		// ctx 取消后 bus/scheduler worker 已退出；database.Close 由 defer 执行。
+		logging.App().Sugar().Info("server stopped gracefully")
+	}
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -23,7 +24,7 @@ func newCallbackServer(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
 	d := testutil.NewTestDB(t)
 	cfg := config.Config{PublicBaseURL: "https://shop.test", BepusdtTimeoutSec: 1200}
-	handler, err := NewHandler(cfg, d)
+	handler, err := NewHandler(context.Background(), cfg, d)
 	if err != nil {
 		t.Fatalf("new handler: %v", err)
 	}

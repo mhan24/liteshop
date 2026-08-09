@@ -150,13 +150,12 @@ func (s *OrderService) completeFreeOrder(order models.Order, discount, couponID 
 	if delivered == 0 || len(cards) == 0 {
 		_ = s.repo.SetOrderStatus(order.ID, models.OrderDeliveryFailed)
 		_ = s.repo.AddLog(order.ID, "delivery_failed", "发卡失败：无可用卡密", models.OrderPaid, models.OrderDeliveryFailed, 0)
+		s.fireDeliveryFailed(order, "无可用卡密")
 		return order.OrderNo, "", discount, couponID, ErrNoCards
 	}
 	_ = s.repo.SetOrderStatus(order.ID, models.OrderDelivered)
 	_ = s.repo.AddLog(order.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
-	if s.SendPaid != nil {
-		go s.SendPaid(order, cards)
-	}
 	s.fireCreatedEvents(order)
+	s.fireOrderEvents(order, cards)
 	return order.OrderNo, "", discount, couponID, nil
 }

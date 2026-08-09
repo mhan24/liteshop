@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 
 	"shop/internal/models"
@@ -24,6 +25,10 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (mod
 	}
 	now := models.Now()
 	delivered, err := s.repo.MarkPaidAndDeliver(o.ID, tradeID, blockTx, now)
+	if errors.Is(err, models.ErrAlreadyProcessed) {
+		// 幂等：该网关交易已处理过，直接返回 noop。
+		return o, nil, false, nil
+	}
 	if err != nil {
 		return o, nil, false, err
 	}
@@ -36,14 +41,12 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (mod
 	if delivered == 0 || len(cards) == 0 {
 		_ = s.repo.SetOrderStatus(o.ID, models.OrderDeliveryFailed)
 		_ = s.repo.AddLog(o.ID, "delivery_failed", "发卡失败：无可用卡密", models.OrderPaid, models.OrderDeliveryFailed, 0)
+		s.fireDeliveryFailed(o, "无可用卡密")
 		return o, nil, false, ErrNoCards
 	}
 	_ = s.repo.SetOrderStatus(o.ID, models.OrderDelivered)
 	_ = s.repo.AddLog(o.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
-	if s.SendPaid != nil {
-		// 异步发送，避免支付回调被 SMTP/Telegram 网络耗时阻塞（网关应答超时重试）。
-		go s.SendPaid(o, cards)
-	}
+	// 发卡邮件统一由 OrderPaidEvent 处理器发送（事件消费异步，不阻塞回调）。
 	s.fireOrderEvents(o, cards)
 	return o, cards, true, nil
 }

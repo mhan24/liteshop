@@ -30,7 +30,16 @@ func (r *OrderRepository) MarkPaidAndDeliver(orderID int64, tradeID, blockTx str
 		return 0, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE orders SET status = 'paid', payment_status = 'confirmed', trade_id = ?, block_transaction_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'waiting_payment'`, tradeID, blockTx, paidAt, paidAt, orderID)
+	// 幂等台账：同一网关交易号只处理一次（与订单状态迁移同一事务）。
+	res, err := tx.Exec(`INSERT OR IGNORE INTO processed_events(event_key, event_type, processed_at)
+		VALUES(?, 'payment', ?)`, "bepusdt:"+tradeID, models.Now())
+	if err != nil {
+		return 0, err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return 0, models.ErrAlreadyProcessed
+	}
+	res, err = tx.Exec(`UPDATE orders SET status = 'paid', payment_status = 'confirmed', trade_id = ?, block_transaction_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'waiting_payment'`, tradeID, blockTx, paidAt, paidAt, orderID)
 	if err != nil {
 		return 0, err
 	}

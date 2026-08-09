@@ -49,6 +49,10 @@
 - API 变更必须同步更新 `internal/api/api_docs/openapi.json`（yaml 由 json 用 `yaml.safe_dump` 重新生成）；
 - 配置结构升级必须新增 `internal/db/settings_migrations.go` 编号步骤（记录到 `settings_version`），禁止在代码里直接改读法；
 - 所有请求日志/支付日志必须带 `request_id`（中间件自动生成），支付日志另带 `order_no` 与 `trace_id`（网关交易号）；
+- 领域事件必须走 `internal/events` 的类型化事件 + `events.Publisher`（service 禁止直接 `bus.Publish`）；新增事件在 events 包定义并统一分发；
+- 外部事件（支付回调）必须以唯一键登记 `processed_events`（与状态变更同事务），重复事件返回幂等 noop；
+- 数据库连接启动即确认 `journal_mode=WAL` / `busy_timeout=5000` / `foreign_keys=ON`；服务必须支持 SIGTERM 优雅停机（停止接收 → 排空 → worker 退出 → 关库）；
+- API 变更必须同步 `admin-ui npm run gen:api` 重新生成 `src/api/types.ts`（CI 有 diff 校验），前端禁止手写接口类型；
 - 支付/通知相关改动必须跑 `go test ./internal/integration/... ./internal/api/...`（MockGateway / NotifyRecorder 覆盖回调、重复回调、取消、超时）；
 - 订单状态与支付状态必须分离：订单状态描述履约生命周期，支付状态写 `orders.payment_status`（created/pending/confirmed/failed/cancelled）；不得用订单状态表达支付语义；
 - 备份逻辑必须带校验（备份后只读打开 + `PRAGMA integrity_check`，失败删除坏文件）；

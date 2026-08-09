@@ -22,6 +22,10 @@ func Open(path string) (*sql.DB, error) {
 	if err := d.Ping(); err != nil {
 		return nil, err
 	}
+	// WAL 提升并发读写；busy_timeout/foreign_keys 由 DSN 设置。
+	if _, err := d.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		return nil, err
+	}
 	if err := schema.Migrate(d); err != nil {
 		return nil, err
 	}

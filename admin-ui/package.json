@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "gen:api": "openapi-typescript ../internal/api/api_docs/openapi.json -o src/api/types.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write ."
@@ -32,6 +33,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-vue": "^10.10.0",
     "globals": "^17.9.0",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.6",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.66.0",

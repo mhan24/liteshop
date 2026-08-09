@@ -1,5 +1,8 @@
 import axios from 'axios'
 
+// OpenAPI 自动生成类型（由 `npm run gen:api` 生成，禁止手改）。
+export type * from './types'
+
 const http = axios.create({
   baseURL: '/api/v1',
   withCredentials: true,

@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 
+	"shop/internal/events"
 	"shop/internal/models"
 )
 
@@ -42,6 +43,7 @@ func (s *OrderService) Cancel(orderID int64) error {
 		return fmt.Errorf("invalid order state for cancel: %s", o.Status)
 	}
 	_ = s.repo.AddLog(orderID, "cancelled", "订单已取消", o.Status, models.OrderCancelled, 0)
+	s.publish(events.OrderCancelledEvent{OrderID: orderID, OrderNo: o.OrderNo})
 	return nil
 }
 
@@ -57,6 +59,7 @@ func (s *OrderService) Expire(orderID int64) error {
 		return fmt.Errorf("invalid order state for expire: %s", o.Status)
 	}
 	_ = s.repo.AddLog(orderID, "expired", "订单已过期", o.Status, models.OrderExpired, 0)
+	s.publish(events.OrderExpiredEvent{OrderID: orderID, OrderNo: o.OrderNo})
 	return nil
 }
 

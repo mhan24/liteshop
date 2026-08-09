@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	"shop/internal/config"
 	"shop/internal/db/repository"
+	"shop/internal/events"
 	"shop/internal/jobs"
 	"shop/internal/logging"
 	"shop/internal/models"
@@ -64,7 +65,7 @@ type Server struct {
 	linkSent map[string]int64 // 订单查看链接邮件冷却（按邮箱）
 }
 
-func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
+func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.Handler, error) {
 	bus := jobs.NewBus(1024)
 	cipher := security.NewCipher(repository.EnsureSessionSecret(database))
 	notifier := notify.New(cfg, database, bus, cipher)
@@ -83,28 +84,31 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	s.notifySvc = service.NewNotifyService(notifier)
 	s.jobsSvc = service.NewJobsService(store)
 	// 异步任务 worker：邮件 / Telegram / Webhook（HTTP 层只发布事件）。
-	bus.Start(context.Background(), 2, notifier.Handler())
+	bus.Start(ctx, 2, notifier.Handler())
 
 	orderRepo := repository.NewOrderRepositoryWithTZ(database, models.LocationFromTimezone(s.settings.SiteSettings().Timezone))
 	keyRepo := repository.NewKeyRepository(database)
 	s.orders = service.NewOrderService(orderRepo, s.paymentGateway, s.settings.PaymentServiceConfig)
 	s.orders.SendPaid = notifier.SendPaid
-	s.orders.OnOrderCreated = func(o models.Order) {
-		payload := notifier.OrderPayload(notify.EventOrderCreated, o, nil, nil)
-		notifier.Notify(notify.EventOrderCreated, payload)
-	}
-	s.orders.OnPaymentSuccess = func(o models.Order, cards []models.Card) {
-		payload := notifier.OrderPayload(notify.EventPaymentSuccess, o, nil, nil)
-		delete(payload, "contact") // 买家邮件由 SendPaid 发送，避免重复
-		notifier.Notify(notify.EventPaymentSuccess, payload)
-	}
-	s.orders.OnDelivered = func(o models.Order, cards []models.Card) {
-		payload := notifier.OrderPayload(notify.EventDelivered, o, cards, nil)
-		delete(payload, "contact")
-		notifier.Notify(notify.EventDelivered, payload)
-	}
-	s.orders.OnLowStock = notifier.NotifyLowStock
-	s.orders.OnSystemError = notifier.NotifySystemError
+	// 领域事件 → 通知分发（service 只发布类型化事件，不接触 bus）。
+	s.orders.SetEvents(events.Func(func(e events.Event) {
+		switch ev := e.(type) {
+		case events.OrderCreatedEvent:
+			payload := notifier.OrderPayload(notify.EventOrderCreated, ev.Order, nil, nil)
+			notifier.Notify(notify.EventOrderCreated, payload)
+		case events.OrderPaidEvent:
+			payload := notifier.OrderPayload(notify.EventPaymentSuccess, ev.Order, nil, nil)
+			delete(payload, "contact") // 买家邮件由 SendPaid 发送，避免重复
+			notifier.Notify(notify.EventPaymentSuccess, payload)
+			notifier.SendPaid(ev.Order, ev.Cards)
+		case events.OrderDeliveredEvent:
+			payload := notifier.OrderPayload(notify.EventDelivered, ev.Order, ev.Cards, nil)
+			delete(payload, "contact")
+			notifier.Notify(notify.EventDelivered, payload)
+		case events.LowStockEvent:
+			notifier.NotifyLowStock(ev.ProductID, ev.ProductName, ev.Available, ev.Threshold)
+		}
+	}))
 	s.orders.SendLinks = notifier.SendOrderLinks
 	s.orders.LowStockThreshold = s.settings.LowStockThreshold
 	s.orders.SetKeyRepository(keyRepo)
@@ -131,7 +135,7 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	scheduler.Add("email_retry", time.Minute, true, jobs.EmailRetryJob(s.db, notifier.SendRawMail))
 	scheduler.Add("cleanup", 5*time.Minute, true, jobs.CleanupJob(s.db, s.cleanupMemory))
 	scheduler.Add("backup", 24*time.Hour, false, jobs.BackupJob(s.dbPath, 7))
-	scheduler.Start(context.Background())
+	scheduler.Start(ctx)
 	s.logStartupInfo()
 	return s, nil
 }

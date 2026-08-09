@@ -3,11 +3,12 @@ package testutil
 import (
 	"sync"
 
+	"shop/internal/events"
 	"shop/internal/models"
 	"shop/internal/service"
 )
 
-// NotifyRecorder 收集 OrderService 的通知回调（内存 recorder，替代真实 SMTP/Telegram）。
+// NotifyRecorder 收集 OrderService 发布的领域事件（内存 recorder，替代真实 SMTP/Telegram）。
 type NotifyRecorder struct {
 	mu sync.Mutex
 
@@ -15,38 +16,40 @@ type NotifyRecorder struct {
 	Created        []models.Order
 	PaymentSuccess []models.Order
 	Delivered      []models.Order
-	SystemErrors   []string
+	Expired        []string
+	Cancelled      []string
+	DeliveryFailed []string
+	LowStock       []events.LowStockEvent
 	LinksSent      []string
+}
+
+// Publish 实现 events.Publisher，按事件类型记录。
+func (r *NotifyRecorder) Publish(e events.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch ev := e.(type) {
+	case events.OrderCreatedEvent:
+		r.Created = append(r.Created, ev.Order)
+	case events.OrderPaidEvent:
+		r.Paid = append(r.Paid, ev.Order)
+		r.PaymentSuccess = append(r.PaymentSuccess, ev.Order)
+	case events.OrderDeliveredEvent:
+		r.Delivered = append(r.Delivered, ev.Order)
+	case events.OrderExpiredEvent:
+		r.Expired = append(r.Expired, ev.OrderNo)
+	case events.OrderCancelledEvent:
+		r.Cancelled = append(r.Cancelled, ev.OrderNo)
+	case events.DeliveryFailedEvent:
+		r.DeliveryFailed = append(r.DeliveryFailed, ev.OrderNo)
+	case events.LowStockEvent:
+		r.LowStock = append(r.LowStock, ev)
+	}
 }
 
 func (r *NotifyRecorder) SendPaid(o models.Order, _ []models.Card) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.Paid = append(r.Paid, o)
-}
-
-func (r *NotifyRecorder) OnOrderCreated(o models.Order) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.Created = append(r.Created, o)
-}
-
-func (r *NotifyRecorder) OnPaymentSuccess(o models.Order, _ []models.Card) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.PaymentSuccess = append(r.PaymentSuccess, o)
-}
-
-func (r *NotifyRecorder) OnDelivered(o models.Order, _ []models.Card) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.Delivered = append(r.Delivered, o)
-}
-
-func (r *NotifyRecorder) OnSystemError(msg string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.SystemErrors = append(r.SystemErrors, msg)
 }
 
 func (r *NotifyRecorder) SendLinks(contact string, _ []string) error {
@@ -56,13 +59,10 @@ func (r *NotifyRecorder) SendLinks(contact string, _ []string) error {
 	return nil
 }
 
-// Wire 把 recorder 接到 OrderService 的通知回调上。
+// Wire 把 recorder 接入 OrderService：领域事件 + 重发邮件回调。
 func (r *NotifyRecorder) Wire(s *service.OrderService) {
+	s.SetEvents(events.Func(r.Publish))
 	s.SendPaid = r.SendPaid
-	s.OnOrderCreated = r.OnOrderCreated
-	s.OnPaymentSuccess = r.OnPaymentSuccess
-	s.OnDelivered = r.OnDelivered
-	s.OnSystemError = r.OnSystemError
 	s.SendLinks = r.SendLinks
 }
 
