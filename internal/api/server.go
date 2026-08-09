@@ -92,8 +92,15 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 	keyRepo := repository.NewKeyRepository(database)
 	s.orders = service.NewOrderService(orderRepo, s.paymentGateway, s.settings.PaymentServiceConfig)
 	s.orders.SendPaid = notifier.SendPaid
-	// 领域事件 → 通知分发（service 只发布类型化事件，不接触 bus；直接事件 + outbox 共用同一分发器）。
-	dispatch := orderEventDispatcher(notifier)
+	// 领域事件 → 消费者扇出（每个消费者独立 goroutine + panic 隔离；
+	// service 只发布类型化事件，不接触 bus；直接事件 + outbox 共用同一分发器）。
+	dispatch := events.NewFanout(
+		events.Consumer{Name: "notify", Handle: notifyEventConsumer(notifier)},
+		events.Consumer{Name: "mail", Handle: mailEventConsumer(notifier)},
+	)
+	dispatch.SetPanicHandler(func(name string, r any) {
+		logging.App().Sugar().Errorf("event consumer %s panic: %v", name, r)
+	})
 	s.orders.SetEvents(dispatch)
 	s.orders.SendLinks = notifier.SendOrderLinks
 	s.orders.LowStockThreshold = s.settings.LowStockThreshold
@@ -143,9 +150,9 @@ func (s *Server) logStartupInfo() {
 	logging.App().Sugar().Infof("notify url: %s", payCfg.NotifyURL)
 }
 
-// orderEventDispatcher 领域事件 → 通知分发（service 直接发布与 outbox 消费者共用）。
-func orderEventDispatcher(notifier *notify.Notifier) events.Func {
-	return events.Func(func(e events.Event) {
+// notifyEventConsumer 模板事件消费者（订单创建/支付成功/发货/低库存 → 通知模板）。
+func notifyEventConsumer(notifier *notify.Notifier) func(events.Event) {
+	return func(e events.Event) {
 		switch ev := e.(type) {
 		case events.OrderCreatedEvent:
 			payload := notifier.OrderPayload(notify.EventOrderCreated, ev.Order, nil, nil)
@@ -154,7 +161,6 @@ func orderEventDispatcher(notifier *notify.Notifier) events.Func {
 			payload := notifier.OrderPayload(notify.EventPaymentSuccess, ev.Order, nil, nil)
 			delete(payload, "contact") // 买家邮件由 SendPaid 发送，避免重复
 			notifier.Notify(notify.EventPaymentSuccess, payload)
-			notifier.SendPaid(ev.Order, ev.Cards)
 		case events.OrderDeliveredEvent:
 			payload := notifier.OrderPayload(notify.EventDelivered, ev.Order, ev.Cards, nil)
 			delete(payload, "contact")
@@ -162,7 +168,16 @@ func orderEventDispatcher(notifier *notify.Notifier) events.Func {
 		case events.LowStockEvent:
 			notifier.NotifyLowStock(ev.ProductID, ev.ProductName, ev.Available, ev.Threshold)
 		}
-	})
+	}
+}
+
+// mailEventConsumer 买家发卡邮件消费者（OrderPaid → SendPaid，独立失败不影响其他消费者）。
+func mailEventConsumer(notifier *notify.Notifier) func(events.Event) {
+	return func(e events.Event) {
+		if ev, ok := e.(events.OrderPaidEvent); ok {
+			notifier.SendPaid(ev.Order, ev.Cards)
+		}
+	}
 }
 
 // handleHealth 组件级健康检查：数据库连通性 + 支付网关配置状态。

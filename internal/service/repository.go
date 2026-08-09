@@ -114,6 +114,7 @@ type AdminStore interface {
 type JobsStore interface {
 	LatestJobRuns() ([]models.JobRun, error)
 	PendingMailCount() (int, error)
+	DeadEventCount() (int, error)
 }
 
 // StatsStore 健康/统计所需的数据访问接口。

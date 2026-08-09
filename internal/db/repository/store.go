@@ -166,3 +166,7 @@ func (s *Store) LatestJobRuns() ([]models.JobRun, error) {
 func (s *Store) PendingMailCount() (int, error) {
 	return PendingMailCount(s.db)
 }
+
+func (s *Store) DeadEventCount() (int, error) {
+	return DeadEventCount(s.db)
+}

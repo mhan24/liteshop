@@ -1654,6 +1654,9 @@ paths:
                       $ref: '#/components/schemas/JobRun'
                   mail_queue_pending:
                     type: integer
+                  dead_events:
+                    type: integer
+                    description: outbox 死信事件数
   /api/v1/admin/coupons:
     get:
       tags:

@@ -1679,7 +1679,7 @@ func (s *Server) apiAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
 
 // apiAdminJobs 返回后台任务执行记录（每个任务最近一次）+ 邮件队列积压数。
 func (s *Server) apiAdminJobs(w http.ResponseWriter, r *http.Request) {
-	runs, pending, err := s.jobsSvc.Runs()
+	runs, pending, dead, err := s.jobsSvc.Runs()
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1694,7 +1694,7 @@ func (s *Server) apiAdminJobs(w http.ResponseWriter, r *http.Request) {
 			"error":       run.Error,
 		})
 	}
-	writeJSON(w, 200, map[string]any{"jobs": out, "mail_queue_pending": pending})
+	writeJSON(w, 200, map[string]any{"jobs": out, "mail_queue_pending": pending, "dead_events": dead})
 }
 
 func (s *Server) apiAdminCoupons(w http.ResponseWriter, r *http.Request) {

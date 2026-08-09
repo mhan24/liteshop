@@ -26,6 +26,41 @@ type Func func(e Event)
 
 func (f Func) Publish(e Event) { f(e) }
 
+// Consumer 一个独立的事件消费者（邮件 / Telegram / 统计等），互不影响。
+type Consumer struct {
+	Name   string
+	Handle func(Event)
+}
+
+// Fanout 事件扇出：每个消费者独立 goroutine + panic 隔离，
+// 单个消费者崩溃不影响其他消费者与进程。
+type Fanout struct {
+	consumers []Consumer
+	onPanic   func(name string, r any)
+}
+
+func NewFanout(consumers ...Consumer) *Fanout {
+	return &Fanout{consumers: consumers}
+}
+
+// SetPanicHandler 设置消费者 panic 回调（如写日志）。
+func (f *Fanout) SetPanicHandler(fn func(name string, r any)) {
+	f.onPanic = fn
+}
+
+func (f *Fanout) Publish(e Event) {
+	for _, c := range f.consumers {
+		go func(c Consumer) {
+			defer func() {
+				if r := recover(); r != nil && f.onPanic != nil {
+					f.onPanic(c.Name, r)
+				}
+			}()
+			c.Handle(e)
+		}(c)
+	}
+}
+
 // OrderCreatedEvent 订单已创建。
 type OrderCreatedEvent struct {
 	Order models.Order

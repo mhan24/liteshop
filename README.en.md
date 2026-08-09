@@ -48,6 +48,8 @@
 - Domain events: typed events in `internal/events` (OrderPaid / OrderExpired / DeliveryFailed / LowStock …); the service only publishes events — no scattered `bus.Publish` — and the composition root dispatches them
 - **Outbox pattern**: payment-success/delivery events are written to `outbox_events` **in the same transaction** as the order state change; an outbox worker (1s) reads and publishes them — even after a crash right after COMMIT, events are re-published on restart, keeping DB state and events permanently consistent
 - Outbox lifecycle: published events are kept for 30 days and purged by `cleanup` (unpublished events are never purged); event payloads carry a `version` — bump it when the structure changes, and old events stay decodable
+- Outbox dead letter: after 5 consecutive processing failures an event moves to `dead_events` (for manual admin handling) instead of retrying forever; `GET /api/v1/admin/jobs` reports the dead count
+- Consumer isolation: `events.Fanout` fans OrderPaid etc. out to independent consumers (notify / mail / future stats), each in its own goroutine with panic isolation — one failing consumer never affects the others
 - Idempotency ledger: external events (payment callbacks) register a unique key (`transaction_id`) in `processed_events` within the same transaction as the order state change, so duplicate notifications are processed once
 - Background jobs (ticker + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup (with integrity verification)
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files
@@ -284,6 +286,8 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
   - Coverage: payment callback delivery, **duplicate-callback idempotency** (no double delivery/notify), cancel-order stock release + gateway cancellation, stale-order expiry, and the real HTTP callback route (MD5 verification / status=3 gateway stub / bad-signature rejection)
 - **Benchmarks**: `go test -bench=. ./internal/integration/` (BenchmarkCreateOrder / BenchmarkPaymentCallback / BenchmarkRepositoryQuery) to catch performance regressions from future refactors
 - **Restore drill**: `TestBackupRestoreDrill` automates "backup → copy to a new DB → re-run migrations → query data" (a successful backup does not prove it can be restored)
+- **Concurrency stress**: `TestConcurrentPressure100` fires 100 goroutines at the last remaining card and asserts exactly 1 success, 99 insufficient-stock business errors, 0 system errors (proves `_txlock=immediate` + conditional UPDATE under real contention)
+- **Legacy upgrade**: `TestLegacyDBUpgradeKeepsData` builds an old 001 DB with legacy data, upgrades to the latest code, and verifies data integrity, status/token backfills, new tables and migration records
 - CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + admin-ui and storefront builds
 
 ---

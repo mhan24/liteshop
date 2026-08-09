@@ -805,7 +805,7 @@
         "responses": {
           "200": {
             "description": "{ jobs: [JobRun], mail_queue_pending }",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "jobs": { "type": "array", "items": { "$ref": "#/components/schemas/JobRun" } }, "mail_queue_pending": { "type": "integer" } } } } }
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "jobs": { "type": "array", "items": { "$ref": "#/components/schemas/JobRun" } }, "mail_queue_pending": { "type": "integer" }, "dead_events": { "type": "integer", "description": "outbox 死信事件数" } } } } }
           }
         }
       }

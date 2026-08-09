@@ -305,3 +305,57 @@ func TestConcurrentLastCardPurchase(t *testing.T) {
 		}
 	}
 }
+
+// TestConcurrentPressure100 压力测试：100 个 goroutine 同时抢最后 1 张卡，
+// 恰好 1 成功、99 个库存不足业务错误，无系统错误/超卖/重复锁定。
+func TestConcurrentPressure100(t *testing.T) {
+	const users = 100
+	for iter := 0; iter < 3; iter++ {
+		d := testutil.NewTestDB(t)
+		orderRepo := repository.NewOrderRepository(d)
+		keyRepo := repository.NewKeyRepository(d)
+		gw := testutil.NewMockGateway()
+		svc := service.NewOrderService(orderRepo, func() payment.Gateway { return gw }, func() service.PaymentConfig {
+			return service.PaymentConfig{PublicBaseURL: "https://shop.test", NotifyURL: "https://shop.test/notify", TimeoutSec: 1200, Fiat: "CNY", TradeTypes: []string{"usdt.trc20"}}
+		})
+		pid := testutil.SeedProductWithCards(t, d, 1)
+		p := testProduct(pid)
+
+		var wg sync.WaitGroup
+		results := make([]error, users)
+		for i := 0; i < users; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				_, _, _, _, err := svc.CreateOrder(p, 1, fmt.Sprintf("u%d@test.com", i), "usdt.trc20", "")
+				results[i] = err
+			}(i)
+		}
+		wg.Wait()
+
+		success := 0
+		bizFails := 0
+		sysFails := 0
+		for _, err := range results {
+			if err == nil {
+				success++
+				continue
+			}
+			var biz *service.BusinessError
+			if errors.As(err, &biz) {
+				bizFails++
+			} else {
+				sysFails++
+			}
+		}
+		if success != 1 || bizFails != users-1 || sysFails != 0 {
+			t.Fatalf("iter %d: success=%d biz=%d sys=%d, want 1/%d/0", iter, success, bizFails, sysFails, users-1)
+		}
+		avail, _ := keyRepo.AvailableCount(pid)
+		var locked int
+		_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE product_id = ? AND status = 'locked'`, pid).Scan(&locked)
+		if avail != 0 || locked != 1 {
+			t.Fatalf("iter %d: available=%d locked=%d, want 0/1", iter, avail, locked)
+		}
+	}
+}
