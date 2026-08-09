@@ -181,3 +181,22 @@ func TestUniqueViolationMapped(t *testing.T) {
 		t.Fatal("coupon code not persisted after update")
 	}
 }
+
+func TestDeleteOldJobRuns(t *testing.T) {
+	d, err := Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer d.Close()
+	now := models.Now()
+	_ = repository.RecordJobRun(d, "backup", now-8*86400, now-8*86400+5, nil)
+	_ = repository.RecordJobRun(d, "backup", now-86400, now-86400+5, nil)
+	if err := repository.DeleteOldJobRuns(d, now-7*86400); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	var n int
+	_ = d.QueryRow(`SELECT COUNT(1) FROM job_runs`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("job_runs after cleanup = %d, want 1", n)
+	}
+}

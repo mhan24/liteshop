@@ -38,3 +38,9 @@ func LatestJobRuns(d *sql.DB) ([]models.JobRun, error) {
 	}
 	return out, rows.Err()
 }
+
+// DeleteOldJobRuns 清理超过保留期的任务执行记录（防高频任务导致表无限增长）。
+func DeleteOldJobRuns(d *sql.DB, cutoff int64) error {
+	_, err := d.Exec(`DELETE FROM job_runs WHERE finished_at < ?`, cutoff)
+	return err
+}

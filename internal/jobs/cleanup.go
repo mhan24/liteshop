@@ -37,6 +37,11 @@ func CleanupJob(d *sql.DB, memoryCleanups ...func()) func() error {
 			logging.App().Sugar().Errorf("job cleanup mail_queue: %v", err)
 			return err
 		}
+		// 任务执行记录：保留 7 天（outbox 等高频任务也不至于无限增长）。
+		if err := repository.DeleteOldJobRuns(d, now.Add(-7*24*time.Hour).Unix()); err != nil {
+			logging.App().Sugar().Errorf("job cleanup job_runs: %v", err)
+			return err
+		}
 		for _, fn := range memoryCleanups {
 			if fn != nil {
 				fn()

@@ -121,6 +121,10 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 	scheduler := jobs.NewScheduler()
 	// 任务执行记录（job_runs 表）：后台可查看每个任务最后执行结果。
 	scheduler.SetRecorder(func(name string, startedAt, finishedAt int64, err error) {
+		// outbox_publish 每秒执行，不写 job_runs（失败由 app.log + 死信机制覆盖），避免表膨胀。
+		if name == "outbox_publish" {
+			return
+		}
 		_ = repository.RecordJobRun(s.db, name, startedAt, finishedAt, err)
 	})
 	// order_expire / email_retry / cleanup 启动后立即执行一次（进程崩溃后的补偿清理）。
