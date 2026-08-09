@@ -107,3 +107,9 @@ type AdminStore interface {
 	AddAuditLog(adminID int64, username, action, targetType, targetID, before, after string) error
 	AuditLogs(limit int) ([]models.AuditLog, error)
 }
+
+// JobsStore 后台任务执行记录数据访问接口。
+type JobsStore interface {
+	LatestJobRuns() ([]models.JobRun, error)
+	PendingMailCount() (int, error)
+}

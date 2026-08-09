@@ -15,35 +15,36 @@ import (
 )
 
 // BackupJob 定期备份 SQLite 数据库（VACUUM INTO 一致性快照），保留最近 keep 份。
-func BackupJob(databasePath string, keep int) func() {
-	return func() {
+func BackupJob(databasePath string, keep int) func() error {
+	return func() error {
 		dir := filepath.Join(filepath.Dir(databasePath), "backups")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			logging.App().Sugar().Errorf("job backup mkdir: %v", err)
-			return
+			return err
 		}
 		name := fmt.Sprintf("shop-%s.db", time.Now().Format("20060102-150405"))
 		target := filepath.Join(dir, name)
 		d, err := db.Open(databasePath)
 		if err != nil {
 			logging.App().Sugar().Errorf("job backup open: %v", err)
-			return
+			return err
 		}
 		_, err = d.Exec(fmt.Sprintf("VACUUM INTO '%s'", strings.ReplaceAll(target, "'", "''")))
 		d.Close()
 		if err != nil {
 			logging.App().Sugar().Errorf("job backup vacuum: %v", err)
-			return
+			return err
 		}
 		// 备份校验：只读打开 + PRAGMA integrity_check，防止坏备份文件混入保留列表。
 		if err := verifyBackup(target); err != nil {
 			_ = os.Remove(target)
 			logging.App().Sugar().Errorf("job backup verify failed, removed: %s: %v", target, err)
-			return
+			return err
 		}
 		_ = os.Chmod(target, 0o600)
 		pruneOldBackups(dir, keep)
 		logging.App().Sugar().Infof("job backup: %s (verified)", target)
+		return nil
 	}
 }
 

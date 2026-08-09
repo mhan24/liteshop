@@ -447,6 +447,23 @@ type ProductSaleRow struct {
 	Revenue int64
 }
 
+// JobRun 后台任务一次执行记录。
+type JobRun struct {
+	ID         int64
+	JobName    string
+	StartedAt  int64
+	FinishedAt int64
+	Status     string // running / ok / error
+	Error      string
+}
+
+// 任务执行状态。
+const (
+	JobRunRunning = "running"
+	JobRunOK      = "ok"
+	JobRunError   = "error"
+)
+
 // InsufficientError 库存不足错误。
 type InsufficientError struct{}
 

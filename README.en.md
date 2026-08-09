@@ -34,7 +34,7 @@
 - Maintenance mode: toggle + notice + unlock password (hashed + AES-encrypted storage)
 - Account: change username / change password
 - Security: TOTP 2FA (Google Authenticator, AES-encrypted secret), admin RBAC + audit logs
-- System: config backup / restore (excludes secrets) / wipe and re-init
+- System: config backup / restore (excludes secrets) / wipe and re-init / **background job status** (last run result per job + pending mail queue count)
 
 ### Backend (Go)
 
@@ -105,6 +105,7 @@ HTTP handler (internal/api)
   - `cleanup`: expired sessions / 180-day logs / in-memory state cleanup
   - `backup`: daily `VACUUM INTO` consistent snapshot + **read-only `integrity_check` verification** (corrupt files are removed automatically), keeping the last 7
 - Robustness: worker/scheduler panics are isolated (one crashing job never takes down the process); `order_expire` / `email_retry` / `cleanup` also run once at startup (compensation after a crash/restart)
+- **Run records**: every job execution is written to `job_runs` (job_name / started_at / finished_at / status / error); the admin endpoint `GET /api/v1/admin/jobs` shows "last backup: ok / mail queue: N" directly instead of relying on logs
 
 ---
 

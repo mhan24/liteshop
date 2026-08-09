@@ -43,6 +43,13 @@ func DueMails(d *sql.DB, now int64) ([]MailItem, error) {
 	return out, rows.Err()
 }
 
+// PendingMailCount 返回待发送/重试中的邮件数（失败次数未超限）。
+func PendingMailCount(d *sql.DB) (int, error) {
+	var n int
+	err := d.QueryRow(`SELECT COUNT(1) FROM mail_queue WHERE attempts < 5`).Scan(&n)
+	return n, err
+}
+
 // MarkMailSent 标记邮件发送成功（删除队列项）。
 func MarkMailSent(d *sql.DB, id int64) error {
 	_, err := d.Exec(`DELETE FROM mail_queue WHERE id = ?`, id)

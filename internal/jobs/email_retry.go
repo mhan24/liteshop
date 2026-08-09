@@ -11,12 +11,12 @@ import (
 
 // EmailRetryJob 重试发送失败的邮件（指数退避，最多 5 次）。
 // send 由调用方注入（notifier.SendRawMail），避免 jobs ↔ notify 循环依赖。
-func EmailRetryJob(d *sql.DB, send func(to, subject, body string) error) func() {
-	return func() {
+func EmailRetryJob(d *sql.DB, send func(to, subject, body string) error) func() error {
+	return func() error {
 		items, err := repository.DueMails(d, time.Now().Unix())
 		if err != nil {
 			logging.App().Sugar().Errorf("job email_retry: %v", err)
-			return
+			return err
 		}
 		for _, m := range items {
 			if err := send(m.To, m.Subject, m.Body); err != nil {
@@ -30,5 +30,6 @@ func EmailRetryJob(d *sql.DB, send func(to, subject, body string) error) func() 
 				logging.App().Sugar().Errorf("job email_retry: mark sent %d: %v", m.ID, err)
 			}
 		}
+		return nil
 	}
 }

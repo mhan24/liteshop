@@ -34,7 +34,7 @@ English: [README.en.md](README.en.md)
 - 维护模式：开关 + 提示文案 + 解锁密码（哈希 + 加密存储）
 - 账号：改用户名 / 改密码
 - 安全：TOTP 二次验证（Google Authenticator，密钥 AES 加密）、管理员 RBAC + 审计日志
-- 系统：配置备份 / 恢复（不含密钥）/ 清空并重新初始化
+- 系统：配置备份 / 恢复（不含密钥）/ 清空并重新初始化 / **后台任务状态**（每个任务最后执行结果 + 邮件队列积压数）
 
 ### 后端（Go）
 
@@ -105,6 +105,7 @@ HTTP handler (internal/api)
   - `cleanup`：过期会话 / 180 天日志 / 内存状态清理
   - `backup`：每日 `VACUUM INTO` 一致性快照 + **只读打开执行 `integrity_check` 校验**（校验失败自动删除坏文件），保留最近 7 份
 - 健壮性：worker/调度任务 panic 隔离（单任务崩溃不拖垮进程）；`order_expire` / `email_retry` / `cleanup` 启动后立即执行一次（进程崩溃后的补偿清理）
+- **执行记录**：每次任务执行写入 `job_runs`（job_name / started_at / finished_at / status / error），后台 `GET /api/v1/admin/jobs` 直接展示"最后备份: 成功 / 邮件队列: N"等状态，不再只靠日志
 
 ---
 

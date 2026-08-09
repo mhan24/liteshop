@@ -102,6 +102,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/admins/{id}/role", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSetRole)))
 	mux.Handle("POST /api/v1/admin/admins/{id}/delete", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminDeleteAdmin)))
 	mux.Handle("GET /api/v1/admin/audit-logs", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminAuditLogs)))
+	mux.Handle("GET /api/v1/admin/jobs", s.requireAdminAPI(http.HandlerFunc(s.apiAdminJobs)))
 	mux.Handle("GET /api/v1/admin/coupons", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCoupons)))
 	mux.Handle("POST /api/v1/admin/coupons", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCouponCreate)))
 	mux.Handle("POST /api/v1/admin/coupons/{id}/edit", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCouponUpdate)))
@@ -1672,6 +1673,26 @@ func (s *Server) apiAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- 优惠券管理 ----------
+
+// apiAdminJobs 返回后台任务执行记录（每个任务最近一次）+ 邮件队列积压数。
+func (s *Server) apiAdminJobs(w http.ResponseWriter, r *http.Request) {
+	runs, pending, err := s.jobsSvc.Runs()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	out := []map[string]any{}
+	for _, run := range runs {
+		out = append(out, map[string]any{
+			"job_name":    run.JobName,
+			"status":      run.Status,
+			"started_at":  run.StartedAt,
+			"finished_at": run.FinishedAt,
+			"error":       run.Error,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"jobs": out, "mail_queue_pending": pending})
+}
 
 func (s *Server) apiAdminCoupons(w http.ResponseWriter, r *http.Request) {
 	coupons, err := s.orders.ListCoupons()

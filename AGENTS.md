@@ -37,4 +37,5 @@
 - 支付/通知相关改动必须跑 `go test ./internal/integration/... ./internal/api/...`（MockGateway / NotifyRecorder 覆盖回调、重复回调、取消、超时）；
 - 订单状态与支付状态必须分离：订单状态描述履约生命周期，支付状态写 `orders.payment_status`（created/pending/confirmed/failed/cancelled）；不得用订单状态表达支付语义；
 - 备份逻辑必须带校验（备份后只读打开 + `PRAGMA integrity_check`，失败删除坏文件）；
+- 后台任务执行必须记录 `job_runs`（由调度器统一写入 status/error），新增任务时确保返回 error 以正确记录失败；
 - 部署：服务器 `git pull && go build ./... && go test ./internal/...` 通过后再替换二进制重启。

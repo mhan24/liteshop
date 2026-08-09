@@ -144,3 +144,13 @@ func (s *Store) AddAuditLog(adminID int64, username, action, targetType, targetI
 func (s *Store) AuditLogs(limit int) ([]models.AuditLog, error) {
 	return AuditLogs(s.db, limit)
 }
+
+// ---- jobs ----
+
+func (s *Store) LatestJobRuns() ([]models.JobRun, error) {
+	return LatestJobRuns(s.db)
+}
+
+func (s *Store) PendingMailCount() (int, error) {
+	return PendingMailCount(s.db)
+}

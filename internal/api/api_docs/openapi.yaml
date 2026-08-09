@@ -225,6 +225,23 @@ components:
           - viewer
         created_at:
           type: integer
+    JobRun:
+      type: object
+      properties:
+        job_name:
+          type: string
+        status:
+          type: string
+          enum:
+          - running
+          - ok
+          - error
+        started_at:
+          type: integer
+        finished_at:
+          type: integer
+        error:
+          type: string
     SiteInfo:
       type: object
       properties:
@@ -1587,6 +1604,27 @@ paths:
       responses:
         '200':
           description: '{ logs: [AuditLog] }'
+  /api/v1/admin/jobs:
+    get:
+      tags:
+      - admin
+      security:
+      - sessionCookie: []
+      summary: 后台任务执行记录（每个任务最近一次）+ 邮件队列积压数
+      responses:
+        '200':
+          description: '{ jobs: [JobRun], mail_queue_pending }'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/JobRun'
+                  mail_queue_pending:
+                    type: integer
   /api/v1/admin/coupons:
     get:
       tags:

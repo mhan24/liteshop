@@ -53,6 +53,7 @@ type Server struct {
 	admin     *service.AdminService
 	notifySvc *service.NotifyService
 	stats     *service.StatsService
+	jobsSvc   *service.JobsService
 	dbPath    string
 	startTime time.Time
 
@@ -80,6 +81,7 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	s.settings = service.NewSettingsService(store, cipher, cfg)
 	s.admin = service.NewAdminService(store, cipher, notifier.NotifySystemError)
 	s.notifySvc = service.NewNotifyService(notifier)
+	s.jobsSvc = service.NewJobsService(store)
 	// 异步任务 worker：邮件 / Telegram / Webhook（HTTP 层只发布事件）。
 	bus.Start(context.Background(), 2, notifier.Handler())
 
@@ -120,6 +122,10 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	s.mux = mux
 	// 后台任务系统（cron + worker）：订单过期 / 邮件重试 / 清理 / 备份。
 	scheduler := jobs.NewScheduler()
+	// 任务执行记录（job_runs 表）：后台可查看每个任务最后执行结果。
+	scheduler.SetRecorder(func(name string, startedAt, finishedAt int64, err error) {
+		_ = repository.RecordJobRun(s.db, name, startedAt, finishedAt, err)
+	})
 	// order_expire / email_retry / cleanup 启动后立即执行一次（进程崩溃后的补偿清理）。
 	scheduler.Add("order_expire", 5*time.Minute, true, jobs.OrderExpireJob(s.orders, func() int { return s.settings.PaymentServiceConfig().TimeoutSec }))
 	scheduler.Add("email_retry", time.Minute, true, jobs.EmailRetryJob(s.db, notifier.SendRawMail))
