@@ -40,9 +40,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	logging.App().Sugar().Infof("shop listening on %s", cfg.ListenAddr)
-	logging.App().Sugar().Infof("admin entry: %s/admin", cfg.PublicBaseURL)
-	logging.App().Sugar().Infof("bepusdt notify url: %s", cfg.NotifyURL)
 	// 显式超时，防止慢速请求（slowloris 等）长期占用连接。
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,

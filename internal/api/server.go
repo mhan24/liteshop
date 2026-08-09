@@ -30,6 +30,7 @@ import (
 	"shop/internal/payment"
 	"shop/internal/security"
 	"shop/internal/service"
+	"shop/internal/version"
 )
 
 type Server struct {
@@ -99,10 +100,7 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	s.stats = service.NewStatsService(orderRepo, keyRepo, repository.NewProductRepository(database))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, 200, map[string]any{"ok": true})
-	})
+	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST "+s.settings.NotifyPath(), s.handlePaymentNotify)
 	s.registerAPI(mux)
 	s.registerDocs(mux)
@@ -118,7 +116,52 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	scheduler.Add("cleanup", 5*time.Minute, true, jobs.CleanupJob(s.db, s.cleanupMemory))
 	scheduler.Add("backup", 24*time.Hour, false, jobs.BackupJob(s.dbPath, 7))
 	scheduler.Start(context.Background())
+	s.logStartupInfo()
 	return s, nil
+}
+
+// logStartupInfo 输出结构化启动横幅（版本 / 数据库 / 支付 / 监听地址）。
+func (s *Server) logStartupInfo() {
+	payCfg := s.settings.PaymentConfig()
+	paymentStatus := "ok"
+	if payCfg.BepusdtBaseURL == "" || payCfg.BepusdtToken == "" {
+		paymentStatus = "not_configured"
+	}
+	logging.App().Sugar().Infof("LiteShop %s", version.String())
+	logging.App().Sugar().Infof("database: ok (path=%s)", s.dbPath)
+	logging.App().Sugar().Infof("payment: %s (gateway=%s)", paymentStatus, payCfg.BepusdtBaseURL)
+	logging.App().Sugar().Infof("listen: %s", s.cfg.ListenAddr)
+	logging.App().Sugar().Infof("admin entry: %s/admin", s.cfg.PublicBaseURL)
+	logging.App().Sugar().Infof("notify url: %s", payCfg.NotifyURL)
+}
+
+// handleHealth 组件级健康检查：数据库连通性 + 支付网关配置状态。
+// DB 故障返回 503；支付未配置视为 degraded（仍 200，便于部署/监控识别状态）。
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	dbStatus := "ok"
+	if err := s.db.Ping(); err != nil {
+		dbStatus = "fail"
+	}
+	payCfg := s.settings.PaymentConfig()
+	paymentStatus := "ok"
+	if payCfg.BepusdtBaseURL == "" || payCfg.BepusdtToken == "" {
+		paymentStatus = "not_configured"
+	}
+	body := map[string]any{
+		"ok":         dbStatus == "ok",
+		"app":        "LiteShop",
+		"version":    version.Version,
+		"build":      version.String(),
+		"uptime_sec": int64(time.Since(s.startTime).Seconds()),
+		"database":   dbStatus,
+		"payment":    paymentStatus,
+	}
+	status := http.StatusOK
+	if dbStatus != "ok" {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, body)
 }
 
 // cleanupMemory 清理进程内状态（2FA 待验证、链接冷却、限流器）。

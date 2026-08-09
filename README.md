@@ -47,7 +47,7 @@ English: [README.en.md](README.en.md)
 - 迁移体系：编号 .sql 迁移（`internal/db/schema/migrations/`），只执行一次并记录
 - 管理员安全：PBKDF2-SHA256、TOTP 2FA、**登录失败 5 次锁定 10 分钟**、登录时序均摊防枚举
 - 安全：RBAC、审计日志、全接口限流、Turnstile、CSP、HSTS、安全响应头、CSV 注入防护、SQL 全参数化
-- 健康检查 `/health`、首次初始化 `/setup`
+- 组件级健康检查 `/health`（版本 + database/payment 状态，DB 故障返回 503）、首次初始化 `/setup`
 
 ---
 
@@ -275,6 +275,16 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制 + storefront/
 
 - 前台下单/订单查询嵌入 Turnstile
 - 后端 canonical siteverify 校验（含 hostname 匹配，IP/本地放宽）
+
+---
+
+## 可观测性
+
+- 日志（zap）：`logs/app.log` / `logs/payment.log` / `logs/security.log`，50MB 轮转保留 7 份
+- 健康检查 `GET /health`：返回应用名、版本、运行时长与组件状态（`database` / `payment`），DB 故障返回 503
+- 启动横幅：启动时输出 `LiteShop vX.Y.Z (commit, date)` 及 database / payment / listen / admin / notify 信息
+- 版本号由 `internal/version` 统一管理，构建时经 `-ldflags` 注入（build-release.sh 自动带 git tag / commit / date）
+- 后台 `/api/v1/admin/version` 返回版本与构建信息
 
 ---
 

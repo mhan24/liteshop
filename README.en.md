@@ -47,7 +47,7 @@ An automated digital-goods delivery (card / activation code) shop built with **G
 - Migration system: numbered .sql migrations (`internal/db/schema/migrations/`), each run exactly once and recorded
 - Admin security: PBKDF2-SHA256, TOTP 2FA, **lockout after 5 failed logins for 10 minutes**, timing-equalized login
 - Security: RBAC, audit logs, endpoint-wide rate limiting, Turnstile, CSP, HSTS, security headers, CSV injection guard, fully parameterized SQL
-- Health check `/health`, first-time setup `/setup`
+- Component-level health check `/health` (version + database/payment status, 503 on DB failure), first-time setup `/setup`
 
 ---
 
@@ -276,6 +276,16 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary + storefront/.ou
 
 - Storefront checkout / order lookup embed Turnstile
 - Backend verifies via canonical siteverify (with hostname match; relaxed for IP/local access)
+
+---
+
+## Observability
+
+- Logging (zap): `logs/app.log` / `logs/payment.log` / `logs/security.log`, 50MB rotation keeping 7 files
+- Health check `GET /health`: app name, version, uptime and component status (`database` / `payment`); returns 503 when the database is down
+- Startup banner: logs `LiteShop vX.Y.Z (commit, date)` plus database / payment / listen / admin / notify info on boot
+- Version lives in `internal/version` and is injected via `-ldflags` at build time (`build-release.sh` picks up git tag / commit / date automatically)
+- Admin endpoint `/api/v1/admin/version` returns version and build info
 
 ---
 

@@ -14,6 +14,7 @@ import (
 	"shop/internal/models"
 	"shop/internal/notify"
 	"shop/internal/service"
+	"shop/internal/version"
 	"strconv"
 	"strings"
 	"time"
@@ -1915,10 +1916,13 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
-// Version 为构建版本号（可由 -ldflags 覆盖）。
-var Version = "0.1.0"
-
 // apiAdminVersion 返回当前版本并异步检查 GitHub 最新 release。
 func (s *Server) apiAdminVersion(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"version": Version, "repo": "mhan24/liteshop"})
+	writeJSON(w, 200, map[string]any{
+		"version": version.Version,
+		"build":   version.String(),
+		"commit":  version.Commit,
+		"date":    version.Date,
+		"repo":    "mhan24/liteshop",
+	})
 }
