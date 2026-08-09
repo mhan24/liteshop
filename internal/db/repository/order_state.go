@@ -1,6 +1,49 @@
 package repository
 
-import "shop/internal/models"
+import (
+	"database/sql"
+
+	"shop/internal/events"
+	"shop/internal/models"
+)
+
+// enqueuePaidEventsTx 在支付成功事务内写入 OrderPaid + OrderDelivered 到 outbox，
+// 保证"数据库状态"与"事件"永久一致（提交后崩溃也不丢事件）。
+func enqueuePaidEventsTx(tx *sql.Tx, orderID int64) error {
+	o, err := scanOrder(tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE id = ?`, orderID))
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT id, product_id, reserved_order, sold_order, content, status, created_at, updated_at, sold_at FROM cards WHERE sold_order = ? ORDER BY id`, orderID)
+	if err != nil {
+		return err
+	}
+	cards := []models.Card{}
+	for rows.Next() {
+		var c models.Card
+		if err := rows.Scan(&c.ID, &c.ProductID, &c.ReservedOrder, &c.SoldOrder, &c.Content, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.SoldAt); err != nil {
+			rows.Close()
+			return err
+		}
+		cards = append(cards, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	paidPayload, err := events.Encode(events.OrderPaidEvent{Order: o, Cards: cards})
+	if err != nil {
+		return err
+	}
+	if err := enqueueOutboxTx(tx, events.OrderPaidEvent{}.EventName(), paidPayload); err != nil {
+		return err
+	}
+	deliveredPayload, err := events.Encode(events.OrderDeliveredEvent{Order: o, Cards: cards})
+	if err != nil {
+		return err
+	}
+	return enqueueOutboxTx(tx, events.OrderDeliveredEvent{}.EventName(), deliveredPayload)
+}
 
 // ErrNoRows 数据不存在或无变更。
 var ErrNoRows = &NoRowsError{}
@@ -51,6 +94,9 @@ func (r *OrderRepository) MarkPaidAndDeliver(orderID int64, tradeID, blockTx str
 		return 0, err
 	}
 	delivered, _ := res.RowsAffected()
+	if err := enqueuePaidEventsTx(tx, orderID); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
@@ -77,6 +123,9 @@ func (r *OrderRepository) CompleteFreeOrder(orderID int64, paidAt int64) (int64,
 		return 0, err
 	}
 	delivered, _ := res.RowsAffected()
+	if err := enqueuePaidEventsTx(tx, orderID); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}

@@ -9,10 +9,11 @@ type StatsService struct {
 	orders   OrderRepository
 	keys     KeyRepository
 	products ProductRepository
+	store    StatsStore
 }
 
-func NewStatsService(orders OrderRepository, keys KeyRepository, products ProductRepository) *StatsService {
-	return &StatsService{orders: orders, keys: keys, products: products}
+func NewStatsService(orders OrderRepository, keys KeyRepository, products ProductRepository, store StatsStore) *StatsService {
+	return &StatsService{orders: orders, keys: keys, products: products, store: store}
 }
 
 // LowStockItem 低库存商品。
@@ -87,4 +88,34 @@ func (s *StatsService) SalesReport(days int) ([]models.DailyRevenueRow, []models
 		return nil, nil, 0, 0, 0, err
 	}
 	return daily, products, orderTime, migrationEstimate, unknown, nil
+}
+
+// HealthInfo 健康检查聚合指标。
+type HealthInfo struct {
+	SchemaVersion    int
+	IntegrityOK      bool
+	MailQueuePending int
+	LastJobSuccess   int64
+}
+
+// Health 返回数据库/任务健康指标。
+func (s *StatsService) Health() (HealthInfo, error) {
+	var h HealthInfo
+	h.SchemaVersion = s.store.SchemaVersion()
+	h.IntegrityOK = s.store.IntegrityOK()
+	pending, err := s.store.PendingMailCount()
+	if err != nil {
+		return h, err
+	}
+	h.MailQueuePending = pending
+	runs, err := s.store.LatestJobRuns()
+	if err != nil {
+		return h, err
+	}
+	for _, r := range runs {
+		if r.Status == models.JobRunOK && r.FinishedAt > h.LastJobSuccess {
+			h.LastJobSuccess = r.FinishedAt
+		}
+	}
+	return h, nil
 }

@@ -398,7 +398,33 @@ paths:
                   uptime_sec:
                     type: integer
                   database:
-                    type: string
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                      size_bytes:
+                        type: integer
+                      migration_version:
+                        type: integer
+                      last_backup:
+                        type: object
+                        properties:
+                          file:
+                            type: string
+                          modified:
+                            type: integer
+                      integrity:
+                        type: string
+                        enum:
+                        - ok
+                        - error
+                  jobs:
+                    type: object
+                    properties:
+                      mail_queue_size:
+                        type: integer
+                      last_success:
+                        type: integer
                   payment:
                     type: string
         '503':

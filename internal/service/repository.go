@@ -115,3 +115,11 @@ type JobsStore interface {
 	LatestJobRuns() ([]models.JobRun, error)
 	PendingMailCount() (int, error)
 }
+
+// StatsStore 健康/统计所需的数据访问接口。
+type StatsStore interface {
+	SchemaVersion() int
+	IntegrityOK() bool
+	PendingMailCount() (int, error)
+	LatestJobRuns() ([]models.JobRun, error)
+}

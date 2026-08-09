@@ -51,6 +51,14 @@ func (s *Store) SettingsVersion() int {
 	return SettingsVersion(s.db)
 }
 
+func (s *Store) SchemaVersion() int {
+	return SchemaVersion(s.db)
+}
+
+func (s *Store) IntegrityOK() bool {
+	return IntegrityOK(s.db)
+}
+
 // ---- admin / session / audit ----
 
 func (s *Store) HasAdmin() bool {

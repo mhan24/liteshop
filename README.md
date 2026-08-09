@@ -46,6 +46,7 @@ English: [README.en.md](README.en.md)
 - 状态模型分离：**订单状态**（履约生命周期：created / waiting_payment / paid / processing / delivered / completed / cancelled / expired / payment_failed / delivery_failed）与**支付状态**（payment_status 独立列：created / pending / confirmed / failed / cancelled）解耦，支付异常不会污染订单语义（如"支付成功但发卡失败"= 订单 delivery_failed + 支付 confirmed）
 - 任务系统：进程内 goroutine + channel（邮件 / Telegram / Webhook），HTTP 层只发布事件
 - 领域事件：`internal/events` 类型化事件（OrderPaid / OrderExpired / DeliveryFailed / LowStock …），service 只发布事件、不散落 `bus.Publish`，装配层统一分发
+- **Outbox 模式**：支付成功/发货事件与订单状态**同事务**写入 `outbox_events`，outbox worker（1s）读取发布；即使提交后崩溃，事件也会在重启后补发——数据库状态与事件永久一致
 - 幂等台账：外部事件（支付回调）以网关交易号登记 `processed_events` 唯一键，与订单状态迁移同一事务，重复通知只处理一次
 - 后台任务（ticker + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份（含完整性校验）
 - 日志（zap）：app / payment / security 三通道，50MB 轮转保留 7 份
@@ -294,6 +295,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 | `/`、`/api/*`、`/admin/*`、`/order*`、`/product*`、`/page*`、`/setup`、`/health` | `no-store` + `X-Robots-Tag: noindex` |
 
 - 动态页面不缓存；站点源取自数据库 `public_base_url`，不依赖 Host/环境变量。
+- SSR 缓存策略：动态页面与商品列表保持 `no-store`（正确）；未来流量大时再评估 ISR / edge cache，当前不做
 
 ---
 
@@ -301,10 +303,12 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 
 - 日志（zap）：`logs/app.log` / `logs/payment.log` / `logs/security.log`，50MB 轮转保留 7 份
 - 健康检查 `GET /health`：返回应用名、版本、构建标识、运行时长与组件状态（`database` / `payment`），DB 故障返回 503
+- 健康指标：`database`（status / size_bytes / migration_version / last_backup / integrity）与 `jobs`（mail_queue_size / last_success），管理员一眼判断系统状态
 - 启动横幅：启动时输出 `LiteShop vX.Y.Z (commit, date)` 及 database / payment / listen / admin / notify 信息
 - 版本号由 `internal/version` 统一管理，构建时经 `-ldflags` 注入（build-release.sh 自动带 git tag / commit / date）
 - 后台 `/api/v1/admin/version` 返回版本与构建信息
 - 请求日志：`app.log` 每请求一行（request_id / method / path / status / duration_ms）；支付日志带 request_id / order_no / trace_id
+- 安全头回归测试：`internal/api/security_test.go` 固化 nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / admin CSP / HSTS / 会话 Cookie Secure
 
 ---
 

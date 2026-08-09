@@ -46,8 +46,7 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (mod
 	}
 	_ = s.repo.SetOrderStatus(o.ID, models.OrderDelivered)
 	_ = s.repo.AddLog(o.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
-	// 发卡邮件统一由 OrderPaidEvent 处理器发送（事件消费异步，不阻塞回调）。
-	s.fireOrderEvents(o, cards)
+	// OrderPaid/OrderDelivered 事件已由支付事务写入 outbox，由 outbox worker 发布。
 	return o, cards, true, nil
 }
 

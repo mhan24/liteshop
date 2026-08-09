@@ -15,6 +15,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,30 +92,14 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 	keyRepo := repository.NewKeyRepository(database)
 	s.orders = service.NewOrderService(orderRepo, s.paymentGateway, s.settings.PaymentServiceConfig)
 	s.orders.SendPaid = notifier.SendPaid
-	// 领域事件 → 通知分发（service 只发布类型化事件，不接触 bus）。
-	s.orders.SetEvents(events.Func(func(e events.Event) {
-		switch ev := e.(type) {
-		case events.OrderCreatedEvent:
-			payload := notifier.OrderPayload(notify.EventOrderCreated, ev.Order, nil, nil)
-			notifier.Notify(notify.EventOrderCreated, payload)
-		case events.OrderPaidEvent:
-			payload := notifier.OrderPayload(notify.EventPaymentSuccess, ev.Order, nil, nil)
-			delete(payload, "contact") // 买家邮件由 SendPaid 发送，避免重复
-			notifier.Notify(notify.EventPaymentSuccess, payload)
-			notifier.SendPaid(ev.Order, ev.Cards)
-		case events.OrderDeliveredEvent:
-			payload := notifier.OrderPayload(notify.EventDelivered, ev.Order, ev.Cards, nil)
-			delete(payload, "contact")
-			notifier.Notify(notify.EventDelivered, payload)
-		case events.LowStockEvent:
-			notifier.NotifyLowStock(ev.ProductID, ev.ProductName, ev.Available, ev.Threshold)
-		}
-	}))
+	// 领域事件 → 通知分发（service 只发布类型化事件，不接触 bus；直接事件 + outbox 共用同一分发器）。
+	dispatch := orderEventDispatcher(notifier)
+	s.orders.SetEvents(dispatch)
 	s.orders.SendLinks = notifier.SendOrderLinks
 	s.orders.LowStockThreshold = s.settings.LowStockThreshold
 	s.orders.SetKeyRepository(keyRepo)
 	s.products = service.NewProductService(repository.NewProductRepository(database), keyRepo)
-	s.stats = service.NewStatsService(orderRepo, keyRepo, repository.NewProductRepository(database))
+	s.stats = service.NewStatsService(orderRepo, keyRepo, repository.NewProductRepository(database), store)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -133,6 +119,8 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 	// order_expire / email_retry / cleanup 启动后立即执行一次（进程崩溃后的补偿清理）。
 	scheduler.Add("order_expire", 5*time.Minute, true, jobs.OrderExpireJob(s.orders, func() int { return s.settings.PaymentServiceConfig().TimeoutSec }))
 	scheduler.Add("email_retry", time.Minute, true, jobs.EmailRetryJob(s.db, notifier.SendRawMail))
+	// Outbox 消费者：近实时发布支付成功/发货事件（崩溃恢复后立即补发）。
+	scheduler.Add("outbox_publish", time.Second, true, jobs.OutboxPublishJob(s.db, dispatch))
 	scheduler.Add("cleanup", 5*time.Minute, true, jobs.CleanupJob(s.db, s.cleanupMemory))
 	scheduler.Add("backup", 24*time.Hour, false, jobs.BackupJob(s.dbPath, 7))
 	scheduler.Start(ctx)
@@ -155,6 +143,28 @@ func (s *Server) logStartupInfo() {
 	logging.App().Sugar().Infof("notify url: %s", payCfg.NotifyURL)
 }
 
+// orderEventDispatcher 领域事件 → 通知分发（service 直接发布与 outbox 消费者共用）。
+func orderEventDispatcher(notifier *notify.Notifier) events.Func {
+	return events.Func(func(e events.Event) {
+		switch ev := e.(type) {
+		case events.OrderCreatedEvent:
+			payload := notifier.OrderPayload(notify.EventOrderCreated, ev.Order, nil, nil)
+			notifier.Notify(notify.EventOrderCreated, payload)
+		case events.OrderPaidEvent:
+			payload := notifier.OrderPayload(notify.EventPaymentSuccess, ev.Order, nil, nil)
+			delete(payload, "contact") // 买家邮件由 SendPaid 发送，避免重复
+			notifier.Notify(notify.EventPaymentSuccess, payload)
+			notifier.SendPaid(ev.Order, ev.Cards)
+		case events.OrderDeliveredEvent:
+			payload := notifier.OrderPayload(notify.EventDelivered, ev.Order, ev.Cards, nil)
+			delete(payload, "contact")
+			notifier.Notify(notify.EventDelivered, payload)
+		case events.LowStockEvent:
+			notifier.NotifyLowStock(ev.ProductID, ev.ProductName, ev.Available, ev.Threshold)
+		}
+	})
+}
+
 // handleHealth 组件级健康检查：数据库连通性 + 支付网关配置状态。
 // DB 故障返回 503；支付未配置视为 degraded（仍 200，便于部署/监控识别状态）。
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +178,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if payCfg.BepusdtBaseURL == "" || payCfg.BepusdtToken == "" {
 		paymentStatus = "not_configured"
 	}
+	var dbSize int64
+	if st, err := os.Stat(s.dbPath); err == nil {
+		dbSize = st.Size()
+	}
+	health, err := s.stats.Health()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	backupFile, backupMod, hasBackup := latestBackupFile(s.dbPath)
+	lastBackup := map[string]any{"file": "", "modified": int64(0)}
+	if hasBackup {
+		lastBackup = map[string]any{"file": backupFile, "modified": backupMod}
+	}
 	body := map[string]any{
 		"ok":             dbStatus == "ok",
 		"app":            "LiteShop",
@@ -175,14 +199,52 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"build":          version.String(),
 		"config_version": s.settings.ConfigVersion(),
 		"uptime_sec":     int64(time.Since(s.startTime).Seconds()),
-		"database":       dbStatus,
-		"payment":        paymentStatus,
+		"database": map[string]any{
+			"status":            dbStatus,
+			"size_bytes":        dbSize,
+			"migration_version": health.SchemaVersion,
+			"last_backup":       lastBackup,
+			"integrity":         map[bool]string{true: "ok", false: "error"}[health.IntegrityOK],
+		},
+		"jobs": map[string]any{
+			"mail_queue_size": health.MailQueuePending,
+			"last_success":    health.LastJobSuccess,
+		},
+		"payment": paymentStatus,
 	}
 	status := http.StatusOK
 	if dbStatus != "ok" {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, body)
+}
+
+// latestBackupFile 返回备份目录（data/backups）中最新的 shop-*.db 备份。
+func latestBackupFile(dbPath string) (string, int64, bool) {
+	dir := filepath.Join(filepath.Dir(dbPath), "backups")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", 0, false
+	}
+	var best string
+	var bestMod int64
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "shop-") || !strings.HasSuffix(e.Name(), ".db") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Unix() > bestMod {
+			best = e.Name()
+			bestMod = info.ModTime().Unix()
+		}
+	}
+	if best == "" {
+		return "", 0, false
+	}
+	return best, bestMod, true
 }
 
 // cleanupMemory 清理进程内状态（2FA 待验证、链接冷却、限流器）。
@@ -205,6 +267,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 	w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+	// HSTS：仅在 HTTPS 请求时下发（生产由 Caddy/Cloudflare 终止 TLS，以 X-Forwarded-Proto 判断）。
+	if r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	}
 	// 关联 ID：一次请求一个 request_id，贯穿 app/payment/security 日志与响应头。
 	requestID := models.RandomToken(16)
 	w.Header().Set("X-Request-ID", requestID)

@@ -156,6 +156,6 @@ func (s *OrderService) completeFreeOrder(order models.Order, discount, couponID 
 	_ = s.repo.SetOrderStatus(order.ID, models.OrderDelivered)
 	_ = s.repo.AddLog(order.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
 	s.fireCreatedEvents(order)
-	s.fireOrderEvents(order, cards)
+	// OrderPaid/OrderDelivered 事件由 CompleteFreeOrder 事务写入 outbox。
 	return order.OrderNo, "", discount, couponID, nil
 }

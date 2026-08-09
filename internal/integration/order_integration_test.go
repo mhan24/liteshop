@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"shop/internal/db/repository"
+	"shop/internal/events"
+	"shop/internal/jobs"
 	"shop/internal/models"
 	"shop/internal/payment"
 	"shop/internal/service"
@@ -68,6 +70,18 @@ func TestPaymentCallbackAndDuplicate(t *testing.T) {
 	if !changed || len(cards) != 1 {
 		t.Fatalf("deliver result: changed=%v cards=%d", changed, len(cards))
 	}
+	// Outbox：支付成功/发货事件已与状态同事务写入，待发布 2 条。
+	pending, err := repository.FetchOutboxEvents(d, 10)
+	if err != nil {
+		t.Fatalf("fetch outbox: %v", err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("pending outbox = %d, want 2 (paid + delivered)", len(pending))
+	}
+	// 模拟 outbox worker 发布事件。
+	if err := jobs.OutboxPublishJob(d, events.Func(rec.Publish))(); err != nil {
+		t.Fatalf("outbox publish: %v", err)
+	}
 	o2, err := svc.GetOrderByNo(orderNo)
 	if err != nil || o2.Status != models.OrderDelivered {
 		t.Fatalf("order status = %v (%v), want delivered", o2.Status, err)
@@ -78,6 +92,10 @@ func TestPaymentCallbackAndDuplicate(t *testing.T) {
 	testutil.WaitFor(t, 2*time.Second, func() bool { return rec.PaidCount() == 1 }, "send paid notify")
 	if rec.PaymentSuccessCount() != 1 || rec.DeliveredCount() != 1 {
 		t.Fatalf("event notifies: success=%d delivered=%d", rec.PaymentSuccessCount(), rec.DeliveredCount())
+	}
+	pending, _ = repository.FetchOutboxEvents(d, 10)
+	if len(pending) != 0 {
+		t.Fatalf("pending outbox after publish = %d, want 0", len(pending))
 	}
 	avail, _ := keyRepo.AvailableCount(pid)
 	if avail != 2 {
@@ -99,6 +117,12 @@ func TestPaymentCallbackAndDuplicate(t *testing.T) {
 	o3, _ := svc.GetOrderByNo(orderNo)
 	if o3.PaymentStatus != models.PaymentConfirmed {
 		t.Fatalf("payment status after duplicate = %q, want confirmed", o3.PaymentStatus)
+	}
+	// 重复回调后再次运行 outbox：无新增事件、通知不重复。
+	_ = jobs.OutboxPublishJob(d, events.Func(rec.Publish))()
+	time.Sleep(50 * time.Millisecond)
+	if rec.PaidCount() != 1 {
+		t.Fatalf("duplicate callback re-published events: paid=%d", rec.PaidCount())
 	}
 	// 幂等台账：同一网关交易号只登记一次
 	var processed int

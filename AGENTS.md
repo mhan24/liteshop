@@ -51,6 +51,10 @@
 - 所有请求日志/支付日志必须带 `request_id`（中间件自动生成），支付日志另带 `order_no` 与 `trace_id`（网关交易号）；
 - 领域事件必须走 `internal/events` 的类型化事件 + `events.Publisher`（service 禁止直接 `bus.Publish`）；新增事件在 events 包定义并统一分发；
 - 外部事件（支付回调）必须以唯一键登记 `processed_events`（与状态变更同事务），重复事件返回幂等 noop；
+- 关键领域事件（支付成功/发货）必须走 Outbox：与状态变更**同事务**写 `outbox_events`，由 outbox worker 发布；禁止只在提交后直接发布而丢失"提交成功但未发布"的窗口；
+- 健康检查 `/health` 必须保留 database（size/migration_version/last_backup/integrity）与 jobs（queue_size/last_success）指标；
+- 安全响应头（nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / CSP / HSTS / Cookie Secure）改动必须同步 `internal/api/security_test.go`；
+- SSR 缓存策略：动态页面与商品列表保持 no-store，ISR/edge cache 暂不实施；
 - 数据库连接启动即确认 `journal_mode=WAL` / `busy_timeout=5000` / `foreign_keys=ON`；服务必须支持 SIGTERM 优雅停机（停止接收 → 排空 → worker 退出 → 关库）；
 - API 变更必须同步 `admin-ui npm run gen:api` 重新生成 `src/api/types.ts`（CI 有 diff 校验），前端禁止手写接口类型；
 - 支付/通知相关改动必须跑 `go test ./internal/integration/... ./internal/api/...`（MockGateway / NotifyRecorder 覆盖回调、重复回调、取消、超时）；

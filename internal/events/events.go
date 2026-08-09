@@ -4,7 +4,12 @@
 // 装配层把事件分发到通知/任务系统，后续事件增多也不会在业务代码里散落 Publish。
 package events
 
-import "shop/internal/models"
+import (
+	"encoding/json"
+	"fmt"
+
+	"shop/internal/models"
+)
 
 // Event 领域事件统一接口。
 type Event interface {
@@ -78,3 +83,42 @@ type LowStockEvent struct {
 }
 
 func (LowStockEvent) EventName() string { return "stock.low" }
+
+// Encode 把领域事件序列化为 outbox 载荷（{"type":...,"data":...}）。
+func Encode(e Event) (string, error) {
+	raw, err := json.Marshal(struct {
+		Type string `json:"type"`
+		Data any    `json:"data"`
+	}{Type: e.EventName(), Data: e})
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// Decode 从 outbox 载荷还原领域事件。
+func Decode(payload string) (Event, error) {
+	var env struct {
+		Type string          `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(payload), &env); err != nil {
+		return nil, err
+	}
+	switch env.Type {
+	case OrderPaidEvent{}.EventName():
+		var e OrderPaidEvent
+		if err := json.Unmarshal(env.Data, &e); err != nil {
+			return nil, err
+		}
+		return e, nil
+	case OrderDeliveredEvent{}.EventName():
+		var e OrderDeliveredEvent
+		if err := json.Unmarshal(env.Data, &e); err != nil {
+			return nil, err
+		}
+		return e, nil
+	default:
+		return nil, fmt.Errorf("events: unsupported outbox event type %q", env.Type)
+	}
+}

@@ -46,6 +46,7 @@
 - Separated status models: **order status** (fulfillment lifecycle: created / waiting_payment / paid / processing / delivered / completed / cancelled / expired / payment_failed / delivery_failed) is decoupled from **payment status** (dedicated `payment_status` column: created / pending / confirmed / failed / cancelled); payment anomalies never pollute order semantics (e.g. "paid but delivery failed" = order `delivery_failed` + payment `confirmed`)
 - Task system: in-process goroutine + channel (mail / Telegram / Webhook); the HTTP layer only publishes events
 - Domain events: typed events in `internal/events` (OrderPaid / OrderExpired / DeliveryFailed / LowStock …); the service only publishes events — no scattered `bus.Publish` — and the composition root dispatches them
+- **Outbox pattern**: payment-success/delivery events are written to `outbox_events` **in the same transaction** as the order state change; an outbox worker (1s) reads and publishes them — even after a crash right after COMMIT, events are re-published on restart, keeping DB state and events permanently consistent
 - Idempotency ledger: external events (payment callbacks) register a unique key (`transaction_id`) in `processed_events` within the same transaction as the order state change, so duplicate notifications are processed once
 - Background jobs (ticker + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup (with integrity verification)
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files
@@ -295,6 +296,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 
 - Dynamic pages are never cached; canonical / OG / JSON-LD are emitted by Nuxt; sitemap includes product URLs dynamically.
 - The site origin comes from the database `public_base_url` — no Host/env dependency.
+- SSR caching policy: dynamic pages and product listings stay `no-store` (correct for now); ISR / edge cache can be evaluated later under high traffic — not implemented today.
 
 ---
 
@@ -302,10 +304,12 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 
 - Logging (zap): `logs/app.log` / `logs/payment.log` / `logs/security.log`, 50MB rotation keeping 7 files
 - Health check `GET /health`: app name, version, build ID, uptime and component status (`database` / `payment`); returns 503 when the database is down
+- Health metrics: `database` (status / size_bytes / migration_version / last_backup / integrity) and `jobs` (mail_queue_size / last_success)
 - Startup banner: logs `LiteShop vX.Y.Z (commit, date)` plus database / payment / listen / admin / notify info on boot
 - Version lives in `internal/version` and is injected via `-ldflags` at build time (`build-release.sh` picks up git tag / commit / date automatically)
 - Admin endpoint `/api/v1/admin/version` returns version and build info
 - Request logging: `app.log` writes one line per request (request_id / method / path / status / duration_ms); payment logs carry request_id / order_no / trace_id
+- Security-header regression tests: `internal/api/security_test.go` pins nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / admin CSP / HSTS / session-cookie Secure
 
 ---
 
