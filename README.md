@@ -210,6 +210,12 @@ cd admin-ui && npm run lint && npm run format
 
 > `internal/api/admin-ui` 是后台构建产物，已被 `.gitignore` 忽略，不提交。
 
+### 代码规范
+
+- **service 小文件原则**：按职责拆分（如 `order_create.go` / `order_cancel.go` / `order_deliver.go`），单文件建议不超过 300 行；
+- 新增 schema 变更必须新增编号 .sql 迁移；敏感配置一律走 `secrets` 表加密存储；
+- 改动同步更新测试与中英文 README。
+
 ---
 
 ## 部署（服务器）

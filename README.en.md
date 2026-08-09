@@ -210,6 +210,12 @@ cd admin-ui && npm run lint && npm run format
 
 > `internal/api/admin-ui` is a build artifact, ignored by `.gitignore`, not committed.
 
+### Code conventions
+
+- **Small service files**: split by responsibility (e.g. `order_create.go` / `order_cancel.go` / `order_deliver.go`); keep each file under ~300 lines;
+- New schema changes must be new numbered .sql migrations; sensitive config always goes into the encrypted `secrets` table;
+- Keep tests and the bilingual README in sync with changes.
+
 ---
 
 ## Deployment (server)
