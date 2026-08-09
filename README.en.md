@@ -190,7 +190,7 @@ AGENTS.md               engineering conventions (layering / small files / interf
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.25.12+ (govulncheck clean: patches known stdlib vulnerabilities, e.g. x509/name-constraints, crypto/tls, net/textproto)
 - Node.js 18+ / npm
 - A BEpusdt instance (or another `Gateway` implementation)
 

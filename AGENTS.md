@@ -70,3 +70,4 @@
 - 备份逻辑必须带校验（备份后只读打开 + `PRAGMA integrity_check`，失败删除坏文件）；
 - 后台任务执行必须记录 `job_runs`（由调度器统一写入 status/error），新增任务时确保返回 error 以正确记录失败；
 - 部署：服务器 `git pull && go build ./... && go test ./internal/...` 通过后再替换二进制重启。
+- Go 工具链必须 ≥1.25.12（govulncheck 基线）；升级 Go 后跑 `govulncheck ./...` 确认无新漏洞。

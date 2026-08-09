@@ -190,7 +190,7 @@ AGENTS.md               工程约定（分层 / 小文件 / 接口化 / 迁移 /
 
 ### 前置要求
 
-- Go 1.25+
+- Go 1.25.12+（govulncheck 全绿：修复标准库已知漏洞，如 x509/name-constraints、crypto/tls、net/textproto）
 - Node.js 18+ / npm
 - 一个 BEpusdt 实例（或接入其他 `Gateway` 实现）
 

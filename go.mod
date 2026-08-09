@@ -1,6 +1,6 @@
 module shop
 
-go 1.25.0
+go 1.25.12
 
 require (
 	go.uber.org/zap v1.28.0
