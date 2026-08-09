@@ -165,13 +165,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		paymentStatus = "not_configured"
 	}
 	body := map[string]any{
-		"ok":         dbStatus == "ok",
-		"app":        "LiteShop",
-		"version":    version.Version,
-		"build":      version.String(),
-		"uptime_sec": int64(time.Since(s.startTime).Seconds()),
-		"database":   dbStatus,
-		"payment":    paymentStatus,
+		"ok":             dbStatus == "ok",
+		"app":            "LiteShop",
+		"version":        version.Version,
+		"build":          version.String(),
+		"config_version": s.settings.ConfigVersion(),
+		"uptime_sec":     int64(time.Since(s.startTime).Seconds()),
+		"database":       dbStatus,
+		"payment":        paymentStatus,
 	}
 	status := http.StatusOK
 	if dbStatus != "ok" {
@@ -200,12 +201,36 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 	w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+	// 关联 ID：一次请求一个 request_id，贯穿 app/payment/security 日志与响应头。
+	requestID := models.RandomToken(16)
+	w.Header().Set("X-Request-ID", requestID)
+	ctx := logging.WithRequestID(r.Context(), requestID)
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	start := time.Now()
 	// 管理后台 SPA 的 CSP（/docs 依赖 CDN 脚本，不在此范围）。
 	if strings.HasPrefix(r.URL.Path, "/admin") {
 		// script-src 需 'unsafe-eval'：vue-i18n 消息编译在运行时使用 new Function。
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 	}
-	s.mux.ServeHTTP(w, r)
+	s.mux.ServeHTTP(rec, r.WithContext(ctx))
+	logging.App().Sugar().Infow("http request",
+		"request_id", requestID,
+		"method", r.Method,
+		"path", r.URL.Path,
+		"status", rec.status,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+}
+
+// statusRecorder 记录响应状态码（供请求日志使用）。
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
 }
 
 func pathID(r *http.Request, name string) (int64, error) {
@@ -317,6 +342,7 @@ func (s *Server) handlePaymentNotify(w http.ResponseWriter, r *http.Request) {
 	params, err := s.paymentGateway().VerifyCallback(body)
 	if err != nil {
 		logging.Payment().Warn("bepusdt callback verify failed",
+			zap.String("request_id", logging.RequestID(r.Context())),
 			zap.Int("body_bytes", len(body)),
 			zap.String("result", "verify_failed"),
 			zap.Error(err),
@@ -325,8 +351,10 @@ func (s *Server) handlePaymentNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logging.Payment().Info("bepusdt callback",
+		zap.String("request_id", logging.RequestID(r.Context())),
 		zap.String("order_no", params["order_id"]),
 		zap.String("trade_id", params["trade_id"]),
+		zap.String("trace_id", params["trade_id"]),
 		zap.String("block_transaction_id", params["block_transaction_id"]),
 		zap.String("status", params["status"]),
 		zap.Time("callback_time", time.Now()),
@@ -336,6 +364,7 @@ func (s *Server) handlePaymentNotify(w http.ResponseWriter, r *http.Request) {
 		order, _, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], params["trade_id"], params["block_transaction_id"])
 		if err != nil {
 			logging.Payment().Error("payment callback error",
+				zap.String("request_id", logging.RequestID(r.Context())),
 				zap.String("order_no", params["order_id"]),
 				zap.String("result", "error"),
 				zap.Error(err),
@@ -343,9 +372,11 @@ func (s *Server) handlePaymentNotify(w http.ResponseWriter, r *http.Request) {
 			s.notifySvc.SystemError("支付回调处理异常 order=" + params["order_id"] + ": " + err.Error())
 		} else {
 			logging.Payment().Info("payment delivered",
+				zap.String("request_id", logging.RequestID(r.Context())),
 				zap.String("order_no", order.OrderNo),
 				zap.Int64("amount_cents", order.AmountCents),
 				zap.String("trade_id", order.TradeID),
+				zap.String("trace_id", order.TradeID),
 				zap.String("result", map[bool]string{true: "ok", false: "noop"}[changed]),
 			)
 		}

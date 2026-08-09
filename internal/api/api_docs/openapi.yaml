@@ -392,6 +392,9 @@ paths:
                     type: string
                   build:
                     type: string
+                  config_version:
+                    type: integer
+                    description: settings 配置版本
                   uptime_sec:
                     type: integer
                   database:
@@ -1508,7 +1511,7 @@ paths:
       summary: 版本与构建信息
       responses:
         '200':
-          description: '{ version, build, commit, date, repo }'
+          description: '{ version, build, commit, date, config_version, repo }'
   /api/v1/admin/admins:
     get:
       tags:

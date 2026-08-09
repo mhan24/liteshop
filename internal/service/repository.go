@@ -79,6 +79,7 @@ type SettingsStore interface {
 	SetSecret(key, value string, cipher *security.Cipher) error
 	SecretKeys() []string
 	ResetAllTables() error
+	SettingsVersion() int
 }
 
 // AdminStore 管理员/会话/审计数据访问接口。

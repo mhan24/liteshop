@@ -47,6 +47,10 @@ func (s *Store) ResetAllTables() error {
 	return ResetAllTables(s.db)
 }
 
+func (s *Store) SettingsVersion() int {
+	return SettingsVersion(s.db)
+}
+
 // ---- admin / session / audit ----
 
 func (s *Store) HasAdmin() bool {

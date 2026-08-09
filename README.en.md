@@ -40,6 +40,7 @@
 
 - SQLite storage (pure Go, no CGO); no application-level environment variables — **all configuration is written to the database** during `/setup` and from the admin panel
 - Config system: `settings` (system config) + `secrets` (sensitive config AES-GCM encrypted)
+- Config versioning: `settings_version` records config-structure upgrade versions (numbered Laravel-style steps, run once); config upgrades no longer require guessing — exposed via `/health` and `/api/v1/admin/version`
 - Layering: api (handler) → service (business) → db/repository (data) → db/schema (schema evolution); payment / notify / jobs / logging each isolated by responsibility
 - Payment abstraction: order business depends only on the `payment.Gateway` interface (currently implemented by BEpusdt); switching gateways does not touch business code
 - Separated status models: **order status** (fulfillment lifecycle: created / waiting_payment / paid / processing / delivered / completed / cancelled / expired / payment_failed / delivery_failed) is decoupled from **payment status** (dedicated `payment_status` column: created / pending / confirmed / failed / cancelled); payment anomalies never pollute order semantics (e.g. "paid but delivery failed" = order `delivery_failed` + payment `confirmed`)
@@ -50,6 +51,7 @@
 - Admin security: PBKDF2-SHA256, TOTP 2FA, **lockout after 5 failed logins for 10 minutes**, timing-equalized login
 - Security: RBAC, audit logs, endpoint-wide rate limiting, Turnstile, CSP, HSTS, security headers, CSV injection guard, fully parameterized SQL
 - Observability: component-level health check `/health` (database / payment), version injection, structured startup banner
+- Log correlation: every HTTP request gets an auto-generated `request_id` (response header `X-Request-ID`); payment logs carry `request_id` / `order_id` / `trace_id` (gateway trade ID), so one payment flow can be traced end to end
 - API docs: `/docs` (OpenAPI 3.0, JSON + YAML, `/swagger` alias), admin-only
 
 ---
@@ -297,6 +299,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 - Startup banner: logs `LiteShop vX.Y.Z (commit, date)` plus database / payment / listen / admin / notify info on boot
 - Version lives in `internal/version` and is injected via `-ldflags` at build time (`build-release.sh` picks up git tag / commit / date automatically)
 - Admin endpoint `/api/v1/admin/version` returns version and build info
+- Request logging: `app.log` writes one line per request (request_id / method / path / status / duration_ms); payment logs carry request_id / order_no / trace_id
 
 ---
 

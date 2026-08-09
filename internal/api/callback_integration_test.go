@@ -56,7 +56,7 @@ func postCallback(t *testing.T, s *Server, payload []byte) *httptest.ResponseRec
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/notify/bepusdt", bytes.NewReader(payload))
 	rec := httptest.NewRecorder()
-	s.mux.ServeHTTP(rec, req)
+	s.ServeHTTP(rec, req)
 	return rec
 }
 
@@ -71,6 +71,8 @@ func TestPaymentCallbackHTTP(t *testing.T) {
 	})
 	if rec := postCallback(t, s, payload); rec.Code != http.StatusOK {
 		t.Fatalf("callback status = %d, want 200", rec.Code)
+	} else if rec.Header().Get("X-Request-ID") == "" {
+		t.Fatal("X-Request-ID header missing (correlation id middleware)")
 	}
 	repo := repository.NewOrderRepository(d)
 	o, err := repo.GetOrderByNo(orderNo)

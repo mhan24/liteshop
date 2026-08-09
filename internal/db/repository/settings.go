@@ -54,6 +54,13 @@ func AllSettings(d *sql.DB) (map[string]string, error) {
 	return out, rows.Err()
 }
 
+// SettingsVersion 返回当前配置版本（settings_version 表最大版本，0=未记录）。
+func SettingsVersion(d *sql.DB) int {
+	var v int
+	_ = d.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM settings_version`).Scan(&v)
+	return v
+}
+
 // EnsureSessionSecret 返回会话主密钥（缺失时生成并写入 settings）。
 // 该密钥用于派生 secrets/TOTP 的 AES 密钥，明文保存在 settings 表。
 func EnsureSessionSecret(d *sql.DB) string {

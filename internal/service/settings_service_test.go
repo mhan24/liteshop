@@ -34,6 +34,7 @@ func (s *stubSettingsStore) SetSecret(key, value string, _ *security.Cipher) err
 }
 func (s *stubSettingsStore) SecretKeys() []string  { return s.keys }
 func (s *stubSettingsStore) ResetAllTables() error { return nil }
+func (s *stubSettingsStore) SettingsVersion() int  { return 1 }
 
 // TestSettingsServiceSavePaymentWithStub 用内存 stub 验证支付配置保存：
 // 普通配置进 settings，敏感 Token 走 secrets，法币/收款类型规范化。

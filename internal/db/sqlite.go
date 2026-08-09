@@ -25,5 +25,8 @@ func Open(path string) (*sql.DB, error) {
 	if err := schema.Migrate(d); err != nil {
 		return nil, err
 	}
+	if err := MigrateSettings(d); err != nil {
+		return nil, err
+	}
 	return d, nil
 }

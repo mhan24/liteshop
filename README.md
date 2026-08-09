@@ -40,6 +40,7 @@ English: [README.en.md](README.en.md)
 
 - SQLite 存储（纯 Go，无 CGO）；无应用级环境变量，**全部配置在初始化与管理后台写入数据库**
 - 配置系统：`settings`（系统配置）+ `secrets`（敏感配置 AES-GCM 加密）
+- 配置版本：`settings_version` 记录配置结构升级版本（Laravel 风格编号步骤，只执行一次），升级配置不再靠猜；`/health` 与 `/api/v1/admin/version` 直接显示
 - 分层：api（handler）→ service（业务）→ db/repository（数据）→ db/schema（schema 演进）；payment / notify / jobs / logging 按职责独立
 - 支付抽象：订单业务只依赖 `payment.Gateway` 接口，当前实现为 BEpusdt，换网关不改业务
 - 状态模型分离：**订单状态**（履约生命周期：created / waiting_payment / paid / processing / delivered / completed / cancelled / expired / payment_failed / delivery_failed）与**支付状态**（payment_status 独立列：created / pending / confirmed / failed / cancelled）解耦，支付异常不会污染订单语义（如"支付成功但发卡失败"= 订单 delivery_failed + 支付 confirmed）
@@ -50,6 +51,7 @@ English: [README.en.md](README.en.md)
 - 管理员安全：PBKDF2-SHA256、TOTP 2FA、**登录失败 5 次锁定 10 分钟**、登录时序均摊防枚举
 - 安全：RBAC、审计日志、全接口限流、Turnstile、CSP、HSTS、安全响应头、CSV 注入防护、SQL 全参数化
 - 可观测性：组件级健康检查 `/health`（database / payment）、版本注入、结构化启动横幅
+- 日志关联：每个 HTTP 请求自动生成 `request_id`（响应头 `X-Request-ID`），支付日志携带 `request_id` / `order_id` / `trace_id`（网关交易号），一条支付链路可整线串起
 - API 文档：`/docs`（OpenAPI 3.0，json + yaml 双格式，`/swagger` 别名），仅管理员可见
 
 ---
@@ -296,6 +298,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 - 启动横幅：启动时输出 `LiteShop vX.Y.Z (commit, date)` 及 database / payment / listen / admin / notify 信息
 - 版本号由 `internal/version` 统一管理，构建时经 `-ldflags` 注入（build-release.sh 自动带 git tag / commit / date）
 - 后台 `/api/v1/admin/version` 返回版本与构建信息
+- 请求日志：`app.log` 每请求一行（request_id / method / path / status / duration_ms）；支付日志带 request_id / order_no / trace_id
 
 ---
 

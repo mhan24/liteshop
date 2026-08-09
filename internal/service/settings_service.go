@@ -94,3 +94,8 @@ func (s *SettingsService) GetSecret(key string) string {
 func (s *SettingsService) SetSecret(key, value string) error {
 	return s.store.SetSecret(key, value, s.cipher)
 }
+
+// ConfigVersion 返回当前配置版本（settings 结构升级版本号）。
+func (s *SettingsService) ConfigVersion() int {
+	return s.store.SettingsVersion()
+}

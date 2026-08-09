@@ -394,6 +394,7 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.notifySvc.SystemError("创建支付交易失败: " + err.Error())
 		logging.Payment().Warn("payment create failed",
+			zap.String("request_id", logging.RequestID(r.Context())),
 			zap.String("order_no", orderNo),
 			zap.String("trade_type", tradeType),
 			zap.String("result", "error"),
@@ -416,9 +417,11 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	if o, oerr := s.orders.GetOrderByNo(orderNo); oerr == nil {
 		token = o.ViewToken
 		logging.Payment().Info("payment create",
+			zap.String("request_id", logging.RequestID(r.Context())),
 			zap.String("order_no", orderNo),
 			zap.Int64("amount_cents", o.AmountCents),
 			zap.String("trade_type", o.TradeType),
+			zap.String("trace_id", o.TradeID),
 			zap.String("result", "ok"),
 		)
 	}
@@ -1941,10 +1944,11 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 // apiAdminVersion 返回当前版本并异步检查 GitHub 最新 release。
 func (s *Server) apiAdminVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
-		"version": version.Version,
-		"build":   version.String(),
-		"commit":  version.Commit,
-		"date":    version.Date,
-		"repo":    "mhan24/liteshop",
+		"version":        version.Version,
+		"build":          version.String(),
+		"commit":         version.Commit,
+		"date":           version.Date,
+		"config_version": s.settings.ConfigVersion(),
+		"repo":           "mhan24/liteshop",
 	})
 }
