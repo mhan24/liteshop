@@ -112,10 +112,11 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	s.mux = mux
 	// 后台任务系统（cron + worker）：订单过期 / 邮件重试 / 清理 / 备份。
 	scheduler := jobs.NewScheduler()
-	scheduler.Add("order_expire", 5*time.Minute, jobs.OrderExpireJob(s.orders, func() int { return s.settings.PaymentServiceConfig().TimeoutSec }))
-	scheduler.Add("email_retry", time.Minute, jobs.EmailRetryJob(s.db, notifier.SendRawMail))
-	scheduler.Add("cleanup", 5*time.Minute, jobs.CleanupJob(s.db, s.cleanupMemory))
-	scheduler.Add("backup", 24*time.Hour, jobs.BackupJob(s.dbPath, 7))
+	// order_expire / email_retry / cleanup 启动后立即执行一次（进程崩溃后的补偿清理）。
+	scheduler.Add("order_expire", 5*time.Minute, true, jobs.OrderExpireJob(s.orders, func() int { return s.settings.PaymentServiceConfig().TimeoutSec }))
+	scheduler.Add("email_retry", time.Minute, true, jobs.EmailRetryJob(s.db, notifier.SendRawMail))
+	scheduler.Add("cleanup", 5*time.Minute, true, jobs.CleanupJob(s.db, s.cleanupMemory))
+	scheduler.Add("backup", 24*time.Hour, false, jobs.BackupJob(s.dbPath, 7))
 	scheduler.Start(context.Background())
 	return s, nil
 }

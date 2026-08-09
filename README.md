@@ -100,6 +100,7 @@ HTTP handler (internal/api)
   - `email_retry`：失败邮件入 `mail_queue`，指数退避重试（最多 5 次）
   - `cleanup`：过期会话 / 180 天日志 / 内存状态清理
   - `backup`：每日 `VACUUM INTO` 一致性快照，保留最近 7 份
+- 健壮性：worker/调度任务 panic 隔离（单任务崩溃不拖垮进程）；`order_expire` / `email_retry` / `cleanup` 启动后立即执行一次（进程崩溃后的补偿清理）
 
 ---
 

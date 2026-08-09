@@ -65,7 +65,15 @@ func (b *Bus) Start(ctx context.Context, workers int, handle func(Job)) {
 				case <-ctx.Done():
 					return
 				case j := <-b.ch:
-					handle(j)
+					// 单个任务 panic 只影响该 worker，不允许拖垮整个进程。
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								logging.App().Sugar().Errorf("task worker panic kind=%s: %v", j.Kind, r)
+							}
+						}()
+						handle(j)
+					}()
 				}
 			}
 		}()
