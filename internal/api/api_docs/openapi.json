@@ -64,6 +64,7 @@
           "trade_type": { "type": "string" },
           "buyer_contact": { "type": "string" },
           "status": { "type": "string" },
+          "payment_status": { "type": "string", "description": "支付生命周期（created / pending / confirmed / failed / cancelled），与订单状态解耦" },
           "trade_id": { "type": "string" },
           "payment_url": { "type": "string" },
           "block_transaction_id": { "type": "string" },

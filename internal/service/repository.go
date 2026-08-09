@@ -25,6 +25,8 @@ type OrderRepository interface {
 	ExpireOrder(orderID int64) (string, bool, error)
 	ReserveCardsFromStock(productID int64, qty int, orderID int64) (int, error)
 	SetOrderStatus(orderID int64, status string) error
+	SetPaymentStatus(orderID int64, status string) error
+	GetPaymentStatus(orderID int64) (string, error)
 	GetOrderStatus(orderID int64) (string, error)
 	OrderCounts() (todayOrders, todaySales, pending, paymentFailed, deliveryFailed int, todayRevenue int64, err error)
 	RecentOrders(limit int) ([]models.Order, error)

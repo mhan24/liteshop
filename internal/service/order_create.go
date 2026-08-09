@@ -93,6 +93,7 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 		if err := s.repo.UseCoupon(couponID, order.OrderNo, discount); err != nil {
 			_ = s.repo.ReleaseLockedCards(order.ID)
 			_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
+			_ = s.repo.SetPaymentStatus(order.ID, models.PaymentFailed)
 			_ = s.repo.AddLog(order.ID, "coupon_failed", "优惠券占用失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
 			return order.OrderNo, "", 0, 0, wrapCouponError(err)
 		}
@@ -117,6 +118,7 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 	})
 	if err != nil {
 		_ = s.repo.SetOrderStatus(order.ID, models.OrderPaymentFailed)
+		_ = s.repo.SetPaymentStatus(order.ID, models.PaymentFailed)
 		_ = s.repo.AddLog(order.ID, "payment_failed", "创建支付交易失败: "+err.Error(), models.OrderCreated, models.OrderPaymentFailed, 0)
 		// 回滚优惠券用量（支付失败，券不应被消耗）
 		if discount > 0 {

@@ -168,6 +168,7 @@ func orderJSON(o models.Order) map[string]any {
 		"trade_type":           o.TradeType,
 		"buyer_contact":        o.BuyerContact,
 		"status":               o.Status,
+		"payment_status":       o.PaymentStatus,
 		"trade_id":             o.TradeID,
 		"payment_url":          o.PaymentURL,
 		"block_transaction_id": o.BlockTransactionID,

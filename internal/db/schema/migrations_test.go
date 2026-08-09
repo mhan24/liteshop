@@ -85,6 +85,10 @@ func TestMigrationIdempotent(t *testing.T) {
 	if cols == 0 {
 		t.Fatalf("orders.view_token missing after re-open")
 	}
+	_ = d2.QueryRow(`SELECT COUNT(1) FROM pragma_table_info('orders') WHERE name='payment_status'`).Scan(&cols)
+	if cols == 0 {
+		t.Fatalf("orders.payment_status missing after re-open")
+	}
 }
 
 // TestAllMigrationsRecorded 验证每个迁移文件都按序记录。

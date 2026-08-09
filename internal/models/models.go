@@ -95,6 +95,7 @@ type Order struct {
 	BuyerContact       string
 	ViewToken          string
 	Status             string
+	PaymentStatus      string
 	TradeID            string
 	PaymentURL         string
 	BlockTransactionID string
@@ -115,6 +116,17 @@ const (
 	OrderDeliveryFailed = "delivery_failed" // 发卡失败，待后台处理
 	OrderCancelled      = "cancelled"       // 用户取消
 	OrderExpired        = "expired"         // 支付超时过期
+)
+
+// PaymentStatus 支付生命周期状态（与订单状态解耦，独立列 payment_status）。
+// 订单状态描述履约生命周期，支付状态描述支付生命周期；
+// 例如"支付成功但发卡失败"= 订单 delivery_failed + 支付 confirmed，二者不混淆。
+const (
+	PaymentCreated   = "created"   // 支付记录已创建（下单成功）
+	PaymentPending   = "pending"   // 支付交易已创建，等待用户确认
+	PaymentConfirmed = "confirmed" // 支付确认成功
+	PaymentFailed    = "failed"    // 支付失败/异常
+	PaymentCancelled = "cancelled" // 支付已取消（订单取消/超时）
 )
 
 // validOrderTransitions 定义状态机的合法迁移。

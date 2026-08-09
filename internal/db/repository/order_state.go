@@ -11,7 +11,7 @@ func (e *NoRowsError) Error() string { return "no rows affected" }
 
 // MarkPaid 将订单从 waiting_payment 置为 paid（事务）。
 func (r *OrderRepository) MarkPaid(orderID int64, tradeID, blockTx string, paidAt int64) error {
-	res, err := r.db.Exec(`UPDATE orders SET status = 'paid', trade_id = ?, block_transaction_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'waiting_payment'`, tradeID, blockTx, paidAt, paidAt, orderID)
+	res, err := r.db.Exec(`UPDATE orders SET status = 'paid', payment_status = 'confirmed', trade_id = ?, block_transaction_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'waiting_payment'`, tradeID, blockTx, paidAt, paidAt, orderID)
 	if err != nil {
 		return err
 	}
@@ -30,7 +30,7 @@ func (r *OrderRepository) MarkPaidAndDeliver(orderID int64, tradeID, blockTx str
 		return 0, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE orders SET status = 'paid', trade_id = ?, block_transaction_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'waiting_payment'`, tradeID, blockTx, paidAt, paidAt, orderID)
+	res, err := tx.Exec(`UPDATE orders SET status = 'paid', payment_status = 'confirmed', trade_id = ?, block_transaction_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'waiting_payment'`, tradeID, blockTx, paidAt, paidAt, orderID)
 	if err != nil {
 		return 0, err
 	}
@@ -56,7 +56,7 @@ func (r *OrderRepository) CompleteFreeOrder(orderID int64, paidAt int64) (int64,
 		return 0, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE orders SET status = 'paid', paid_at = ?, updated_at = ? WHERE id = ? AND status = 'created'`, paidAt, paidAt, orderID)
+	res, err := tx.Exec(`UPDATE orders SET status = 'paid', payment_status = 'confirmed', paid_at = ?, updated_at = ? WHERE id = ? AND status = 'created'`, paidAt, paidAt, orderID)
 	if err != nil {
 		return 0, err
 	}
@@ -96,7 +96,7 @@ func (r *OrderRepository) CancelOrder(orderID int64) (string, bool, error) {
 	if status != models.OrderCreated && status != models.OrderWaitingPayment {
 		return orderNo, false, nil
 	}
-	res, err := tx.Exec(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status IN (?, ?)`,
+	res, err := tx.Exec(`UPDATE orders SET status = ?, payment_status = 'cancelled', updated_at = ? WHERE id = ? AND status IN (?, ?)`,
 		models.OrderCancelled, models.Now(), orderID, models.OrderCreated, models.OrderWaitingPayment)
 	if err != nil {
 		return "", false, err
@@ -130,7 +130,7 @@ func (r *OrderRepository) ExpireOrder(orderID int64) (string, bool, error) {
 	if status != models.OrderCreated && status != models.OrderWaitingPayment {
 		return orderNo, false, nil
 	}
-	res, err := tx.Exec(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status IN (?, ?)`,
+	res, err := tx.Exec(`UPDATE orders SET status = ?, payment_status = 'cancelled', updated_at = ? WHERE id = ? AND status IN (?, ?)`,
 		models.OrderExpired, models.Now(), orderID, models.OrderCreated, models.OrderWaitingPayment)
 	if err != nil {
 		return "", false, err
@@ -167,4 +167,17 @@ func (r *OrderRepository) SetOrderStatusFrom(orderID int64, from, to string) err
 		return ErrNoRows
 	}
 	return nil
+}
+
+// SetPaymentStatus 更新支付状态（与订单状态解耦，单独维护）。
+func (r *OrderRepository) SetPaymentStatus(orderID int64, status string) error {
+	_, err := r.db.Exec(`UPDATE orders SET payment_status = ?, updated_at = ? WHERE id = ?`, status, models.Now(), orderID)
+	return err
+}
+
+// GetPaymentStatus 返回订单的支付状态。
+func (r *OrderRepository) GetPaymentStatus(orderID int64) (string, error) {
+	var status string
+	err := r.db.QueryRow(`SELECT payment_status FROM orders WHERE id = ?`, orderID).Scan(&status)
+	return status, err
 }

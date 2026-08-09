@@ -69,6 +69,9 @@ func TestPaymentCallbackAndDuplicate(t *testing.T) {
 	if err != nil || o2.Status != models.OrderDelivered {
 		t.Fatalf("order status = %v (%v), want delivered", o2.Status, err)
 	}
+	if o2.PaymentStatus != models.PaymentConfirmed {
+		t.Fatalf("payment status = %q, want confirmed", o2.PaymentStatus)
+	}
 	testutil.WaitFor(t, 2*time.Second, func() bool { return rec.PaidCount() == 1 }, "send paid notify")
 	if rec.PaymentSuccessCount() != 1 || rec.DeliveredCount() != 1 {
 		t.Fatalf("event notifies: success=%d delivered=%d", rec.PaymentSuccessCount(), rec.DeliveredCount())
@@ -89,6 +92,10 @@ func TestPaymentCallbackAndDuplicate(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if rec.PaidCount() != 1 {
 		t.Fatalf("duplicate callback sent notification again: %d", rec.PaidCount())
+	}
+	o3, _ := svc.GetOrderByNo(orderNo)
+	if o3.PaymentStatus != models.PaymentConfirmed {
+		t.Fatalf("payment status after duplicate = %q, want confirmed", o3.PaymentStatus)
 	}
 	avail, _ = keyRepo.AvailableCount(pid)
 	if avail != 2 {
@@ -113,6 +120,9 @@ func TestCancelOrderReleasesCards(t *testing.T) {
 	o, err = svc.GetOrderByNo(orderNo)
 	if err != nil || o.Status != models.OrderCancelled {
 		t.Fatalf("order status = %v (%v), want cancelled", o.Status, err)
+	}
+	if o.PaymentStatus != models.PaymentCancelled {
+		t.Fatalf("payment status = %q, want cancelled", o.PaymentStatus)
 	}
 	availAfter, _ := keyRepo.AvailableCount(pid)
 	if availAfter != availBefore+1 {
@@ -143,6 +153,9 @@ func TestExpireStaleClosesTimeoutOrders(t *testing.T) {
 	o, err := svc.GetOrderByNo(orderNo)
 	if err != nil || o.Status != models.OrderExpired {
 		t.Fatalf("order status = %v (%v), want expired", o.Status, err)
+	}
+	if o.PaymentStatus != models.PaymentCancelled {
+		t.Fatalf("payment status = %q, want cancelled", o.PaymentStatus)
 	}
 	avail, _ := keyRepo.AvailableCount(pid)
 	if avail != 3 {

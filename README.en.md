@@ -42,6 +42,7 @@
 - Config system: `settings` (system config) + `secrets` (sensitive config AES-GCM encrypted)
 - Layering: api (handler) → service (business) → db/repository (data) → db/schema (schema evolution); payment / notify / jobs / logging each isolated by responsibility
 - Payment abstraction: order business depends only on the `payment.Gateway` interface (currently implemented by BEpusdt); switching gateways does not touch business code
+- Separated status models: **order status** (fulfillment lifecycle: created / waiting_payment / paid / processing / delivered / completed / cancelled / expired / payment_failed / delivery_failed) is decoupled from **payment status** (dedicated `payment_status` column: created / pending / confirmed / failed / cancelled); payment anomalies never pollute order semantics (e.g. "paid but delivery failed" = order `delivery_failed` + payment `confirmed`)
 - Task system: in-process goroutine + channel (mail / Telegram / Webhook); the HTTP layer only publishes events
 - Background jobs (ticker + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup (with integrity verification)
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files

@@ -42,6 +42,7 @@ English: [README.en.md](README.en.md)
 - 配置系统：`settings`（系统配置）+ `secrets`（敏感配置 AES-GCM 加密）
 - 分层：api（handler）→ service（业务）→ db/repository（数据）→ db/schema（schema 演进）；payment / notify / jobs / logging 按职责独立
 - 支付抽象：订单业务只依赖 `payment.Gateway` 接口，当前实现为 BEpusdt，换网关不改业务
+- 状态模型分离：**订单状态**（履约生命周期：created / waiting_payment / paid / processing / delivered / completed / cancelled / expired / payment_failed / delivery_failed）与**支付状态**（payment_status 独立列：created / pending / confirmed / failed / cancelled）解耦，支付异常不会污染订单语义（如"支付成功但发卡失败"= 订单 delivery_failed + 支付 confirmed）
 - 任务系统：进程内 goroutine + channel（邮件 / Telegram / Webhook），HTTP 层只发布事件
 - 后台任务（ticker + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份（含完整性校验）
 - 日志（zap）：app / payment / security 三通道，50MB 轮转保留 7 份
