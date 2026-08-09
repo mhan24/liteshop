@@ -49,6 +49,7 @@ English: [README.en.md](README.en.md)
 - 管理员安全：PBKDF2-SHA256、TOTP 2FA、**登录失败 5 次锁定 10 分钟**、登录时序均摊防枚举
 - 安全：RBAC、审计日志、全接口限流、Turnstile、CSP、HSTS、安全响应头、CSV 注入防护、SQL 全参数化
 - 可观测性：组件级健康检查 `/health`（database / payment）、版本注入、结构化启动横幅
+- API 文档：`/docs`（OpenAPI 3.0，json + yaml 双格式，`/swagger` 别名），仅管理员可见
 
 ---
 
@@ -280,6 +281,15 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 - 启动横幅：启动时输出 `LiteShop vX.Y.Z (commit, date)` 及 database / payment / listen / admin / notify 信息
 - 版本号由 `internal/version` 统一管理，构建时经 `-ldflags` 注入（build-release.sh 自动带 git tag / commit / date）
 - 后台 `/api/v1/admin/version` 返回版本与构建信息
+
+---
+
+## API 文档
+
+- 地址：`/docs`（别名 `/swagger`），**仅管理员登录后可见**，避免公开暴露完整接口面
+- 规范文件：`/docs/openapi.json` 与 `/docs/openapi.yaml`（OpenAPI 3.0，覆盖前台 / 后台 / 支付回调全部端点）
+- 使用：Swagger UI / Postman 等直接导入上述 URL；公开端点无需认证，管理端点需会话 Cookie
+- 维护：接口变更必须同步更新 `internal/api/api_docs/openapi.json`（yaml 由 json 生成）
 
 ---
 

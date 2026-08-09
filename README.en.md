@@ -49,6 +49,7 @@
 - Admin security: PBKDF2-SHA256, TOTP 2FA, **lockout after 5 failed logins for 10 minutes**, timing-equalized login
 - Security: RBAC, audit logs, endpoint-wide rate limiting, Turnstile, CSP, HSTS, security headers, CSV injection guard, fully parameterized SQL
 - Observability: component-level health check `/health` (database / payment), version injection, structured startup banner
+- API docs: `/docs` (OpenAPI 3.0, JSON + YAML, `/swagger` alias), admin-only
 
 ---
 
@@ -281,6 +282,15 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 - Startup banner: logs `LiteShop vX.Y.Z (commit, date)` plus database / payment / listen / admin / notify info on boot
 - Version lives in `internal/version` and is injected via `-ldflags` at build time (`build-release.sh` picks up git tag / commit / date automatically)
 - Admin endpoint `/api/v1/admin/version` returns version and build info
+
+---
+
+## API docs
+
+- URL: `/docs` (alias `/swagger`), **visible only after admin login** to avoid exposing the full API surface publicly
+- Spec files: `/docs/openapi.json` and `/docs/openapi.yaml` (OpenAPI 3.0, covering storefront / admin / payment callback endpoints)
+- Usage: import the URL into Swagger UI / Postman etc.; public endpoints need no auth, admin endpoints need the session cookie
+- Maintenance: API changes must be reflected in `internal/api/api_docs/openapi.json` (YAML is generated from the JSON)
 
 ---
 

@@ -28,4 +28,5 @@
 - `jobs` 不直接依赖 `service`（用接口/回调解耦），避免 import 环；
 - 新支付网关 = 新增 `payment.Gateway` 实现，不改业务层；
 - 每次改动同步更新测试与 README（中英双份）；
+- API 变更必须同步更新 `internal/api/api_docs/openapi.json`（yaml 由 json 用 `yaml.safe_dump` 重新生成）；
 - 部署：服务器 `git pull && go build ./... && go test ./internal/...` 通过后再替换二进制重启。
