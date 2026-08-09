@@ -269,6 +269,10 @@ ${ADDR} {
 	header @dynamic Cache-Control "no-store"
 	header @dynamic X-Robots-Tag "noindex, nofollow"
 
+	# 前台（storefront）CSP：后台 /admin 的 CSP 由 Go 应用下发。
+	@storefront not path /api* /notify* /admin* /health
+	header @storefront Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
 	header {
 		-Server
 		Strict-Transport-Security "max-age=31536000"

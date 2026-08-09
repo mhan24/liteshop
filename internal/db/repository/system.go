@@ -28,13 +28,18 @@ func ResetAllTables(d *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
-	tables := []string{"order_logs", "cards", "orders", "products", "settings", "admins"}
+	// 清空业务数据与运行时表；settings_version（配置版本）与 schema_migrations 保留。
+	tables := []string{
+		"order_logs", "cards", "orders", "products", "settings", "admins",
+		"secrets", "sessions", "mail_queue", "outbox_events", "processed_events",
+		"job_runs", "dead_events",
+	}
 	for _, t := range tables {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", t)); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM sqlite_sequence WHERE name IN ('products','cards','orders')`); err != nil {
+	if _, err := tx.Exec(`DELETE FROM sqlite_sequence WHERE name IN ('products','cards','orders','mail_queue','outbox_events','job_runs','dead_events')`); err != nil {
 		return err
 	}
 	return tx.Commit()

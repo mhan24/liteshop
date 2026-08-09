@@ -32,6 +32,11 @@ func CleanupJob(d *sql.DB, memoryCleanups ...func()) func() error {
 			logging.App().Sugar().Errorf("job cleanup outbox_events: %v", err)
 			return err
 		}
+		// 邮件队列：失败超上限且超 30 天的行不再保留。
+		if err := repository.DeleteStaleMailQueue(d, now.Add(-30*24*time.Hour).Unix()); err != nil {
+			logging.App().Sugar().Errorf("job cleanup mail_queue: %v", err)
+			return err
+		}
 		for _, fn := range memoryCleanups {
 			if fn != nil {
 				fn()

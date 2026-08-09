@@ -50,6 +50,12 @@ func PendingMailCount(d *sql.DB) (int, error) {
 	return n, err
 }
 
+// DeleteStaleMailQueue 清理已超重试上限且创建超过 cutoff 的邮件队列行（防长期残留）。
+func DeleteStaleMailQueue(d *sql.DB, cutoff int64) error {
+	_, err := d.Exec(`DELETE FROM mail_queue WHERE attempts >= 5 AND created_at < ?`, cutoff)
+	return err
+}
+
 // MarkMailSent 标记邮件发送成功（删除队列项）。
 func MarkMailSent(d *sql.DB, id int64) error {
 	_, err := d.Exec(`DELETE FROM mail_queue WHERE id = ?`, id)

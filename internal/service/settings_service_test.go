@@ -81,3 +81,18 @@ func TestSettingsServiceSavePaymentInvalid(t *testing.T) {
 		t.Fatalf("invalid input must not write anything: %v", st.settings)
 	}
 }
+
+// TestSettingsServiceSaveNotifyWebhookURL 非法 webhook_url 应报错；合法 http(s) 可保存。
+func TestSettingsServiceSaveNotifyWebhookURL(t *testing.T) {
+	st := newStubSettingsStore()
+	svc := NewSettingsService(st, nil, config.Config{})
+	if err := svc.SaveNotify(map[string]any{"webhook_url": "ftp://x"}); err == nil {
+		t.Fatal("invalid webhook_url should error")
+	}
+	if err := svc.SaveNotify(map[string]any{"webhook_url": "https://hooks.example.com/abc"}); err != nil {
+		t.Fatalf("valid webhook_url: %v", err)
+	}
+	if st.settings["webhook_url"] != "https://hooks.example.com/abc" {
+		t.Fatalf("webhook_url = %q", st.settings["webhook_url"])
+	}
+}

@@ -9,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"shop/internal/db"
-
+	_ "modernc.org/sqlite"
 	"shop/internal/logging"
 )
 
@@ -24,7 +23,8 @@ func BackupJob(databasePath string, keep int) func() error {
 		}
 		name := fmt.Sprintf("shop-%s.db", time.Now().Format("20060102-150405"))
 		target := filepath.Join(dir, name)
-		d, err := db.Open(databasePath)
+		// 备份连接只用于 VACUUM INTO，不跑迁移（迁移只由主库连接执行）。
+		d, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)", databasePath))
 		if err != nil {
 			logging.App().Sugar().Errorf("job backup open: %v", err)
 			return err

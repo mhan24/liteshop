@@ -13,9 +13,17 @@ func (s *SettingsService) SaveNotify(input map[string]any) error {
 	set("smtp_port", "smtp_port")
 	set("smtp_from", "smtp_from")
 	set("telegram_chat_id", "telegram_chat_id")
-	set("webhook_url", "webhook_url")
 	set("notify_events", "notify_events")
 	set("notify_admin_email", "notify_admin_email")
+	if v := strings.TrimSpace(str(input["webhook_url"])); v != "" {
+		u, err := normalizeHTTPURL(v, false)
+		if err != nil {
+			return err
+		}
+		_ = s.Set("webhook_url", u)
+	} else if _, ok := input["webhook_url"]; ok {
+		_ = s.Set("webhook_url", "")
+	}
 	if v := strings.TrimSpace(str(input["smtp_username"])); v != "" {
 		_ = s.Set("smtp_username", v)
 	}
