@@ -11,7 +11,9 @@ import (
 
 // Open 打开 SQLite 数据库并执行迁移（当前默认实现）。
 func Open(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
+	// _txlock=immediate：所有事务在 BEGIN 时立即获取写锁（SQLite 的"行锁模拟"），
+	// 并发写事务串行化，先读后写也不会出现脏读/超卖竞态。
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate", path)
 	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

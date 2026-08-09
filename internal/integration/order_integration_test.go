@@ -3,6 +3,8 @@ package integration
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -217,5 +219,59 @@ func TestCallbackAfterCancelNoEffect(t *testing.T) {
 	avail, _ := keyRepo.AvailableCount(pid)
 	if avail != availAfterCancel {
 		t.Fatalf("available after late callback = %d, want %d", avail, availAfterCancel)
+	}
+}
+
+// TestConcurrentLastCardPurchase 并发抢最后一张卡（库存=1，两个买家同时下单）：
+// 恰好一个成功，失败方得到库存不足业务错误，库存不超卖、卡密不重复锁定。
+func TestConcurrentLastCardPurchase(t *testing.T) {
+	for iter := 0; iter < 5; iter++ {
+		d := testutil.NewTestDB(t)
+		orderRepo := repository.NewOrderRepository(d)
+		keyRepo := repository.NewKeyRepository(d)
+		gw := testutil.NewMockGateway()
+		svc := service.NewOrderService(orderRepo, func() payment.Gateway { return gw }, func() service.PaymentConfig {
+			return service.PaymentConfig{PublicBaseURL: "https://shop.test", NotifyURL: "https://shop.test/notify", TimeoutSec: 1200, Fiat: "CNY", TradeTypes: []string{"usdt.trc20"}}
+		})
+		pid := testutil.SeedProductWithCards(t, d, 1) // 最后一张
+		p := testProduct(pid)
+
+		var wg sync.WaitGroup
+		results := make([]error, 2)
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				_, _, _, _, err := svc.CreateOrder(p, 1, fmt.Sprintf("buyer%d@test.com", i), "usdt.trc20", "")
+				results[i] = err
+			}(i)
+		}
+		wg.Wait()
+
+		success := 0
+		var loserErr error
+		for _, err := range results {
+			if err == nil {
+				success++
+			} else {
+				loserErr = err
+			}
+		}
+		if success != 1 {
+			t.Fatalf("iter %d: success=%d, want exactly 1 (results=%v)", iter, success, results)
+		}
+		var biz *service.BusinessError
+		if !errors.As(loserErr, &biz) {
+			t.Fatalf("iter %d: loser error = %v, want business error (insufficient stock)", iter, loserErr)
+		}
+		avail, _ := keyRepo.AvailableCount(pid)
+		if avail != 0 {
+			t.Fatalf("iter %d: available = %d, want 0", iter, avail)
+		}
+		var locked int
+		_ = d.QueryRow(`SELECT COUNT(1) FROM cards WHERE product_id = ? AND status = 'locked'`, pid).Scan(&locked)
+		if locked != 1 {
+			t.Fatalf("iter %d: locked = %d, want exactly 1", iter, locked)
+		}
 	}
 }

@@ -17,27 +17,20 @@ func (r *OrderRepository) CreatePendingOrder(order *models.Order) error {
 		return err
 	}
 	order.ID, _ = res.LastInsertId()
-	rows, err := tx.Query(`SELECT id FROM cards WHERE product_id = ? AND status = 'available' LIMIT ?`, order.ProductID, order.Qty)
+	// 原子锁卡：单条条件 UPDATE（子查询限量为"扣库存"），以受影响行数判定成功。
+	// 并发下多个事务同时抢最后一张卡时，只有一个事务能锁到足够数量，其余 affected < qty。
+	res, err = tx.Exec(`UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ?
+		WHERE id IN (
+			SELECT id FROM cards
+			WHERE product_id = ? AND status = 'available'
+			ORDER BY id
+			LIMIT ?
+		)`, order.ID, models.Now(), order.ProductID, order.Qty)
 	if err != nil {
 		return err
 	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	if len(ids) != order.Qty {
+	if locked, _ := res.RowsAffected(); locked != int64(order.Qty) {
 		return errInsufficient
-	}
-	for _, id := range ids {
-		if _, err := tx.Exec(`UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ? WHERE id = ? AND status = 'available'`, order.ID, models.Now(), id); err != nil {
-			return err
-		}
 	}
 	return tx.Commit()
 }
