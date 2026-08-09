@@ -103,7 +103,7 @@ HTTP handler (internal/api)
   - `order_expire`：每 5 分钟关闭超时未支付订单、释放卡密（不依赖用户访问）
   - `email_retry`：失败邮件入 `mail_queue`，指数退避重试（最多 5 次）
   - `cleanup`：过期会话 / 180 天日志 / 内存状态清理
-  - `backup`：每日 `VACUUM INTO` 一致性快照，保留最近 7 份
+  - `backup`：每日 `VACUUM INTO` 一致性快照 + **只读打开执行 `integrity_check` 校验**（校验失败自动删除坏文件），保留最近 7 份
 - 健壮性：worker/调度任务 panic 隔离（单任务崩溃不拖垮进程）；`order_expire` / `email_retry` / `cleanup` 启动后立即执行一次（进程崩溃后的补偿清理）
 
 ---

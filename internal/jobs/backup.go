@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,10 +35,34 @@ func BackupJob(databasePath string, keep int) func() {
 			logging.App().Sugar().Errorf("job backup vacuum: %v", err)
 			return
 		}
+		// 备份校验：只读打开 + PRAGMA integrity_check，防止坏备份文件混入保留列表。
+		if err := verifyBackup(target); err != nil {
+			_ = os.Remove(target)
+			logging.App().Sugar().Errorf("job backup verify failed, removed: %s: %v", target, err)
+			return
+		}
 		_ = os.Chmod(target, 0o600)
 		pruneOldBackups(dir, keep)
-		logging.App().Sugar().Infof("job backup: %s", target)
+		logging.App().Sugar().Infof("job backup: %s (verified)", target)
 	}
+}
+
+// verifyBackup 以只读方式打开备份文件并执行 PRAGMA integrity_check，
+// 返回 nil 表示备份完整可用。
+func verifyBackup(path string) error {
+	d, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(3000)")
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	var result string
+	if err := d.QueryRow(`PRAGMA integrity_check`).Scan(&result); err != nil {
+		return err
+	}
+	if result != "ok" {
+		return fmt.Errorf("integrity_check: %s", result)
+	}
+	return nil
 }
 
 func pruneOldBackups(dir string, keep int) {

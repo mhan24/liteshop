@@ -30,4 +30,5 @@
 - 每次改动同步更新测试与 README（中英双份）；
 - API 变更必须同步更新 `internal/api/api_docs/openapi.json`（yaml 由 json 用 `yaml.safe_dump` 重新生成）；
 - 支付/通知相关改动必须跑 `go test ./internal/integration/... ./internal/api/...`（MockGateway / NotifyRecorder 覆盖回调、重复回调、取消、超时）；
+- 备份逻辑必须带校验（备份后只读打开 + `PRAGMA integrity_check`，失败删除坏文件）；
 - 部署：服务器 `git pull && go build ./... && go test ./internal/...` 通过后再替换二进制重启。

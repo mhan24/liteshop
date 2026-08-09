@@ -103,7 +103,7 @@ HTTP handler (internal/api)
   - `order_expire`: every 5 minutes, close overdue unpaid orders and release cards (no user access required)
   - `email_retry`: failed mail goes into `mail_queue`, retried with exponential backoff (max 5 attempts)
   - `cleanup`: expired sessions / 180-day logs / in-memory state cleanup
-  - `backup`: daily `VACUUM INTO` consistent snapshot, keeping the last 7
+  - `backup`: daily `VACUUM INTO` consistent snapshot + **read-only `integrity_check` verification** (corrupt files are removed automatically), keeping the last 7
 - Robustness: worker/scheduler panics are isolated (one crashing job never takes down the process); `order_expire` / `email_retry` / `cleanup` also run once at startup (compensation after a crash/restart)
 
 ---
