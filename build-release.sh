@@ -32,7 +32,7 @@ case "$ARCH" in
   *) echo "不支持的架构: $ARCH" >&2; exit 1 ;;
 esac
 export GOOS GOARCH CGO_ENABLED=0 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
-VERSION="$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo 0.1.0)"
+VERSION="$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo 0.2.0)"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || true)"
 DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 go build -trimpath -ldflags "-X shop/internal/version.Version=${VERSION} -X shop/internal/version.Commit=${COMMIT} -X shop/internal/version.Date=${DATE}" -o /tmp/shop ./cmd/shop

@@ -1,59 +1,56 @@
-# Changelog
+# 更新日志
 
-## 0.1.0 (2026-08-07) — First official release / 首个正式版
+## v0.2.0（2026-08-09）— 代号：月球 Moon
 
-English / 中文：
+> 从"能用"走向"工程化"：分层、抽象、可观测性与稳定性全面升级；数据库状态与事件、备份与恢复、代码与文档全部可验证、可回滚。
 
-### Features / 功能
+### 架构与工程化
 
-- Automated card delivery + BEpusdt USDT payments (create/cancel transactions, callback verification, idempotent delivery) / 自动发卡 + BEpusdt USDT 支付（创建/取消交易、回调验签、幂等发卡）
-- Nuxt 3 SSR storefront: product listing/detail, order lookup, payment polling, email-delivered card view links, SEO / 前台 Nuxt 3 SSR：商品列表/详情、订单查询、支付轮询、卡密邮件化查看链接、SEO
-- Vue 3 admin SPA: products/cards/orders/coupons/wholesale/notifications/site/admins/audit/TOTP / 后台 Vue 3 SPA：商品/卡密/订单/优惠券/阶梯价/通知/站点/管理员/审计/TOTP
-- Maintenance mode, config backup/restore, sales report and dashboard / 维护模式、配置备份/恢复、销售报表与仪表盘
+- 数据库工程化：`internal/db` 收敛为连接层；`schema/` 统一迁移（编号 .sql + 只跑一次）；`repository/` 集中全部 SQL，`Store` 把配置/管理员/会话/审计接口化
+- 业务层隔离：handler 只做 HTTP 适配；`service` 六大领域（Order/Product/Admin/Settings/Notify/Stats）；service 只依赖接口，测试可 mock
+- 仓储/服务小文件原则：order 仓储按 query/create/state/stats/log 拆分；service 按领域拆小文件（AGENTS.md 固化）
+- 领域事件：`internal/events` 类型化事件 + 版本化载荷；`Fanout` 消费者隔离（每消费者独立 goroutine + panic 隔离）
+- Outbox 模式：支付成功/发货事件与订单状态**同事务**写 `outbox_events`，worker 发布；连续失败 5 次进 `dead_events`；已发布事件 30 天清理
+- 幂等台账：支付回调以网关交易号唯一键登记 `processed_events`（与状态迁移同事务），重复回调零副作用
+- 并发库存保护：`_txlock=immediate` + 单条条件 UPDATE 原子锁卡（100 并发抢 1 卡压测通过）
+- 事务边界：下单/支付/取消/过期单事务；失败路径原子释放卡密（修复网关建单失败泄漏库存）
+- 配置版本：`settings_version` 记录配置结构升级（Laravel 风格步骤），升级不靠猜
 
-### Security baseline / 安全基线
+### 支付
 
-- PBKDF2-SHA256 (100k) passwords, TOTP 2FA (AES-GCM encrypted) / PBKDF2-SHA256（10 万次）密码、TOTP 2FA（AES-GCM 加密）
-- Order view tokens (email-only delivery), atomic order state machine (deliver/cancel/expire in single transactions) / 订单查看令牌（只经邮件下发）、订单状态机原子化（发卡/取消/过期单事务）
-- RBAC (admin/operator/viewer) + audit logs, rate limiting across endpoints, Turnstile / RBAC + 审计日志、全接口限流、Turnstile
-- Parameterized SQL, CSV injection guard, admin CSP, HSTS, security headers / SQL 全参数化、CSV 注入防护、后台 CSP、HSTS、安全响应头
-- Backups exclude secret keys; persisted sessions revoked immediately on deletion/logout / 备份不包含密钥类配置；会话持久化 + 删号/登出即时吊销
+- `payment.Gateway` 接口抽象，订单业务不绑定 BEpusdt；换网关只需新增适配器
+- 回调路径后台可改且**即时生效**（动态兜底路由，无需重启）
+- 验签改恒定时间比较
 
-### Deployment / 部署
+### 稳定性与运维
 
-- Go 1.26 + SQLite (modernc latest), single zero-dependency binary / Go 1.26 + SQLite（modernc 最新），单二进制零依赖
-- One-click install.sh: non-root, UMask=0077, data files 600, Caddy auto-HTTPS / 一键 install.sh：非 root 运行、UMask=0077、数据文件 600、Caddy 自动 HTTPS
+- 任务系统：worker/调度 panic 隔离、启动补偿、`job_runs` 执行记录（高频任务不记录、7 天清理）
+- 备份：`VACUUM INTO` + `integrity_check` 校验（坏文件自动删除）+ 恢复演练测试
+- 优雅停机：SIGTERM → 停止接收 → 排空 → worker 退出 → 关库
+- 健康指标：/health 返回 database（size/migration_version/last_backup/integrity）+ jobs（queue_size/last_success）
+- 日志关联：request_id（X-Request-ID）+ order_id + trace_id，一次支付整线可查
+- 数据库连接：WAL + busy_timeout + foreign_keys + immediate
+- 限流分级：公共严格、管理 300/min；审计日志三索引
 
-### Dependencies / 依赖
+### 安全
 
-- storefront / admin-ui `npm audit`: 0 known vulnerabilities / 0 已知漏洞
+- Cloudflare 信任边界：仅对端为 CF 边缘 IP 才采信 `CF-Connecting-IP`
+- 管理接口非幂等请求 Origin 同源校验（CSRF 纵深防御）
+- 登录锁定按 IP+用户名（防跨 IP 账号锁定 DoS）；失败记录定期清理
+- 安全头回归测试（nosniff/X-Frame-Options/CSP/HSTS/Cookie Secure）；前台 CSP
+- 依赖基线：Go 1.25.12（govulncheck 全绿）、npm 0 运行时漏洞
 
----
+### 可观测性与文档
 
-## 0.1.0（2026-08-07）— 首个正式版
+- 组件级健康检查、启动横幅、版本注入（git tag/commit/date）
+- OpenAPI 3.0（57 路径，/docs + /swagger，json+yaml）；OpenAPI → TS 类型自动生成（`npm run gen:api`，CI diff 校验）
+- 集成测试：MockGateway/NotifyRecorder、支付回调/重复回调/取消/超时/HTTP 验签、并发压测、恢复演练、版本兼容升级
 
-LiteShop 首个官方发布版本。
+## v0.1.0（此前）— 代号：地球 Earth
 
-### 功能
+> 首个正式版：完整可用的自动发卡系统。
 
-- 自动发卡 + BEpusdt USDT 支付（创建/取消交易、回调验签、幂等发卡）
-- 前台 Nuxt 3 SSR：商品列表/详情、订单查询、支付轮询、卡密邮件化查看链接、SEO
-- 后台 Vue 3 SPA：商品/卡密/订单/优惠券/阶梯价/通知/站点/管理员/审计/TOTP
-- 维护模式、配置备份/恢复、销售报表与仪表盘
-
-### 安全基线
-
-- PBKDF2-SHA256（10 万次）密码、TOTP 2FA（AES-GCM 加密）
-- 订单查看令牌（只经邮件下发）、订单状态机原子化（发卡/取消/过期单事务）
-- RBAC（viewer/operator/admin）+ 审计日志、全接口限流、Turnstile 人机验证
-- SQL 全参数化、CSV 注入防护、后台 CSP、HSTS、安全响应头
-- 备份不包含密钥类配置；会话持久化 + 删号/登出即时吊销
-
-### 部署
-
-- Go 1.26 + SQLite（modernc 最新），单二进制零依赖
-- 一键 install.sh：非 root 运行、UMask=0077、数据文件 600、Caddy 自动 HTTPS
-
-### 依赖
-
-- storefront / admin-ui `npm audit` 均为 0 已知漏洞
+- 前台（Nuxt 3 SSR）：商品列表/详情、Turnstile、下单（BEpusdt 收银台）、订单详情轮询/取消、邮箱找回 + 查看令牌、隐私/条款、SEO（canonical/OG/sitemap/robots）
+- 后台（Vue 3 + Element Plus）：仪表盘、商品/卡密/订单/优惠券管理、支付/通知/站点设置、事件模板与测试按钮、维护模式、TOTP 2FA、RBAC + 审计日志、配置备份/恢复/重置
+- 后端（Go + SQLite）：BEpusdt 支付对接、zap 三通道日志、编号 .sql 迁移、全接口限流、Turnstile、CSP/HSTS/安全头、CSV 注入防护、SQL 全参数化
+- 任务：goroutine + channel 任务总线；订单过期/邮件重试/清理/每日备份
