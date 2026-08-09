@@ -52,6 +52,8 @@
 - 领域事件必须走 `internal/events` 的类型化事件 + `events.Publisher`（service 禁止直接 `bus.Publish`）；新增事件在 events 包定义并统一分发；
 - 外部事件（支付回调）必须以唯一键登记 `processed_events`（与状态变更同事务），重复事件返回幂等 noop；
 - 关键领域事件（支付成功/发货）必须走 Outbox：与状态变更**同事务**写 `outbox_events`，由 outbox worker 发布；禁止只在提交后直接发布而丢失"提交成功但未发布"的窗口；
+- Outbox 已发布事件保留 30 天由 cleanup 清理（未发布永不清理）；事件结构变更必须递增 `events.EventVersion` 并保持 `Decode` 兼容老版本；
+- 订单/支付/查询链路改动后跑 `go test -bench=. ./internal/integration/` 对比基准，防性能回退；备份改动必须跑恢复演练测试；
 - 健康检查 `/health` 必须保留 database（size/migration_version/last_backup/integrity）与 jobs（queue_size/last_success）指标；
 - 安全响应头（nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / CSP / HSTS / Cookie Secure）改动必须同步 `internal/api/security_test.go`；
 - SSR 缓存策略：动态页面与商品列表保持 no-store，ISR/edge cache 暂不实施；

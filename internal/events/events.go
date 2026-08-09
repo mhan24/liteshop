@@ -84,12 +84,16 @@ type LowStockEvent struct {
 
 func (LowStockEvent) EventName() string { return "stock.low" }
 
-// Encode 把领域事件序列化为 outbox 载荷（{"type":...,"data":...}）。
+// EventVersion 当前事件结构版本（结构变更时递增；解码兼容老版本）。
+const EventVersion = 1
+
+// Encode 把领域事件序列化为 outbox 载荷（{"type":...,"version":...,"data":...}）。
 func Encode(e Event) (string, error) {
 	raw, err := json.Marshal(struct {
-		Type string `json:"type"`
-		Data any    `json:"data"`
-	}{Type: e.EventName(), Data: e})
+		Type    string `json:"type"`
+		Version int    `json:"version"`
+		Data    any    `json:"data"`
+	}{Type: e.EventName(), Version: EventVersion, Data: e})
 	if err != nil {
 		return "", err
 	}
@@ -99,11 +103,19 @@ func Encode(e Event) (string, error) {
 // Decode 从 outbox 载荷还原领域事件。
 func Decode(payload string) (Event, error) {
 	var env struct {
-		Type string          `json:"type"`
-		Data json.RawMessage `json:"data"`
+		Type    string          `json:"type"`
+		Version int             `json:"version"`
+		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(payload), &env); err != nil {
 		return nil, err
+	}
+	// version 缺失视为 v1（老事件）；高于当前版本拒绝处理，避免错读未来结构。
+	if env.Version == 0 {
+		env.Version = 1
+	}
+	if env.Version > EventVersion {
+		return nil, fmt.Errorf("events: unsupported event version %d (current %d)", env.Version, EventVersion)
 	}
 	switch env.Type {
 	case OrderPaidEvent{}.EventName():

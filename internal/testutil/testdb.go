@@ -4,15 +4,22 @@ package testutil
 import (
 	"database/sql"
 	"path/filepath"
-	"testing"
 	"time"
 
 	"shop/internal/db"
 	"shop/internal/models"
 )
 
+// testingTB 同时满足 *testing.T 与 *testing.B（基准测试复用同一套造数设施）。
+type testingTB interface {
+	Helper()
+	TempDir() string
+	Cleanup(func())
+	Fatalf(format string, args ...any)
+}
+
 // NewTestDB 打开临时 SQLite 测试库（完成全部迁移），自动清理。
-func NewTestDB(t *testing.T) *sql.DB {
+func NewTestDB(t testingTB) *sql.DB {
 	t.Helper()
 	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -23,7 +30,7 @@ func NewTestDB(t *testing.T) *sql.DB {
 }
 
 // SeedProductWithCards 建一个上架商品并插入 n 张可用卡密，返回商品 ID。
-func SeedProductWithCards(t *testing.T, d *sql.DB, n int) int64 {
+func SeedProductWithCards(t testingTB, d *sql.DB, n int) int64 {
 	t.Helper()
 	now := models.Now()
 	res, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, created_at, updated_at)
@@ -44,7 +51,7 @@ func SeedProductWithCards(t *testing.T, d *sql.DB, n int) int64 {
 }
 
 // SeedOrder 直接写入一笔订单（集成测试用），返回订单号。
-func SeedOrder(t *testing.T, d *sql.DB, productID int64, status, tradeID string) string {
+func SeedOrder(t testingTB, d *sql.DB, productID int64, status, tradeID string) string {
 	t.Helper()
 	now := models.Now()
 	orderNo := models.NewOrderNo()
@@ -67,7 +74,7 @@ func SeedOrder(t *testing.T, d *sql.DB, productID int64, status, tradeID string)
 }
 
 // WaitFor 轮询等待条件成立（异步通知/网关调用使用）。
-func WaitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+func WaitFor(t testingTB, timeout time.Duration, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

@@ -27,6 +27,11 @@ func CleanupJob(d *sql.DB, memoryCleanups ...func()) func() error {
 			logging.App().Sugar().Errorf("job cleanup order_logs: %v", err)
 			return err
 		}
+		// Outbox 生命周期：已发布事件保留 30 天，定期清理（未发布的不动）。
+		if err := repository.DeleteOldOutboxEvents(d, now.Add(-30*24*time.Hour).Unix()); err != nil {
+			logging.App().Sugar().Errorf("job cleanup outbox_events: %v", err)
+			return err
+		}
 		for _, fn := range memoryCleanups {
 			if fn != nil {
 				fn()

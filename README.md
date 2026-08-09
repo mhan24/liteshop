@@ -47,6 +47,7 @@ English: [README.en.md](README.en.md)
 - 任务系统：进程内 goroutine + channel（邮件 / Telegram / Webhook），HTTP 层只发布事件
 - 领域事件：`internal/events` 类型化事件（OrderPaid / OrderExpired / DeliveryFailed / LowStock …），service 只发布事件、不散落 `bus.Publish`，装配层统一分发
 - **Outbox 模式**：支付成功/发货事件与订单状态**同事务**写入 `outbox_events`，outbox worker（1s）读取发布；即使提交后崩溃，事件也会在重启后补发——数据库状态与事件永久一致
+- Outbox 生命周期：已发布事件保留 30 天由 `cleanup` 定期清理（未发布事件永不清理）；事件载荷带 `version`，结构变更递增版本、兼容老事件
 - 幂等台账：外部事件（支付回调）以网关交易号登记 `processed_events` 唯一键，与订单状态迁移同一事务，重复通知只处理一次
 - 后台任务（ticker + worker）：订单超时自动关闭、失败邮件重试、会话/日志清理、每日数据库备份（含完整性校验）
 - 日志（zap）：app / payment / security 三通道，50MB 轮转保留 7 份
@@ -281,6 +282,8 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
   - 临时 SQLite 测试库（完整迁移 + 造数）
   - `MockGateway`（记录创建/取消调用）与 `NotifyRecorder`（收集通知回调）
   - 覆盖：支付回调发卡、**重复回调幂等**（不重复发卡/通知）、取消订单释放库存并关闭网关交易、超时订单自动过期、真实 HTTP 回调路由（含 MD5 验签 / status=3 网关 stub / 错误签名拒绝）
+- **性能基准**：`go test -bench=. ./internal/integration/`（BenchmarkCreateOrder / BenchmarkPaymentCallback / BenchmarkRepositoryQuery），防止未来重构性能回退
+- **恢复演练**：`TestBackupRestoreDrill` 自动化验证"备份 → 复制到新库 → 重跑迁移 → 查询数据"（备份成功 ≠ 可恢复）
 - CI（`.github/workflows/ci.yml`）：Go `vet` / `build` / `test` + 后台/前台构建
 
 ---

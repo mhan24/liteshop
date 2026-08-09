@@ -50,3 +50,9 @@ func MarkOutboxPublished(d *sql.DB, id int64, publishedAt int64) error {
 		publishedAt, id)
 	return err
 }
+
+// DeleteOldOutboxEvents 清理已发布且超过保留期的 outbox 记录（未发布的一律保留，必须送达）。
+func DeleteOldOutboxEvents(d *sql.DB, cutoff int64) error {
+	_, err := d.Exec(`DELETE FROM outbox_events WHERE published_at != 0 AND published_at < ?`, cutoff)
+	return err
+}

@@ -47,6 +47,7 @@
 - Task system: in-process goroutine + channel (mail / Telegram / Webhook); the HTTP layer only publishes events
 - Domain events: typed events in `internal/events` (OrderPaid / OrderExpired / DeliveryFailed / LowStock …); the service only publishes events — no scattered `bus.Publish` — and the composition root dispatches them
 - **Outbox pattern**: payment-success/delivery events are written to `outbox_events` **in the same transaction** as the order state change; an outbox worker (1s) reads and publishes them — even after a crash right after COMMIT, events are re-published on restart, keeping DB state and events permanently consistent
+- Outbox lifecycle: published events are kept for 30 days and purged by `cleanup` (unpublished events are never purged); event payloads carry a `version` — bump it when the structure changes, and old events stay decodable
 - Idempotency ledger: external events (payment callbacks) register a unique key (`transaction_id`) in `processed_events` within the same transaction as the order state change, so duplicate notifications are processed once
 - Background jobs (ticker + worker): auto-expire unpaid orders, retry failed mail, session/log cleanup, daily database backup (with integrity verification)
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files
@@ -281,6 +282,8 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
   - Temp SQLite test DB (full migrations + seeding)
   - `MockGateway` (records create/cancel calls) and `NotifyRecorder` (collects notification callbacks)
   - Coverage: payment callback delivery, **duplicate-callback idempotency** (no double delivery/notify), cancel-order stock release + gateway cancellation, stale-order expiry, and the real HTTP callback route (MD5 verification / status=3 gateway stub / bad-signature rejection)
+- **Benchmarks**: `go test -bench=. ./internal/integration/` (BenchmarkCreateOrder / BenchmarkPaymentCallback / BenchmarkRepositoryQuery) to catch performance regressions from future refactors
+- **Restore drill**: `TestBackupRestoreDrill` automates "backup → copy to a new DB → re-run migrations → query data" (a successful backup does not prove it can be restored)
 - CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + admin-ui and storefront builds
 
 ---
