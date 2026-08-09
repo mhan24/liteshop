@@ -27,7 +27,8 @@ export default defineNuxtConfig({
     head: {
       title: 'LiteShop',
       htmlAttrs: { lang: 'zh-CN' },
-      link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+      // key: 'icon' 让后台设置的自定义 favicon（layouts/default.vue）可覆盖内置图标，避免重复输出
+      link: [{ rel: 'icon', key: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },

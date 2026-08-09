@@ -102,7 +102,7 @@ useHead(() => {
     link: [
       { rel: 'canonical', href: origin.value + route.path },
       ...(st.favicon_url
-        ? [{ rel: 'icon', type: faviconType(st.favicon_url), href: st.favicon_url }]
+        ? [{ rel: 'icon', key: 'icon', type: faviconType(st.favicon_url), href: st.favicon_url }]
         : []),
     ],
   }
