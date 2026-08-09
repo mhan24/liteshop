@@ -38,7 +38,21 @@ export interface paths {
                             /** @description settings 配置版本 */
                             config_version?: number;
                             uptime_sec?: number;
-                            database?: string;
+                            database?: {
+                                status?: string;
+                                size_bytes?: number;
+                                migration_version?: number;
+                                last_backup?: {
+                                    file?: string;
+                                    modified?: number;
+                                };
+                                /** @enum {string} */
+                                integrity?: "ok" | "error";
+                            };
+                            jobs?: {
+                                mail_queue_size?: number;
+                                last_success?: number;
+                            };
                             payment?: string;
                         };
                     };
@@ -2549,6 +2563,8 @@ export interface paths {
                         "application/json": {
                             jobs?: components["schemas"]["JobRun"][];
                             mail_queue_pending?: number;
+                            /** @description outbox 死信事件数 */
+                            dead_events?: number;
                         };
                     };
                 };

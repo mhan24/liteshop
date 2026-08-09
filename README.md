@@ -291,6 +291,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 ## 测试与 CI
 
 - 单元/集成：`go test ./...`（迁移、签名验签、密码哈希、状态机、优惠券/免费订单、会话、登录锁定、任务总线、调度器、worker panic 隔离、备份校验、邮件重试、健康检查）
+- 依赖基线：`govulncheck ./...` 无漏洞（Go ≥1.25.12）；`npm audit` 中 admin-ui 的 js-yaml 告警仅存在于构建期 codegen（openapi-typescript，输入为仓库内可信 JSON），生产运行时不加载
 - **mock 测试**：service 依赖接口，可脱离数据库用内存 stub（如设置保存/校验）
 - **集成测试**（`internal/integration` + `internal/testutil`）：
   - 临时 SQLite 测试库（完整迁移 + 造数）

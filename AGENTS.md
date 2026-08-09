@@ -71,3 +71,4 @@
 - 后台任务执行必须记录 `job_runs`（由调度器统一写入 status/error），新增任务时确保返回 error 以正确记录失败；
 - 部署：服务器 `git pull && go build ./... && go test ./internal/...` 通过后再替换二进制重启。
 - Go 工具链必须 ≥1.25.12（govulncheck 基线）；升级 Go 后跑 `govulncheck ./...` 确认无新漏洞。
+- npm audit 基线：admin-ui 的 js-yaml 告警（经 openapi-typescript 的 @redocly/openapi-core）为**构建期依赖**且无补丁回移；codegen 只读仓库内可信 openapi.json，生产运行时不加载，不构成可利用面。升级或移除 openapi-typescript 前保持记录即可。

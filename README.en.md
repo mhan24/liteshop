@@ -291,6 +291,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 ## Tests & CI
 
 - Unit & integration: `go test ./...` (migrations, signature verification, password hashing, state machine, coupons/free orders, sessions, login lockout, task bus, scheduler, worker panic isolation, backup verification, mail retry, health check)
+- Dependency baseline: `govulncheck ./...` is clean (Go ≥1.25.12); in `npm audit`, the admin-ui js-yaml advisory exists only in the build-time codegen (openapi-typescript, fed with the trusted in-repo JSON spec) and is never loaded at runtime
 - **Mock tests**: service depends on interfaces, so it can be tested without a database using in-memory stubs (e.g. settings save/validation)
 - **Integration tests** (`internal/integration` + `internal/testutil`):
   - Temp SQLite test DB (full migrations + seeding)
