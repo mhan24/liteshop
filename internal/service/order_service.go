@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"shop/internal/db/repository"
 	"shop/internal/models"
 	"shop/internal/payment"
 )
@@ -20,8 +19,8 @@ type PaymentConfig struct {
 
 // OrderService 订单业务逻辑（按职责拆分到 order_*.go 小文件）。
 type OrderService struct {
-	repo  *repository.OrderRepository
-	keys  *repository.KeyRepository
+	repo  OrderRepository
+	keys  KeyRepository
 	payFn func() payment.Gateway
 	cfgFn func() PaymentConfig
 
@@ -50,8 +49,8 @@ func newBusinessErrorf(format string, args ...any) error {
 // 数据库等系统错误透传，由上层统一脱敏。
 func wrapCouponError(err error) error {
 	switch {
-	case errors.Is(err, repository.ErrCouponNotFound), errors.Is(err, repository.ErrCouponExpired),
-		errors.Is(err, repository.ErrCouponUsedUp), errors.Is(err, repository.ErrCouponNotApplicable):
+	case errors.Is(err, models.ErrCouponNotFound), errors.Is(err, models.ErrCouponExpired),
+		errors.Is(err, models.ErrCouponUsedUp), errors.Is(err, models.ErrCouponNotApplicable):
 		return newBusinessErrorf("%s", err.Error())
 	}
 	return err
@@ -60,12 +59,12 @@ func wrapCouponError(err error) error {
 // ErrNoCards 表示订单已支付但发卡数量为 0（需管理员处理）。
 var ErrNoCards = errors.New("order paid but no cards delivered")
 
-func NewOrderService(repo *repository.OrderRepository, payFn func() payment.Gateway, cfgFn func() PaymentConfig) *OrderService {
+func NewOrderService(repo OrderRepository, payFn func() payment.Gateway, cfgFn func() PaymentConfig) *OrderService {
 	return &OrderService{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
 
 // SetKeyRepository 注入卡密仓储（低库存检查用）。
-func (s *OrderService) SetKeyRepository(keys *repository.KeyRepository) {
+func (s *OrderService) SetKeyRepository(keys KeyRepository) {
 	s.keys = keys
 }
 
@@ -77,4 +76,4 @@ func (s *OrderService) cfg() PaymentConfig {
 }
 
 // Repo 暴露给上层查询。
-func (s *OrderService) Repo() *repository.OrderRepository { return s.repo }
+func (s *OrderService) Repo() OrderRepository { return s.repo }

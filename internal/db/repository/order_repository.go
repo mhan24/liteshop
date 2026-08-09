@@ -77,12 +77,7 @@ func (r *OrderRepository) CreatePendingOrder(order *models.Order) error {
 	return tx.Commit()
 }
 
-var errInsufficient = &InsufficientError{}
-
-// InsufficientError 库存不足错误。
-type InsufficientError struct{}
-
-func (e *InsufficientError) Error() string { return "insufficient card stock" }
+var errInsufficient = &models.InsufficientError{}
 
 // SetTradeInfo 保存 BEpusdt 交易信息。
 func (r *OrderRepository) SetTradeInfo(orderID int64, tradeID, paymentURL string) error {
@@ -433,7 +428,7 @@ func (r *OrderRepository) Logs(orderID int64) ([]models.OrderEvent, error) {
 
 // DailyRevenue 返回最近 days 天每日营收（按支付时间，使用仓库时区自然日）。
 // 返回 [date, revenueCents] 列表，按日期升序。
-func (r *OrderRepository) DailyRevenue(days int) ([]DailyRevenueRow, error) {
+func (r *OrderRepository) DailyRevenue(days int) ([]models.DailyRevenueRow, error) {
 	if days <= 0 {
 		days = 14
 	}
@@ -456,16 +451,16 @@ func (r *OrderRepository) DailyRevenue(days int) ([]DailyRevenueRow, error) {
 		day := time.Unix(paidAt, 0).In(r.tz).Format("2006-01-02")
 		byDay[day] += rev
 	}
-	var out []DailyRevenueRow
+	var out []models.DailyRevenueRow
 	for i := days - 1; i >= 0; i-- {
 		d := time.Unix(models.Now()-int64(i)*86400, 0).In(r.tz).Format("2006-01-02")
-		out = append(out, DailyRevenueRow{Date: d, Revenue: byDay[d]})
+		out = append(out, models.DailyRevenueRow{Date: d, Revenue: byDay[d]})
 	}
 	return out, nil
 }
 
 // ProductSales 返回各商品销量与销售额（已支付订单）。
-func (r *OrderRepository) ProductSales(limit int) ([]ProductSaleRow, error) {
+func (r *OrderRepository) ProductSales(limit int) ([]models.ProductSaleRow, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -476,9 +471,9 @@ func (r *OrderRepository) ProductSales(limit int) ([]ProductSaleRow, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []ProductSaleRow
+	var out []models.ProductSaleRow
 	for rows.Next() {
-		var s ProductSaleRow
+		var s models.ProductSaleRow
 		if err := rows.Scan(&s.Name, &s.Qty, &s.Revenue); err != nil {
 			return nil, err
 		}
@@ -519,17 +514,4 @@ func (r *OrderRepository) CostSourceStats() (orderTime, migrationEstimate, unkno
 		}
 	}
 	return orderTime, migrationEstimate, unknown, rows.Err()
-}
-
-// DailyRevenueRow 单日营收行。
-type DailyRevenueRow struct {
-	Date    string
-	Revenue int64
-}
-
-// ProductSaleRow 商品销量行。
-type ProductSaleRow struct {
-	Name    string
-	Qty     int
-	Revenue int64
 }

@@ -84,6 +84,7 @@ HTTP handler (internal/api)
 - Handlers only parse requests, write responses, and enforce HTTP security (Turnstile / rate limiting / cookies / auth middleware);
 - Order, payment, notification, settings, and admin business logic all live in `service` (Order / Product / Admin / Settings / Notify / Stats); handlers never touch the database directly, call the payment gateway, or send notifications;
 - `internal/db/repository` centralizes all SQL: Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log;
+- Service depends only on interfaces (OrderRepository / ProductRepository / KeyRepository / SettingsStore / AdminStore), never on concrete SQLite — tests use in-memory mocks; shared types and domain errors live in `internal/models`;
 - Payments go through the `payment.Gateway` interface (BEpusdt implementation); business is not bound to a specific gateway;
 - Notifications run asynchronously via `internal/notify` + the task bus; background jobs are scheduled by `internal/jobs`.
 
@@ -254,6 +255,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 ## Tests & CI
 
 - Go: `go test ./...` (migrations, signature verification, password hashing, state machine, coupons/free orders, sessions, login lockout, task bus, scheduler, worker panic isolation, backup, mail retry, health check)
+- Service layer can be tested without a database using mock repositories (e.g. settings save/validation)
 - CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + admin-ui and storefront builds
 
 ---

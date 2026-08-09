@@ -33,6 +33,15 @@ import (
 	"shop/internal/version"
 )
 
+// 编译期断言：SQLite 实现满足 service 接口（便于后续换实现 / mock 测试）。
+var (
+	_ service.OrderRepository   = (*repository.OrderRepository)(nil)
+	_ service.ProductRepository = (*repository.ProductRepository)(nil)
+	_ service.KeyRepository     = (*repository.KeyRepository)(nil)
+	_ service.SettingsStore     = (*repository.Store)(nil)
+	_ service.AdminStore        = (*repository.Store)(nil)
+)
+
 type Server struct {
 	mux       *http.ServeMux
 	db        *sql.DB
@@ -67,8 +76,9 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 		limiters:  make(map[string]*RateLimiter),
 		linkSent:  make(map[string]int64),
 	}
-	s.settings = service.NewSettingsService(database, cipher, cfg)
-	s.admin = service.NewAdminService(database, cipher, notifier.NotifySystemError)
+	store := repository.NewStore(database)
+	s.settings = service.NewSettingsService(store, cipher, cfg)
+	s.admin = service.NewAdminService(store, cipher, notifier.NotifySystemError)
 	s.notifySvc = service.NewNotifyService(notifier)
 	// 异步任务 worker：邮件 / Telegram / Webhook（HTTP 层只发布事件）。
 	bus.Start(context.Background(), 2, notifier.Handler())

@@ -2,16 +2,15 @@ package repository
 
 import (
 	"database/sql"
-	"errors"
 
 	"shop/internal/models"
 )
 
-// ErrAdminNotFound 管理员不存在。
-var ErrAdminNotFound = errors.New("admin not found")
-
-// ErrLastAdmin 不能降级/删除最后一个管理员。
-var ErrLastAdmin = errors.New("cannot demote the last admin")
+// 领域错误收敛到 models（service 与 repository 共用）。
+var (
+	ErrAdminNotFound = models.ErrAdminNotFound
+	ErrLastAdmin     = models.ErrLastAdmin
+)
 
 // HasAdmin 是否存在至少一个管理员。
 func HasAdmin(d *sql.DB) bool {
@@ -97,9 +96,22 @@ func SetAdminTOTPEnabled(d *sql.DB, id int64, enabled bool) error {
 	return err
 }
 
-// ListAdmins 返回全部管理员查询。
-func ListAdmins(d *sql.DB) (*sql.Rows, error) {
-	return d.Query(`SELECT id, username, role, created_at FROM admins ORDER BY id`)
+// ListAdmins 返回全部管理员。
+func ListAdmins(d *sql.DB) ([]models.AdminRow, error) {
+	rows, err := d.Query(`SELECT id, username, role, created_at FROM admins ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.AdminRow{}
+	for rows.Next() {
+		var row models.AdminRow
+		if err := rows.Scan(&row.ID, &row.Username, &row.Role, &row.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 // AdminCountByRole 返回指定角色管理员数量。

@@ -402,3 +402,49 @@ func split4(s string) []string {
 	parts = append(parts, s[start:])
 	return parts
 }
+
+// ---- 仓储层共享类型与领域错误 ----
+// 放在 models 使 service 只依赖接口与中立类型，不依赖具体 SQLite 实现。
+
+// ProductView 商品视图（含库存统计）。
+type ProductView struct {
+	Product   Product
+	Available int
+	Reserved  int
+	Sold      int
+}
+
+// AdminRow 管理员列表行。
+type AdminRow struct {
+	ID        int64
+	Username  string
+	Role      string
+	CreatedAt int64
+}
+
+// DailyRevenueRow 单日营收行。
+type DailyRevenueRow struct {
+	Date    string
+	Revenue int64
+}
+
+// ProductSaleRow 商品销量行。
+type ProductSaleRow struct {
+	Name    string
+	Qty     int
+	Revenue int64
+}
+
+// InsufficientError 库存不足错误。
+type InsufficientError struct{}
+
+func (e *InsufficientError) Error() string { return "insufficient card stock" }
+
+var (
+	ErrCouponNotFound      = errors.New("优惠券不存在或已停用")
+	ErrCouponExpired       = errors.New("优惠券已过期")
+	ErrCouponUsedUp        = errors.New("优惠券使用次数已用完")
+	ErrCouponNotApplicable = errors.New("优惠券不适用于该商品或金额不足")
+	ErrAdminNotFound       = errors.New("admin not found")
+	ErrLastAdmin           = errors.New("cannot demote the last admin")
+)

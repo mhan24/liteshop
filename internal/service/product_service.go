@@ -3,12 +3,11 @@ package service
 import (
 	"strings"
 
-	"shop/internal/db/repository"
 	"shop/internal/models"
 )
 
 // View 商品视图（仓库层类型别名，保持对外类型不变）。
-type View = repository.View
+type View = models.ProductView
 
 // CategoryView 分类分组视图（前台首页/搜索用）。
 type CategoryView struct {
@@ -19,11 +18,11 @@ type CategoryView struct {
 
 // Service 商品业务逻辑。
 type ProductService struct {
-	repo *repository.ProductRepository
-	keys *repository.KeyRepository
+	repo ProductRepository
+	keys KeyRepository
 }
 
-func NewProductService(repo *repository.ProductRepository, keys *repository.KeyRepository) *ProductService {
+func NewProductService(repo ProductRepository, keys KeyRepository) *ProductService {
 	return &ProductService{repo: repo, keys: keys}
 }
 
@@ -170,4 +169,4 @@ func (s *ProductService) StockStats() (products, available, sold, locked int, er
 }
 
 // Repo 暴露仓储给上层查询。
-func (s *ProductService) Repo() *repository.ProductRepository { return s.repo }
+func (s *ProductService) Repo() ProductRepository { return s.repo }

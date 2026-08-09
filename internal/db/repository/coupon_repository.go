@@ -2,16 +2,16 @@ package repository
 
 import (
 	"database/sql"
-	"errors"
 
 	"shop/internal/models"
 )
 
+// 领域错误收敛到 models（service 与 repository 共用）。
 var (
-	ErrCouponNotFound      = errors.New("优惠券不存在或已停用")
-	ErrCouponExpired       = errors.New("优惠券已过期")
-	ErrCouponUsedUp        = errors.New("优惠券使用次数已用完")
-	ErrCouponNotApplicable = errors.New("优惠券不适用于该商品或金额不足")
+	ErrCouponNotFound      = models.ErrCouponNotFound
+	ErrCouponExpired       = models.ErrCouponExpired
+	ErrCouponUsedUp        = models.ErrCouponUsedUp
+	ErrCouponNotApplicable = models.ErrCouponNotApplicable
 )
 
 // GetCouponByCode 按券码查询优惠券（含有效期/启用检查）。

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"shop/internal/db/repository"
 	"shop/internal/models"
 	"shop/internal/payment"
 )
@@ -83,7 +82,7 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 		UpdatedAt:          now,
 	}
 	if err := s.repo.CreatePendingOrder(&order); err != nil {
-		var insufficient *repository.InsufficientError
+		var insufficient *models.InsufficientError
 		if errors.As(err, &insufficient) {
 			return "", "", 0, 0, newBusinessErrorf("库存不足，请刷新后重试")
 		}

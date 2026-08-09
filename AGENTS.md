@@ -7,6 +7,8 @@
 - `internal/api`：只做 HTTP 适配（解析/响应/限流/Turnstile/Cookie/鉴权中间件），不直连数据库、不调支付网关、不发送通知；
 - `internal/service`：全部业务逻辑（Order / Product / Admin / Settings / Notify / Stats）；
 - `internal/db/repository`：全部 SQL；`internal/db/schema`：唯一 schema 变更入口；
+- service 只依赖接口（`internal/service/repository.go` 的 OrderRepository / ProductRepository / KeyRepository / SettingsStore / AdminStore），不依赖具体 SQLite；测试用内存 mock；
+- 仓储共享类型与领域错误放在 `internal/models`（如 ProductView / AdminRow / ErrCouponNotFound / InsufficientError），避免 service ↔ repository 循环依赖；
 - 支付只依赖 `internal/payment` 的 `Gateway` 接口，业务不绑定具体网关；
 - 通知经 `internal/notify` + 任务总线异步执行；后台任务在 `internal/jobs` 调度。
 

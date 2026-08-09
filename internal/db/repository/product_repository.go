@@ -7,13 +7,8 @@ import (
 	"shop/internal/models"
 )
 
-// View 商品视图（含库存统计）。
-type View struct {
-	Product   models.Product
-	Available int
-	Reserved  int
-	Sold      int
-}
+// View 商品视图（含库存统计），类型收敛到 models.ProductView。
+type View = models.ProductView
 
 // Repository 封装商品与卡密的数据访问。
 type ProductRepository struct {

@@ -1,13 +1,11 @@
 package service
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"shop/internal/db/repository"
 	"shop/internal/models"
 	"shop/internal/security"
 )
@@ -36,7 +34,7 @@ type totpPending struct {
 
 // AdminService 管理员认证/会话/RBAC/审计的统一入口（按职责拆分到 admin_*.go 小文件）。
 type AdminService struct {
-	db            *sql.DB
+	store         AdminStore
 	cipher        *security.Cipher
 	onSystemError func(string)
 
@@ -45,9 +43,9 @@ type AdminService struct {
 	totp       map[string]totpPending
 }
 
-func NewAdminService(db *sql.DB, cipher *security.Cipher, onSystemError func(string)) *AdminService {
+func NewAdminService(store AdminStore, cipher *security.Cipher, onSystemError func(string)) *AdminService {
 	return &AdminService{
-		db:            db,
+		store:         store,
 		cipher:        cipher,
 		onSystemError: onSystemError,
 		loginFails:    make(map[string]loginGuard),
@@ -57,12 +55,12 @@ func NewAdminService(db *sql.DB, cipher *security.Cipher, onSystemError func(str
 
 // HasAdmin 是否存在至少一个管理员。
 func (s *AdminService) HasAdmin() bool {
-	return repository.HasAdmin(s.db)
+	return s.store.HasAdmin()
 }
 
 // SeedAdmin 创建初始管理员（已存在返回 (false, nil)）。
 func (s *AdminService) SeedAdmin(username, password string) (bool, error) {
-	return repository.SeedAdmin(s.db, username, password)
+	return s.store.SeedAdmin(username, password)
 }
 
 // Login 校验用户名/密码；成功返回 adminID 与是否启用 TOTP。
@@ -71,8 +69,8 @@ func (s *AdminService) Login(username, password string) (int64, bool, error) {
 	if s.LoginLocked(username) {
 		return 0, false, ErrLoginLocked
 	}
-	adminID, hash, totpSecret, totpEnabled, err := repository.AdminByUsername(s.db, username)
-	if err == repository.ErrAdminNotFound {
+	adminID, hash, totpSecret, totpEnabled, err := s.store.AdminByUsername(username)
+	if err == models.ErrAdminNotFound {
 		// 恒定时间：对不存在用户也执行一次 PBKDF2，避免用户名枚举时间侧信道。
 		_ = models.HashPassword(password)
 		return 0, false, ErrBadCredentials
@@ -94,7 +92,7 @@ func (s *AdminService) Login(username, password string) (int64, bool, error) {
 
 // VerifyLoginTotp 校验登录 TOTP（含旧明文升级为加密存储）。
 func (s *AdminService) VerifyLoginTotp(adminID int64, code string) error {
-	enabled, secret, err := repository.AdminTOTP(s.db, adminID)
+	enabled, secret, err := s.store.AdminTOTP(adminID)
 	if err != nil {
 		return err
 	}
@@ -114,7 +112,7 @@ func (s *AdminService) VerifyLoginTotp(adminID int64, code string) error {
 		if err != nil {
 			return err
 		}
-		if err := repository.SetAdminTOTPSecret(s.db, adminID, enc); err != nil {
+		if err := s.store.SetAdminTOTPSecret(adminID, enc); err != nil {
 			if s.onSystemError != nil {
 				s.onSystemError("TOTP 旧明文升级失败 admin=" + fmt.Sprint(adminID) + ": " + err.Error())
 			}

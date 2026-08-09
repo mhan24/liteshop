@@ -1,18 +1,17 @@
 package service
 
 import (
-	"shop/internal/db/repository"
 	"shop/internal/models"
 )
 
 // StatsService 仪表盘/销售报表聚合（跨订单/卡密/商品仓储）。
 type StatsService struct {
-	orders   *repository.OrderRepository
-	keys     *repository.KeyRepository
-	products *repository.ProductRepository
+	orders   OrderRepository
+	keys     KeyRepository
+	products ProductRepository
 }
 
-func NewStatsService(orders *repository.OrderRepository, keys *repository.KeyRepository, products *repository.ProductRepository) *StatsService {
+func NewStatsService(orders OrderRepository, keys KeyRepository, products ProductRepository) *StatsService {
 	return &StatsService{orders: orders, keys: keys, products: products}
 }
 
@@ -74,7 +73,7 @@ func (s *StatsService) Dashboard(dayStart int64, threshold int) (DashboardData, 
 }
 
 // SalesReport 返回销售报表（近 N 日营收 + 商品销售占比 + 成本来源统计）。
-func (s *StatsService) SalesReport(days int) ([]repository.DailyRevenueRow, []repository.ProductSaleRow, int, int, int, error) {
+func (s *StatsService) SalesReport(days int) ([]models.DailyRevenueRow, []models.ProductSaleRow, int, int, int, error) {
 	daily, err := s.orders.DailyRevenue(days)
 	if err != nil {
 		return nil, nil, 0, 0, 0, err

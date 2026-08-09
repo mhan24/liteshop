@@ -84,6 +84,7 @@ HTTP handler (internal/api)
 - handler 只做请求解析/响应与 HTTP 安全（Turnstile / 限流 / Cookie / 鉴权中间件）；
 - 订单、支付、通知、配置、管理员等业务全部经 `service`（Order / Product / Admin / Settings / Notify / Stats），handler 不直连数据库、不调支付网关、不发送通知；
 - `internal/db/repository` 集中全部 SQL：Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log；
+- service 只依赖接口（OrderRepository / ProductRepository / KeyRepository / SettingsStore / AdminStore），不绑定具体 SQLite，测试可用内存 mock；共享类型与领域错误在 `internal/models`；
 - 支付走 `payment.Gateway` 接口（BEpusdt 实现），业务不绑定具体网关；
 - 通知经 `internal/notify` + 任务总线异步执行；后台任务经 `internal/jobs` 调度。
 
@@ -254,6 +255,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 ## 测试与 CI
 
 - Go：`go test ./...`（迁移、签名验签、密码哈希、状态机、优惠券/免费订单、会话、登录锁定、任务总线、调度器、worker panic 隔离、备份、邮件重试、健康检查）
+- service 层可脱离数据库用 mock 仓储测试（如设置保存/校验）
 - CI（`.github/workflows/ci.yml`）：Go `vet` / `build` / `test` + 后台/前台构建
 
 ---

@@ -2,8 +2,6 @@ package service
 
 import (
 	"strings"
-
-	"shop/internal/db/repository"
 )
 
 // BackupSettings 返回可导出的配置（不含密钥类）。
@@ -41,7 +39,7 @@ func (s *SettingsService) RestoreSettings(settings map[string]string) (int, erro
 
 // ResetAll 清空业务数据（恢复/重置用）。
 func (s *SettingsService) ResetAll() error {
-	return repository.ResetAllTables(s.db)
+	return s.store.ResetAllTables()
 }
 
 // SetupInput 首次初始化输入。

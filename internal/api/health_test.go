@@ -8,6 +8,7 @@ import (
 
 	"shop/internal/config"
 	"shop/internal/db"
+	"shop/internal/db/repository"
 	"shop/internal/security"
 	"shop/internal/service"
 )
@@ -22,7 +23,7 @@ func TestHealthEndpoint(t *testing.T) {
 	s := &Server{
 		db:        d,
 		cfg:       config.Config{},
-		settings:  service.NewSettingsService(d, cipher, config.Config{}),
+		settings:  service.NewSettingsService(repository.NewStore(d), cipher, config.Config{}),
 		startTime: time.Now(),
 	}
 	rec := httptest.NewRecorder()
