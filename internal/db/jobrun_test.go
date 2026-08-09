@@ -124,3 +124,60 @@ func TestResetAllTablesScope(t *testing.T) {
 		t.Fatal("settings_version must be preserved after reset")
 	}
 }
+
+func TestUniqueViolationMapped(t *testing.T) {
+	d, err := Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer d.Close()
+	// 管理员用户名冲突 → ErrUsernameTaken
+	if _, err := repository.SeedAdmin(d, "admin1", "pw123456"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := repository.CreateAdmin(d, "admin2", "hash", "operator"); err != nil {
+		t.Fatalf("create admin2: %v", err)
+	}
+	admins, err := repository.ListAdmins(d)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var id2 int64
+	for _, a := range admins {
+		if a.Username == "admin2" {
+			id2 = a.ID
+		}
+	}
+	if err := repository.UpdateAdminAccount(d, id2, "admin1", "hash"); !errors.Is(err, models.ErrUsernameTaken) {
+		t.Fatalf("duplicate username err = %v, want ErrUsernameTaken", err)
+	}
+	// 优惠券码冲突 → ErrCouponExists
+	repo := repository.NewOrderRepository(d)
+	_ = repo.CreateCoupon(models.Coupon{Code: "A", Type: "fixed", ValueCents: 100, Active: true})
+	_ = repo.CreateCoupon(models.Coupon{Code: "B", Type: "fixed", ValueCents: 100, Active: true})
+	coupons, _ := repo.ListCoupons()
+	var bid int64
+	for _, c := range coupons {
+		if c.Code == "B" {
+			bid = c.ID
+		}
+	}
+	cerr := repo.UpdateCoupon(models.Coupon{ID: bid, Code: "A", Type: "fixed", ValueCents: 100, Active: true})
+	if !errors.Is(cerr, models.ErrCouponExists) {
+		t.Fatalf("duplicate coupon err = %v, want ErrCouponExists", cerr)
+	}
+	// 改为新码应成功且生效（回归：UpdateCoupon 曾漏更 code 列）
+	if err := repo.UpdateCoupon(models.Coupon{ID: bid, Code: "C", Type: "fixed", ValueCents: 100, Active: true}); err != nil {
+		t.Fatalf("update coupon to new code: %v", err)
+	}
+	coupons, _ = repo.ListCoupons()
+	var found bool
+	for _, c := range coupons {
+		if c.ID == bid && c.Code == "C" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("coupon code not persisted after update")
+	}
+}

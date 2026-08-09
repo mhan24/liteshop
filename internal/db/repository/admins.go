@@ -71,6 +71,9 @@ func AdminPasswordHash(d *sql.DB, id int64) (string, error) {
 // UpdateAdminAccount 更新用户名与密码哈希。
 func UpdateAdminAccount(d *sql.DB, id int64, username, hash string) error {
 	_, err := d.Exec(`UPDATE admins SET username = ?, password_hash = ? WHERE id = ?`, username, hash, id)
+	if isUniqueViolation(err) {
+		return models.ErrUsernameTaken
+	}
 	return err
 }
 

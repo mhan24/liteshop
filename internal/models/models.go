@@ -477,4 +477,6 @@ var (
 	ErrAdminNotFound       = errors.New("admin not found")
 	ErrLastAdmin           = errors.New("cannot demote the last admin")
 	ErrAlreadyProcessed    = errors.New("event already processed")
+	ErrUsernameTaken       = errors.New("username already taken")
+	ErrCouponExists        = errors.New("coupon code already exists")
 )

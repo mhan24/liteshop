@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"strings"
 
 	"shop/internal/models"
 )
@@ -177,8 +178,11 @@ func (r *OrderRepository) CreateCoupon(c models.Coupon) error {
 
 // UpdateCoupon 更新优惠券。
 func (r *OrderRepository) UpdateCoupon(c models.Coupon) error {
-	_, err := r.db.Exec(`UPDATE coupons SET type = ?, value_cents = ?, percent = ?, min_amount_cents = ?, max_uses = ?, product_id = ?, active = ?, expires_at = ?, updated_at = ? WHERE id = ?`,
-		c.Type, c.ValueCents, c.Percent, c.MinAmountCents, c.MaxUses, c.ProductID, boolInt(c.Active), c.ExpiresAt, models.Now(), c.ID)
+	_, err := r.db.Exec(`UPDATE coupons SET code = ?, type = ?, value_cents = ?, percent = ?, min_amount_cents = ?, max_uses = ?, product_id = ?, active = ?, expires_at = ?, updated_at = ? WHERE id = ?`,
+		c.Code, c.Type, c.ValueCents, c.Percent, c.MinAmountCents, c.MaxUses, c.ProductID, boolInt(c.Active), c.ExpiresAt, models.Now(), c.ID)
+	if isUniqueViolation(err) {
+		return models.ErrCouponExists
+	}
 	return err
 }
 
@@ -193,4 +197,9 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// isUniqueViolation 判断 SQLite UNIQUE 约束冲突（用于映射为业务错误）。
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

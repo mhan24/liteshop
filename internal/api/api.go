@@ -1473,6 +1473,10 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.admin.UpdateAccount(id, username, hash); err != nil {
+		if errors.Is(err, models.ErrUsernameTaken) {
+			writeError(w, 400, "用户名已存在")
+			return
+		}
 		writeInternalError(w, err)
 		return
 	}
@@ -1790,6 +1794,10 @@ func (s *Server) apiAdminCouponUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	c.ID = id
 	if err := s.orders.UpdateCoupon(c); err != nil {
+		if errors.Is(err, models.ErrCouponExists) {
+			writeError(w, 400, "券码已存在")
+			return
+		}
 		writeInternalError(w, err)
 		return
 	}
