@@ -15,7 +15,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,90 +36,74 @@ type Server struct {
 	mux       *http.ServeMux
 	db        *sql.DB
 	cfg       config.Config
-	pay       *payment.Client
 	notifier  *notify.Notifier
 	orders    *service.OrderService
 	products  *service.ProductService
-	keys      *repository.KeyRepository
+	settings  *service.SettingsService
+	admin     *service.AdminService
+	notifySvc *service.NotifyService
+	stats     *service.StatsService
 	dbPath    string
 	startTime time.Time
-
-	sessMu   sync.Mutex
-	sessions map[string]sessionInfo
 
 	limitersMu sync.Mutex
 	limiters   map[string]*RateLimiter
 
 	linkMu   sync.Mutex
 	linkSent map[string]int64 // 订单查看链接邮件冷却（按邮箱）
-
-	loginMu    sync.Mutex
-	loginFails map[string]loginGuard // 登录失败锁定（按用户名）
-
-	totpCipher *security.Cipher
-}
-
-// loginGuard 登录失败记录。
-type loginGuard struct {
-	fails       int
-	lockedUntil int64
-	lastAttempt int64
-}
-
-type sessionInfo struct {
-	AdminID int64
-	Expiry  time.Time
-}
-
-type SiteSettings struct {
-	Title          string
-	Subtitle       string
-	Announcement   string
-	SEODescription string
-	SEOKeywords    string
-	Contact        string
-	FriendLinks    string
-	Copyright      string
-	Privacy        string
-	Terms          string
-	Locale         string
-	Currency       string
-	Timezone       string
-	StockDisplay   string
 }
 
 func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	bus := jobs.NewBus(1024)
 	cipher := security.NewCipher(repository.EnsureSessionSecret(database))
+	notifier := notify.New(cfg, database, bus, cipher)
 	s := &Server{
-		db:         database,
-		cfg:        cfg,
-		pay:        payment.New(cfg.BepusdtBaseURL, cfg.BepusdtToken),
-		notifier:   notify.New(cfg, database, bus, cipher),
-		dbPath:     cfg.DatabasePath,
-		startTime:  time.Now(),
-		sessions:   make(map[string]sessionInfo),
-		limiters:   make(map[string]*RateLimiter),
-		linkSent:   make(map[string]int64),
-		loginFails: make(map[string]loginGuard),
+		db:        database,
+		cfg:       cfg,
+		notifier:  notifier,
+		dbPath:    cfg.DatabasePath,
+		startTime: time.Now(),
+		limiters:  make(map[string]*RateLimiter),
+		linkSent:  make(map[string]int64),
 	}
+	s.settings = service.NewSettingsService(database, cipher, cfg)
+	s.admin = service.NewAdminService(database, cipher, notifier.NotifySystemError)
+	s.notifySvc = service.NewNotifyService(notifier)
 	// 异步任务 worker：邮件 / Telegram / Webhook（HTTP 层只发布事件）。
-	bus.Start(context.Background(), 2, s.notifier.Handler())
-	s.totpCipher = cipher
-	s.orders = service.NewOrderService(
-		repository.NewOrderRepositoryWithTZ(database, models.LocationFromTimezone(s.siteSettings().Timezone)),
-		s.payClient,
-		s.paymentConfigForService,
-	)
-	s.orders.SendPaid = s.notifier.SendPaid
-	s.products = service.NewProductService(repository.NewProductRepository(database))
-	s.keys = repository.NewKeyRepository(database)
+	bus.Start(context.Background(), 2, notifier.Handler())
+
+	orderRepo := repository.NewOrderRepositoryWithTZ(database, models.LocationFromTimezone(s.settings.SiteSettings().Timezone))
+	keyRepo := repository.NewKeyRepository(database)
+	s.orders = service.NewOrderService(orderRepo, s.payClient, s.settings.PaymentServiceConfig)
+	s.orders.SendPaid = notifier.SendPaid
+	s.orders.OnOrderCreated = func(o models.Order) {
+		payload := notifier.OrderPayload(notify.EventOrderCreated, o, nil, nil)
+		notifier.Notify(notify.EventOrderCreated, payload)
+	}
+	s.orders.OnPaymentSuccess = func(o models.Order, cards []models.Card) {
+		payload := notifier.OrderPayload(notify.EventPaymentSuccess, o, nil, nil)
+		delete(payload, "contact") // 买家邮件由 SendPaid 发送，避免重复
+		notifier.Notify(notify.EventPaymentSuccess, payload)
+	}
+	s.orders.OnDelivered = func(o models.Order, cards []models.Card) {
+		payload := notifier.OrderPayload(notify.EventDelivered, o, cards, nil)
+		delete(payload, "contact")
+		notifier.Notify(notify.EventDelivered, payload)
+	}
+	s.orders.OnLowStock = notifier.NotifyLowStock
+	s.orders.OnSystemError = notifier.NotifySystemError
+	s.orders.SendLinks = notifier.SendOrderLinks
+	s.orders.LowStockThreshold = s.settings.LowStockThreshold
+	s.orders.SetKeyRepository(keyRepo)
+	s.products = service.NewProductService(repository.NewProductRepository(database), keyRepo)
+	s.stats = service.NewStatsService(orderRepo, keyRepo, repository.NewProductRepository(database))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
-	mux.HandleFunc("POST "+s.bepusdtNotifyPath(), s.handleBepusdtNotify)
+	mux.HandleFunc("POST "+s.settings.NotifyPath(), s.handleBepusdtNotify)
 	s.registerAPI(mux)
 	s.registerDocs(mux)
 	mux.Handle("GET /admin/assets/", http.StripPrefix("/admin", http.FileServer(adminAssetsFS())))
@@ -129,16 +112,18 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 	s.mux = mux
 	// 后台任务系统（cron + worker）：订单过期 / 邮件重试 / 清理 / 备份。
 	scheduler := jobs.NewScheduler()
-	scheduler.Add("order_expire", 5*time.Minute, jobs.OrderExpireJob(s.orders, func() int { return s.paymentConfigForService().TimeoutSec }))
-	scheduler.Add("email_retry", time.Minute, jobs.EmailRetryJob(s.db, s.notifier.SendRawMail))
+	scheduler.Add("order_expire", 5*time.Minute, jobs.OrderExpireJob(s.orders, func() int { return s.settings.PaymentServiceConfig().TimeoutSec }))
+	scheduler.Add("email_retry", time.Minute, jobs.EmailRetryJob(s.db, notifier.SendRawMail))
 	scheduler.Add("cleanup", 5*time.Minute, jobs.CleanupJob(s.db, s.cleanupMemory))
 	scheduler.Add("backup", 24*time.Hour, jobs.BackupJob(s.dbPath, 7))
 	scheduler.Start(context.Background())
 	return s, nil
 }
 
-// cleanupMemory 清理进程内状态（2FA 令牌、登录锁定、链接冷却、限流器）。
+// cleanupMemory 清理进程内状态（2FA 待验证、链接冷却、限流器）。
 func (s *Server) cleanupMemory() {
+	// 2FA 待验证令牌与登录锁定由 AdminService 管理，此处仅清理限流器与邮件冷却。
+	s.admin.ClearPendingTotps()
 	cutoff := time.Now().Add(-10 * time.Minute).Unix()
 	s.linkMu.Lock()
 	for k, v := range s.linkSent {
@@ -147,24 +132,6 @@ func (s *Server) cleanupMemory() {
 		}
 	}
 	s.linkMu.Unlock()
-
-	s.loginMu.Lock()
-	lnow := time.Now().Unix()
-	for k, v := range s.loginFails {
-		if lnow-v.lastAttempt > 600 {
-			delete(s.loginFails, k)
-		}
-	}
-	s.loginMu.Unlock()
-
-	s.sessMu.Lock()
-	now := time.Now()
-	for k, v := range s.sessions {
-		if now.After(v.Expiry) {
-			delete(s.sessions, k)
-		}
-	}
-	s.sessMu.Unlock()
 	s.cleanupLimiters()
 }
 
@@ -185,230 +152,16 @@ func pathID(r *http.Request, name string) (int64, error) {
 	return strconv.ParseInt(r.PathValue(name), 10, 64)
 }
 
-func (s *Server) tradeTypeAllowed(v string) bool {
-	for _, t := range s.tradeTypes() {
-		if v == t {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Server) tradeTypes() []string {
-	value, err := repository.GetSetting(s.db, "bepusdt_trade_types")
-	if err == nil && strings.TrimSpace(value) != "" {
-		// 过滤历史遗留的非法值（旧版本可绕过校验保存），避免前台选项与接口校验不一致。
-		var out []string
-		for _, t := range config.ParseTradeTypes(value) {
-			if validTradeType(t) {
-				out = append(out, t)
-			}
-		}
-		if len(out) > 0 {
-			return out
-		}
-	}
-	return s.cfg.BepusdtTradeTypes
-}
-
-func (s *Server) fiat() string {
-	value, err := repository.GetSetting(s.db, "bepusdt_fiat")
-	if err == nil && strings.TrimSpace(value) != "" {
-		return strings.ToUpper(strings.TrimSpace(value))
-	}
-	// 兼容旧版本误存到 "fiat" 键的配置（此前保存键名错误导致不生效）。
-	if legacy, err := repository.GetSetting(s.db, "fiat"); err == nil && strings.TrimSpace(legacy) != "" {
-		return strings.ToUpper(strings.TrimSpace(legacy))
-	}
-	return s.cfg.BepusdtFiat
-}
-
-// bepusdtNotifyPath 返回 BEpusdt 回调路径（可配置，默认 /notify/bepusdt）。
-// 仅接受安全字符且不与已有路由冲突，非法配置回退默认路径，防止 ServeMux panic。
-func (s *Server) bepusdtNotifyPath() string {
-	if v := strings.TrimSpace(mustGetSetting(s, "bepusdt_notify_path")); v != "" {
-		if !strings.HasPrefix(v, "/") {
-			v = "/" + v
-		}
-		if reNotifyPath.MatchString(v) && !notifyPathConflicts(v) {
-			return v
-		}
-	}
-	return "/notify/bepusdt"
-}
-
-var reNotifyPath = regexp.MustCompile(`^/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$`)
-
-// notifyPathConflicts 拒绝与已注册路由冲突的路径（避免 ServeMux 注册 panic）。
-func notifyPathConflicts(v string) bool {
-	return v == "/health" || v == "/docs" || v == "/setup" ||
-		strings.HasPrefix(v, "/api") || strings.HasPrefix(v, "/admin")
-}
-
-func (s *Server) paymentConfig() config.Config {
-	cfg := s.cfg
-	get := func(key string) string {
-		v, err := repository.GetSetting(s.db, key)
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(v)
-	}
-	getSecret := func(key string) string {
-		v, err := repository.GetSecret(s.db, key, s.totpCipher)
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(v)
-	}
-	cfg.BepusdtFiat = s.fiat()
-	cfg.BepusdtTradeTypes = s.tradeTypes()
-	if len(cfg.BepusdtTradeTypes) > 0 {
-		cfg.BepusdtTradeType = cfg.BepusdtTradeTypes[0]
-	}
-	if v := get("bepusdt_base_url"); v != "" {
-		cfg.BepusdtBaseURL = strings.TrimRight(v, "/")
-	}
-	if v := getSecret("bepusdt_api_token"); v != "" {
-		cfg.BepusdtToken = v
-	}
-	if v := get("bepusdt_timeout_sec"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.BepusdtTimeoutSec = n
-		}
-	}
-	publicOverridden := false
-	if v := get("shop_public_base_url"); v != "" {
-		cfg.PublicBaseURL = strings.TrimRight(v, "/")
-		publicOverridden = true
-	}
-	if v := get("bepusdt_notify_url"); v != "" {
-		cfg.NotifyURL = v
-	} else if publicOverridden {
-		// 使用同一回调路径（可配置），避免自定义路径下回调 404
-		cfg.NotifyURL = cfg.PublicBaseURL + s.bepusdtNotifyPath()
-	}
-	return cfg
-}
-
+// payClient 按当前数据库配置构造支付客户端（每次调用读取最新配置）。
 func (s *Server) payClient() *payment.Client {
-	cfg := s.paymentConfig()
+	cfg := s.settings.PaymentConfig()
 	return payment.New(cfg.BepusdtBaseURL, cfg.BepusdtToken)
-}
-
-// paymentConfigForService 供 service.Service 读取支付配置。
-func (s *Server) paymentConfigForService() service.PaymentConfig {
-	cfg := s.paymentConfig()
-	return service.PaymentConfig{
-		PublicBaseURL: cfg.PublicBaseURL,
-		NotifyURL:     cfg.NotifyURL,
-		TimeoutSec:    cfg.BepusdtTimeoutSec,
-		Fiat:          cfg.BepusdtFiat,
-		TradeTypes:    cfg.BepusdtTradeTypes,
-	}
-}
-
-func (s *Server) siteSettings() SiteSettings {
-	st := SiteSettings{
-		Title:          "LiteShop",
-		Subtitle:       "选择商品下单，使用加密货币完成支付，支付成功后自动发放卡密。",
-		Announcement:   "",
-		SEODescription: "",
-		SEOKeywords:    "自动发卡,发卡系统,USDT,数字货币支付",
-		Contact:        "",
-		FriendLinks:    "",
-		Copyright:      "",
-		Privacy:        "请在这里填写隐私政策。",
-		Terms:          "请在这里填写服务条款。",
-	}
-	get := func(key string) string {
-		v, err := repository.GetSetting(s.db, key)
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(v)
-	}
-	if v := get("site_title"); v != "" {
-		st.Title = v
-	}
-	if v := get("site_subtitle"); v != "" {
-		st.Subtitle = v
-	}
-	st.Announcement = get("site_announcement")
-	if v := get("seo_description"); v != "" {
-		st.SEODescription = v
-	}
-	if st.SEODescription == "" {
-		st.SEODescription = st.Subtitle
-	}
-	if v := get("seo_keywords"); v != "" {
-		st.SEOKeywords = v
-	}
-	st.Contact = get("site_contact")
-	st.FriendLinks = get("site_friend_links")
-	st.Copyright = get("site_copyright")
-	if v := get("privacy_policy"); v != "" {
-		st.Privacy = v
-	}
-	if v := get("terms_of_service"); v != "" {
-		st.Terms = v
-	}
-	if st.Copyright == "" {
-		st.Copyright = "© {{year}} {{site_title}}. All rights reserved."
-	}
-	st.Copyright = renderSiteVars(st.Copyright, st.Title)
-	st.Locale = firstNonEmpty(get("site_locale"), "zh-CN")
-	st.Currency = firstNonEmpty(get("site_currency"), "CNY")
-	st.Timezone = firstNonEmpty(get("site_timezone"), "Asia/Shanghai")
-	st.StockDisplay = firstNonEmpty(get("stock_display_mode"), "exact")
-	return st
-}
-
-func renderSiteVars(text, siteTitle string) string {
-	text = strings.ReplaceAll(text, "{{site_title}}", siteTitle)
-	text = strings.ReplaceAll(text, "{{year}}", fmt.Sprintf("%d", time.Now().Year()))
-	return text
-}
-
-func normalizeFiat(v string) (string, error) {
-	v = strings.ToUpper(strings.TrimSpace(v))
-	if len(v) < 3 || len(v) > 10 {
-		return "", errors.New("法币代码长度需为 3-10 位，例如 CNY/USD")
-	}
-	for _, r := range v {
-		if r < 'A' || r > 'Z' {
-			return "", errors.New("法币代码只能包含英文字母，例如 CNY/USD")
-		}
-	}
-	return v, nil
-}
-
-func normalizeTradeTypes(v string) (string, error) {
-	seen := make(map[string]bool)
-	var out []string
-	for _, part := range strings.Split(v, ",") {
-		p := strings.ToLower(strings.TrimSpace(part))
-		if p == "" {
-			continue
-		}
-		if !validTradeType(p) {
-			return "", fmt.Errorf("无效的收款类型：%s", p)
-		}
-		if !seen[p] {
-			seen[p] = true
-			out = append(out, p)
-		}
-	}
-	if len(out) == 0 {
-		return "", errors.New("至少填写一个收款类型")
-	}
-	return strings.Join(out, ","), nil
 }
 
 var turnstileHTTP = &http.Client{Timeout: 10 * time.Second}
 
 func (s *Server) verifyTurnstileToken(token, remoteIP, host string) error {
-	secret := s.turnstileSecret()
+	secret := s.settings.TurnstileSecret()
 	if secret == "" {
 		return errors.New("TURNSTILE_SECRET is not configured")
 	}
@@ -478,21 +231,6 @@ func clientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-func normalizeHTTPURL(v string, required bool) (string, error) {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		if required {
-			return "", errors.New("URL 不能为空")
-		}
-		return "", nil
-	}
-	u, err := url.Parse(v)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", errors.New("URL 必须是 http/https 格式")
-	}
-	return strings.TrimRight(v, "/"), nil
-}
-
 func validEmail(v string) bool {
 	v = strings.TrimSpace(v)
 	if v == "" || len(v) > 200 || strings.ContainsAny(v, " \t\r\n") {
@@ -505,26 +243,8 @@ func validEmail(v string) bool {
 	return strings.Contains(v[at+1:], ".")
 }
 
-// startOfDay 返回当天 00:00 的 Unix 时间戳（北京时间）。
-
-func validTradeType(v string) bool {
-	if !strings.Contains(v, ".") {
-		return false
-	}
-	for i, r := range v {
-		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.'
-		if !ok {
-			return false
-		}
-		if r == '.' && (i == 0 || i == len(v)-1) {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
-	payCfg := s.paymentConfig()
+	payCfg := s.settings.PaymentConfig()
 	if payCfg.BepusdtToken == "" {
 		http.Error(w, "bepusdt token not configured", 500)
 		return
@@ -553,14 +273,14 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 	)
 	switch params["status"] {
 	case "2":
-		order, cards, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], params["trade_id"], params["block_transaction_id"])
+		order, _, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], params["trade_id"], params["block_transaction_id"])
 		if err != nil {
 			logging.Payment().Error("payment callback error",
 				zap.String("order_no", params["order_id"]),
 				zap.String("result", "error"),
 				zap.Error(err),
 			)
-			go s.notifier.NotifySystemError("支付回调处理异常 order=" + params["order_id"] + ": " + err.Error())
+			s.notifySvc.SystemError("支付回调处理异常 order=" + params["order_id"] + ": " + err.Error())
 		} else {
 			logging.Payment().Info("payment delivered",
 				zap.String("order_no", order.OrderNo),
@@ -569,34 +289,13 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 				zap.String("result", map[bool]string{true: "ok", false: "noop"}[changed]),
 			)
 		}
-		if changed {
-			payPayload := s.notifier.OrderPayload(notify.EventPaymentSuccess, order, nil, nil)
-			delete(payPayload, "contact") // 买家邮件由 SendPaid 发送，避免重复
-			go s.notifier.Notify(notify.EventPaymentSuccess, payPayload)
-			deliverPayload := s.notifier.OrderPayload(notify.EventDelivered, order, cards, nil)
-			delete(deliverPayload, "contact") // 同上
-			go s.notifier.Notify(notify.EventDelivered, deliverPayload)
-		}
+		// payment_success / delivered 模板事件由 OrderService 内部回调触发。
 	case "3":
-		if o, oerr := s.orders.Repo().GetOrderByNo(params["order_id"]); oerr == nil && o.TradeID != "" {
-			go func(tradeID string) {
-				_ = s.payClient().CancelTransaction(tradeID)
-			}(o.TradeID)
-			_ = s.orders.Expire(o.ID)
-		}
+		s.orders.HandleGatewayCancel(params["order_id"])
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
 }
-
-// getProductViewBySlug 按 slug 查找商品。
-
-// markPaid 处理支付回调：waiting_payment -> paid，并记录事件日志。
-
-// deliverOrder 执行发卡（释放卡密为 sold），并在成功后推进到 delivered。
-// 返回卡密与是否发生变更。
-
-// cancelOrExpire 释放预留卡密并将订单置为取消/过期，记录日志。
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -627,7 +326,7 @@ func (s *Server) requireRole(min string, next http.Handler) http.Handler {
 
 // audit 记录一条管理员审计日志（记录谁/何时/改了什么/前后值）。
 func (s *Server) audit(r *http.Request, action, targetType, targetID, before, after string) {
-	_ = repository.AddAuditLog(s.db, s.currentAdminID(r), s.currentAdminName(r), action, targetType, targetID, before, after)
+	_ = s.admin.Audit(s.currentAdminID(r), s.currentAdminName(r), action, targetType, targetID, before, after)
 }
 
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID int64) error {
@@ -637,7 +336,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 	id := models.RandomToken(24)
 	expiry := time.Now().Add(12 * time.Hour)
 	// 会话持久化到数据库，服务重启不丢登录态。
-	if err := repository.CreateSession(s.db, id, adminID, expiry.Unix()); err != nil {
+	if err := s.admin.CreateSession(id, adminID, expiry.Unix()); err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
 	// HTTPS 下使用 __Host- 前缀（强制 Secure + Path=/ + 无 Domain）；
@@ -670,44 +369,21 @@ func (s *Server) sessionID(r *http.Request) (string, bool) {
 }
 
 func (s *Server) sessionSecret() string {
-	return repository.EnsureSessionSecret(s.db)
+	return s.admin.SessionSecret()
 }
 
 func (s *Server) turnstileSecret() string {
-	if v, err := repository.GetSecret(s.db, "turnstile_secret", s.totpCipher); err == nil && strings.TrimSpace(v) != "" {
-		return strings.TrimSpace(v)
-	}
-	return s.cfg.TurnstileSecret
+	return s.settings.TurnstileSecret()
 }
 
 func (s *Server) turnstileSiteKey() string {
-	if v, err := repository.GetSetting(s.db, "turnstile_site_key"); err == nil && strings.TrimSpace(v) != "" {
-		return v
-	}
-	return s.cfg.TurnstileSiteKey
+	return s.settings.TurnstileSiteKey()
 }
 
 func (s *Server) signSession(id string) string {
 	h := hmac.New(sha256.New, []byte(s.sessionSecret()))
 	h.Write([]byte(id))
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-}
-
-// hashMaintenancePassword 返回维护密码的 SHA-256 十六进制哈希（用于存储）。
-func hashMaintenancePassword(pw string) string {
-	sum := sha256.Sum256([]byte(pw))
-	return hex.EncodeToString(sum[:])
-}
-
-// normalizeMaintenanceHash 兼容存量明文：已是 64 位十六进制则原样返回，否则视为明文转哈希。
-func normalizeMaintenanceHash(v string) string {
-	v = strings.TrimSpace(v)
-	if len(v) == 64 {
-		if _, err := hex.DecodeString(v); err == nil {
-			return strings.ToLower(v)
-		}
-	}
-	return hashMaintenancePassword(v)
 }
 
 // maintToken 生成维护模式解锁 Cookie：HMAC(session_secret, "maint:"+hash)，
@@ -731,7 +407,7 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 	}
 	var adminID int64
 	var expiresAt int64
-	adminID, expiresAt, err := repository.SessionAdminID(s.db, id)
+	adminID, expiresAt, err := s.admin.SessionAdminID(id)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			log.Printf("session lookup: %v", err)
@@ -739,55 +415,21 @@ func (s *Server) currentSession(r *http.Request) (int64, string, bool) {
 		return 0, "", false
 	}
 	if time.Now().Unix() >= expiresAt {
-		_ = repository.DeleteSession(s.db, id)
+		_ = s.admin.DeleteSession(id)
 		return 0, "", false
 	}
 	// 滑动续期：仅在剩余不足 1 小时时刷新，减少每次请求的写放大。
 	if expiresAt-time.Now().Unix() < 3600 {
-		_ = repository.SlideSessionExpiry(s.db, id, time.Now().Add(12*time.Hour).Unix())
+		_ = s.admin.SlideSession(id, time.Now().Add(12*time.Hour).Unix())
 	}
 	var role string
-	role, err = repository.AdminRole(s.db, adminID)
+	role, err = s.admin.AdminRole(adminID)
 	if err != nil {
 		// 管理员已被删除：吊销其会话，避免降级为 viewer 继续访问。
-		_ = repository.DeleteSession(s.db, id)
+		_ = s.admin.DeleteSession(id)
 		return 0, "", false
 	}
 	return adminID, role, true
-}
-
-// purgeAdminSessions 删除某管理员的全部会话（删除账号时调用）。
-func (s *Server) purgeAdminSessions(adminID int64) {
-	_ = repository.DeleteSessionsByAdmin(s.db, adminID)
-}
-
-// loginLocked 判断用户名是否处于锁定状态。
-func (s *Server) loginLocked(username string) bool {
-	s.loginMu.Lock()
-	defer s.loginMu.Unlock()
-	return s.loginFails[username].lockedUntil > time.Now().Unix()
-}
-
-// recordLoginFail 记录一次登录失败；连续失败 5 次锁定 10 分钟。
-func (s *Server) recordLoginFail(username string) {
-	now := time.Now().Unix()
-	s.loginMu.Lock()
-	defer s.loginMu.Unlock()
-	g := s.loginFails[username]
-	g.fails++
-	g.lastAttempt = now
-	if g.fails >= 5 {
-		g.lockedUntil = now + 600
-		g.fails = 0
-	}
-	s.loginFails[username] = g
-}
-
-// clearLoginFails 登录成功后清除失败记录。
-func (s *Server) clearLoginFails(username string) {
-	s.loginMu.Lock()
-	defer s.loginMu.Unlock()
-	delete(s.loginFails, username)
 }
 
 // currentAdminID 返回当前管理员 ID。
@@ -802,7 +444,7 @@ func (s *Server) currentAdminName(r *http.Request) string {
 	if !ok {
 		return ""
 	}
-	name, _ := repository.AdminUsername(s.db, id)
+	name, _ := s.admin.AdminUsername(id)
 	return name
 }
 

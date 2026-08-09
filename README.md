@@ -80,6 +80,8 @@ HTTP handler (internal/api)
     → database/sql (internal/db)
 ```
 
+- handler 只做请求解析/响应与 HTTP 安全（Turnstile / 限流 / Cookie / 鉴权中间件）；
+- 订单、支付、通知、配置、管理员等业务全部经 `service`（Order / Product / Admin / Settings / Notify / Stats），handler 不直连数据库、不调支付网关、不发送通知；
 - `internal/db/repository` 集中全部 SQL：Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log，业务不散落 `db.Exec`；
 - 换数据库只需换驱动（sqlite.go / postgres.go 未来备用）+ 迁移方言。
 
@@ -137,7 +139,7 @@ HTTP handler (internal/api)
 ```
 cmd/shop/               Go 程序入口
 internal/api/           HTTP 路由、JSON API、支付回调、内嵌后台（handler 层）
-internal/service/       业务逻辑（OrderService / ProductService）
+internal/service/       业务逻辑（OrderService / ProductService / AdminService / SettingsService / NotifyService / StatsService）
 internal/db/            数据库连接层：sqlite.go / postgres.go（未来备用）
 internal/db/schema/     schema 演进：迁移执行器 + migrations/*.sql（唯一 schema 变更入口）
 internal/db/repository/ 全部数据访问（Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log）

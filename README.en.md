@@ -80,6 +80,8 @@ HTTP handler (internal/api)
     → database/sql (internal/db)
 ```
 
+- Handlers only parse requests, write responses, and enforce HTTP security (Turnstile / rate limiting / cookies / auth middleware);
+- Order, payment, notification, settings, and admin business logic all live in `service` (Order / Product / Admin / Settings / Notify / Stats); handlers never touch the database directly, call the payment gateway, or send notifications;
 - `internal/db/repository` centralizes all SQL: Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log; business code has no scattered `db.Exec`;
 - Switching databases only requires a new driver (sqlite.go / postgres.go future) + a migration dialect.
 
@@ -137,7 +139,7 @@ Cancel / expire: release stock + call BEpusdt `cancel-transaction`.
 ```
 cmd/shop/               Go entrypoint
 internal/api/           HTTP routes, JSON API, payment callback, embedded admin (handler layer)
-internal/service/       business logic (OrderService / ProductService)
+internal/service/       business logic (OrderService / ProductService / AdminService / SettingsService / NotifyService / StatsService)
 internal/db/            database connection layer: sqlite.go / postgres.go (future)
 internal/db/schema/     schema evolution: migration runner + migrations/*.sql (single entry for schema changes)
 internal/db/repository/ all data access (Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log)

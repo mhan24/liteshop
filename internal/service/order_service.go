@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"shop/internal/db/repository"
@@ -22,10 +23,19 @@ type PaymentConfig struct {
 // Service 订单业务逻辑。
 type OrderService struct {
 	repo  *repository.OrderRepository
+	keys  *repository.KeyRepository
 	payFn func() *payment.Client
 	cfgFn func() PaymentConfig
-	// SendPaid 发卡通知回调（注入 web 层的 notifier）。
-	SendPaid func(order models.Order, cards []models.Card)
+
+	// 通知回调（由装配层注入，避免 service ↔ notify/jobs 循环依赖）。
+	SendPaid          func(order models.Order, cards []models.Card)
+	OnOrderCreated    func(order models.Order)
+	OnPaymentSuccess  func(order models.Order, cards []models.Card)
+	OnDelivered       func(order models.Order, cards []models.Card)
+	OnLowStock        func(productID int64, productName string, available, threshold int)
+	OnSystemError     func(msg string)
+	SendLinks         func(contact string, links []string) error
+	LowStockThreshold func() int
 }
 
 // BusinessError 表示可安全展示给买家的业务错误（如券码无效、库存不足）。
@@ -51,6 +61,11 @@ func wrapCouponError(err error) error {
 
 func NewOrderService(repo *repository.OrderRepository, payFn func() *payment.Client, cfgFn func() PaymentConfig) *OrderService {
 	return &OrderService{repo: repo, payFn: payFn, cfgFn: cfgFn}
+}
+
+// SetKeyRepository 注入卡密仓储（低库存检查用）。
+func (s *OrderService) SetKeyRepository(keys *repository.KeyRepository) {
+	s.keys = keys
 }
 
 // ExpireStale 清理长时间停留 created / waiting_payment 的订单（释放卡密并回滚优惠券）。
@@ -194,6 +209,7 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 		if s.SendPaid != nil {
 			go s.SendPaid(order, cards)
 		}
+		s.fireCreatedEvents(order)
 		return order.OrderNo, "", discount, couponID, nil
 	}
 	cfg := s.cfg()
@@ -225,6 +241,7 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 	_ = s.repo.SetTradeInfo(order.ID, tradeID, paymentURL)
 	_ = s.repo.SetOrderStatus(order.ID, models.OrderWaitingPayment)
 	_ = s.repo.AddLog(order.ID, "transaction_created", "BEpusdt 交易已创建", models.OrderCreated, models.OrderWaitingPayment, 0)
+	s.fireCreatedEvents(order)
 	return order.OrderNo, paymentURL, discount, couponID, nil
 }
 
@@ -266,7 +283,195 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (mod
 		// 异步发送，避免支付回调被 SMTP/Telegram 网络耗时阻塞（BEpusdt 应答超时重试）。
 		go s.SendPaid(o, cards)
 	}
+	s.fireOrderEvents(o, cards)
 	return o, cards, true, nil
+}
+
+// fireOrderEvents 支付成功/发货事件通知（模板事件：payment_success / delivered）。
+func (s *OrderService) fireOrderEvents(order models.Order, cards []models.Card) {
+	if s.OnPaymentSuccess != nil {
+		go s.OnPaymentSuccess(order, cards)
+	}
+	if s.OnDelivered != nil {
+		go s.OnDelivered(order, cards)
+	}
+}
+
+// fireCreatedEvents 订单创建事件 + 低库存检查。
+func (s *OrderService) fireCreatedEvents(order models.Order) {
+	if s.OnOrderCreated != nil {
+		go s.OnOrderCreated(order)
+	}
+	if s.OnLowStock != nil && s.keys != nil {
+		if remain, err := s.keys.AvailableCount(order.ProductID); err == nil {
+			threshold := 10
+			if s.LowStockThreshold != nil {
+				threshold = s.LowStockThreshold()
+			}
+			go s.OnLowStock(order.ProductID, order.ProductName, remain, threshold)
+		}
+	}
+}
+
+// ---- 查询（handler 只经服务访问仓储） ----
+
+func (s *OrderService) GetOrderByNo(orderNo string) (models.Order, error) {
+	return s.repo.GetOrderByNo(orderNo)
+}
+
+func (s *OrderService) GetOrderByID(id int64) (models.Order, error) {
+	return s.repo.GetOrderByID(id)
+}
+
+func (s *OrderService) GetOrderCards(id int64) ([]models.Card, error) {
+	return s.repo.GetOrderCards(id)
+}
+
+func (s *OrderService) GetOrderStatus(id int64) (string, error) {
+	return s.repo.GetOrderStatus(id)
+}
+
+func (s *OrderService) OrdersByContact(contact string, limit int) ([]models.Order, error) {
+	return s.repo.OrdersByContact(contact, limit)
+}
+
+func (s *OrderService) ListOrders(where string, args []any, limit int) ([]models.Order, error) {
+	return s.repo.ListOrders(where, args, limit)
+}
+
+func (s *OrderService) Logs(orderID int64) ([]models.OrderEvent, error) {
+	return s.repo.Logs(orderID)
+}
+
+func (s *OrderService) AddLog(orderID int64, event, message, from, to string, adminID int64) error {
+	return s.repo.AddLog(orderID, event, message, from, to, adminID)
+}
+
+// ---- 网关联动 ----
+
+// CancelWithGateway 取消订单并同步关闭 BEpusdt 交易（失败不阻塞本地取消）。
+func (s *OrderService) CancelWithGateway(orderID int64) error {
+	s.cancelGatewayTx(orderID)
+	return s.Cancel(orderID)
+}
+
+// ExpireWithGateway 过期订单并同步关闭 BEpusdt 交易。
+func (s *OrderService) ExpireWithGateway(orderID int64) error {
+	s.cancelGatewayTx(orderID)
+	return s.Expire(orderID)
+}
+
+// HandleGatewayCancel 处理 BEpusdt 侧取消回调（status=3）。
+func (s *OrderService) HandleGatewayCancel(orderNo string) {
+	o, err := s.repo.GetOrderByNo(orderNo)
+	if err != nil {
+		return
+	}
+	s.cancelGatewayTx(o.ID)
+	_ = s.Expire(o.ID)
+}
+
+func (s *OrderService) cancelGatewayTx(orderID int64) {
+	o, err := s.repo.GetOrderByID(orderID)
+	if err != nil || o.TradeID == "" {
+		return
+	}
+	go func(tradeID string) {
+		_ = s.payFn().CancelTransaction(tradeID)
+	}(o.TradeID)
+}
+
+// ---- 重发 ----
+
+func resendableStatus(status string) bool {
+	switch status {
+	case models.OrderPaid, models.OrderProcessing, models.OrderDelivered, models.OrderCompleted, models.OrderDeliveryFailed:
+		return true
+	}
+	return false
+}
+
+// Resend 重发单个订单的发卡通知。
+func (s *OrderService) Resend(orderID int64) error {
+	o, err := s.repo.GetOrderByID(orderID)
+	if err != nil {
+		return err
+	}
+	if !resendableStatus(o.Status) {
+		return nil
+	}
+	cards, _ := s.repo.GetOrderCards(o.ID)
+	if len(cards) == 0 {
+		return nil
+	}
+	if s.SendPaid != nil {
+		go s.SendPaid(o, cards)
+	}
+	_ = s.repo.AddLog(o.ID, "resend", "管理员重新发送卡密", o.Status, o.Status, 0)
+	return nil
+}
+
+// BatchResend 批量重发（已支付且有卡密的订单）。
+func (s *OrderService) BatchResend(ids []int64) (int, error) {
+	sent := 0
+	for _, id := range ids {
+		o, err := s.repo.GetOrderByID(id)
+		if err != nil || !resendableStatus(o.Status) {
+			continue
+		}
+		cards, _ := s.repo.GetOrderCards(o.ID)
+		if len(cards) == 0 {
+			continue
+		}
+		if s.SendPaid != nil {
+			go s.SendPaid(o, cards)
+		}
+		_ = s.repo.AddLog(o.ID, "resend", "批量重发卡密", o.Status, o.Status, 0)
+		sent++
+	}
+	return sent, nil
+}
+
+// SendViewLinks 将订单查看链接发送到登记邮箱。返回发送条数（0=无订单）。
+func (s *OrderService) SendViewLinks(contact string) (int, error) {
+	orders, err := s.repo.OrdersByContact(contact, 10)
+	if err != nil {
+		return 0, err
+	}
+	base := strings.TrimRight(s.cfg().PublicBaseURL, "/")
+	links := []string{}
+	for _, o := range orders {
+		link := base + "/order/" + o.OrderNo + "?token=" + o.ViewToken
+		links = append(links, o.ProductName+" x"+strconv.Itoa(o.Qty)+": "+link)
+	}
+	if len(links) == 0 {
+		return 0, nil
+	}
+	if s.SendLinks == nil {
+		return 0, errors.New("邮件发送未配置")
+	}
+	if err := s.SendLinks(contact, links); err != nil {
+		return 0, err
+	}
+	return len(links), nil
+}
+
+// ---- 优惠券 ----
+
+func (s *OrderService) ListCoupons() ([]models.Coupon, error) {
+	return s.repo.ListCoupons()
+}
+
+func (s *OrderService) CreateCoupon(c models.Coupon) error {
+	return s.repo.CreateCoupon(c)
+}
+
+func (s *OrderService) UpdateCoupon(c models.Coupon) error {
+	return s.repo.UpdateCoupon(c)
+}
+
+func (s *OrderService) DeleteCoupon(id int64) error {
+	return s.repo.DeleteCoupon(id)
 }
 
 // ErrNoCards 表示订单已支付但发卡数量为 0（需管理员处理）。

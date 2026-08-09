@@ -10,29 +10,14 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"shop/internal/db/repository"
 	"shop/internal/logging"
 	"shop/internal/models"
 	"shop/internal/notify"
-	"shop/internal/security"
 	"shop/internal/service"
 	"strconv"
 	"strings"
 	"time"
 )
-
-// secretSettingsKey 判断是否为敏感配置键（secrets 表键 + 会话主密钥）。
-func secretSettingsKey(k string) bool {
-	if k == "session_secret" {
-		return true
-	}
-	for _, s := range repository.SecretSettingKeys {
-		if k == s {
-			return true
-		}
-	}
-	return false
-}
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -205,49 +190,35 @@ func cardJSON(c models.Card) map[string]any {
 	}
 }
 
-func parseSiteLinks(raw string) []map[string]string {
-	var arr []map[string]string
-	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
-		return []map[string]string{}
-	}
-	return arr
-}
-
 func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
-	st := s.siteSettings()
-	rawCopyright, _ := repository.GetSetting(s.db, "site_copyright")
-	if strings.TrimSpace(rawCopyright) == "" {
-		rawCopyright = "© {{year}} {{site_title}}. All rights reserved."
-	}
-	maintenanceEnabled, _ := repository.GetSetting(s.db, "maintenance_enabled")
-	maintenanceMessage, _ := repository.GetSetting(s.db, "maintenance_message")
-	maintenancePassword, _ := repository.GetSecret(s.db, "maintenance_password", s.totpCipher)
-	enabled := strings.TrimSpace(maintenanceEnabled) == "1"
+	st := s.settings.SiteSettings()
+	maintenancePassword := s.settings.MaintenancePassword()
+	enabled := s.settings.MaintenanceEnabled()
 	if enabled && maintenancePassword != "" && s.maintenanceUnlocked(r, maintenancePassword) {
 		enabled = false
 	}
 	writeJSON(w, 200, map[string]any{
 		"title":                 st.Title,
 		"subtitle":              st.Subtitle,
-		"public_base_url":       s.paymentConfig().PublicBaseURL,
+		"public_base_url":       s.settings.PaymentConfig().PublicBaseURL,
 		"announcement":          st.Announcement,
-		"seo_description":       firstNonEmpty(st.SEODescription, st.Subtitle),
+		"seo_description":       st.SEODescription,
 		"seo_keywords":          st.SEOKeywords,
-		"links":                 parseSiteLinks(mustGetSetting(s, "site_links")),
-		"copyright":             renderSiteVars(rawCopyright, st.Title),
+		"links":                 s.settings.SiteLinks(),
+		"copyright":             st.Copyright,
 		"lang":                  chooseLang(r),
 		"locale":                st.Locale,
 		"currency":              st.Currency,
 		"currency_symbol":       currencySymbol(st.Currency),
 		"timezone":              st.Timezone,
 		"stock_display_mode":    st.StockDisplay,
-		"default_product_image": s.defaultProductImage(),
-		"turnstile_site_key":    s.turnstileSiteKey(),
-		"logo_url":              s.siteLogoURL(),
-		"favicon_url":           s.siteFaviconURL(),
+		"default_product_image": s.settings.DefaultProductImage(),
+		"turnstile_site_key":    s.settings.TurnstileSiteKey(),
+		"logo_url":              s.settings.SiteLogoURL(),
+		"favicon_url":           s.settings.SiteFaviconURL(),
 		"maintenance": map[string]any{
 			"enabled": enabled,
-			"message": maintenanceMessage,
+			"message": s.settings.Get("maintenance_message"),
 		},
 	})
 }
@@ -286,29 +257,12 @@ func firstNonEmpty(vals ...string) string {
 // DefaultProductImage 是内置默认占位图（站内资源，前端兜底 /default-product.svg）。
 const DefaultProductImage = ""
 
-func (s *Server) defaultProductImage() string {
-	if v := strings.TrimSpace(mustGetSetting(s, "default_product_image")); v != "" {
-		return v
-	}
-	return DefaultProductImage
-}
-
-// siteLogoURL 返回站点 logo URL（后台可配置，空则用默认占位）。
-func (s *Server) siteLogoURL() string {
-	return strings.TrimSpace(mustGetSetting(s, "site_logo"))
-}
-
-// siteFaviconURL 返回站点 favicon URL（后台可配置）。
-func (s *Server) siteFaviconURL() string {
-	return strings.TrimSpace(mustGetSetting(s, "site_favicon"))
-}
-
 func (s *Server) maintenanceUnlocked(r *http.Request, password string) bool {
 	c, err := r.Cookie("maint_unlock")
 	if err != nil {
 		return false
 	}
-	return hmacEqual(c.Value, s.maintToken(normalizeMaintenanceHash(password)))
+	return hmacEqual(c.Value, s.maintToken(s.settings.NormalizeMaintenanceHash(password)))
 }
 
 func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
@@ -319,24 +273,23 @@ func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	maintenanceEnabled, _ := repository.GetSetting(s.db, "maintenance_enabled")
-	if strings.TrimSpace(maintenanceEnabled) != "1" {
+	if !s.settings.MaintenanceEnabled() {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
-	maintenancePassword, _ := repository.GetSecret(s.db, "maintenance_password", s.totpCipher)
+	maintenancePassword := s.settings.MaintenancePassword()
 	if maintenancePassword == "" ||
-		!hmacEqual(hashMaintenancePassword(strings.TrimSpace(input.Password)), normalizeMaintenanceHash(maintenancePassword)) {
+		!hmacEqual(s.settings.HashMaintenancePassword(strings.TrimSpace(input.Password)), s.settings.NormalizeMaintenanceHash(maintenancePassword)) {
 		writeError(w, 403, "密码错误")
 		return
 	}
 	// 存量明文在解锁成功后升级为哈希存储。
-	if normalized := normalizeMaintenanceHash(maintenancePassword); normalized != maintenancePassword {
-		_ = repository.SetSecret(s.db, "maintenance_password", normalized, s.totpCipher)
+	if normalized := s.settings.NormalizeMaintenanceHash(maintenancePassword); normalized != maintenancePassword {
+		_ = s.settings.SetMaintenancePasswordHash(normalized)
 		maintenancePassword = normalized
 	}
 	secure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
-	http.SetCookie(w, &http.Cookie{Name: "maint_unlock", Value: s.maintToken(normalizeMaintenanceHash(maintenancePassword)), Path: "/", MaxAge: 43200, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: "maint_unlock", Value: s.maintToken(s.settings.NormalizeMaintenanceHash(maintenancePassword)), Path: "/", MaxAge: 43200, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -384,10 +337,10 @@ func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"product":               productJSONPublic(v.Product),
 		"available":             v.Available,
-		"trade_types":           s.tradeTypes(),
-		"turnstile_site_key":    s.turnstileSiteKey(),
-		"default_product_image": s.defaultProductImage(),
-		"site_title":            s.siteSettings().Title,
+		"trade_types":           s.settings.TradeTypes(),
+		"turnstile_site_key":    s.settings.TurnstileSiteKey(),
+		"default_product_image": s.settings.DefaultProductImage(),
+		"site_title":            s.settings.SiteSettings().Title,
 	})
 }
 
@@ -428,15 +381,15 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	tradeType := strings.TrimSpace(input.TradeType)
 	if tradeType == "" {
-		tradeType = s.tradeTypes()[0]
+		tradeType = s.settings.TradeTypes()[0]
 	}
-	if !s.tradeTypeAllowed(tradeType) {
+	if !s.settings.TradeTypeAllowed(tradeType) {
 		writeError(w, 400, "invalid trade type")
 		return
 	}
 	orderNo, paymentURL, _, _, err := s.orders.CreateOrder(p, input.Qty, input.Contact, tradeType, input.CouponCode)
 	if err != nil {
-		go s.notifier.NotifySystemError("创建支付交易失败: " + err.Error())
+		s.notifySvc.SystemError("创建支付交易失败: " + err.Error())
 		logging.Payment().Warn("payment create failed",
 			zap.String("order_no", orderNo),
 			zap.String("trade_type", tradeType),
@@ -456,18 +409,8 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// 订单创建事件通知 + 库存不足检查
-	go func() {
-		if o, oerr := s.orders.Repo().GetOrderByNo(orderNo); oerr == nil {
-			payload := s.notifier.OrderPayload(notify.EventOrderCreated, o, nil, nil)
-			s.notifier.Notify(notify.EventOrderCreated, payload)
-		}
-		var remain int
-		remain, _ = s.keys.AvailableCount(p.ID)
-		s.notifier.NotifyLowStock(p.ID, p.Name, remain, s.lowStockThreshold())
-	}()
 	token := ""
-	if o, oerr := s.orders.Repo().GetOrderByNo(orderNo); oerr == nil {
+	if o, oerr := s.orders.GetOrderByNo(orderNo); oerr == nil {
 		token = o.ViewToken
 		logging.Payment().Info("payment create",
 			zap.String("order_no", orderNo),
@@ -486,13 +429,13 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 已配置 Turnstile 时，邮箱查询同样要求人机验证（防枚举/防刷）。
-	if s.turnstileSecret() != "" {
+	if s.settings.TurnstileSecret() != "" {
 		if err := s.verifyTurnstileToken(strings.TrimSpace(r.Header.Get("X-Turnstile-Response")), clientIP(r), r.Host); err != nil {
 			writeError(w, 403, "turnstile failed")
 			return
 		}
 	}
-	orders, err := s.orders.Repo().OrdersByContact(contact, 10)
+	orders, err := s.orders.OrdersByContact(contact, 10)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -535,7 +478,7 @@ func (s *Server) apiSendOrderLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 已配置 Turnstile 时同样要求人机验证。
-	if s.turnstileSecret() != "" {
+	if s.settings.TurnstileSecret() != "" {
 		if err := s.verifyTurnstileToken(strings.TrimSpace(r.Header.Get("X-Turnstile-Response")), clientIP(r), r.Host); err != nil {
 			writeError(w, 403, "turnstile failed")
 			return
@@ -553,23 +496,7 @@ func (s *Server) apiSendOrderLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	s.linkSent[key] = now
 	s.linkMu.Unlock()
-	orders, err := s.orders.Repo().OrdersByContact(contact, 10)
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	base := strings.TrimRight(s.paymentConfig().PublicBaseURL, "/")
-	links := []string{}
-	for _, o := range orders {
-		// 所有订单（含存量回填）均以查看令牌访问。
-		link := base + "/order/" + o.OrderNo + "?token=" + o.ViewToken
-		links = append(links, o.ProductName+" x"+strconv.Itoa(o.Qty)+": "+link)
-	}
-	if len(links) == 0 {
-		writeJSON(w, 200, map[string]any{"ok": true})
-		return
-	}
-	if err := s.notifier.SendOrderLinks(contact, links); err != nil {
+	if _, err := s.orders.SendViewLinks(contact); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -578,7 +505,7 @@ func (s *Server) apiSendOrderLinks(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiCancelOrder(w http.ResponseWriter, r *http.Request) {
 	orderNo := r.PathValue("orderNo")
-	o, err := s.orders.Repo().GetOrderByNo(orderNo)
+	o, err := s.orders.GetOrderByNo(orderNo)
 	if err != nil {
 		writeError(w, 404, "订单不存在")
 		return
@@ -593,13 +520,7 @@ func (s *Server) apiCancelOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "当前状态不可取消")
 		return
 	}
-	// 同步取消 BEpusdt 交易（失败不阻塞本地取消）
-	if o.TradeID != "" {
-		go func(tradeID string) {
-			_ = s.payClient().CancelTransaction(tradeID)
-		}(o.TradeID)
-	}
-	if err := s.orders.Cancel(o.ID); err != nil {
+	if err := s.orders.CancelWithGateway(o.ID); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -608,7 +529,7 @@ func (s *Server) apiCancelOrder(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 	orderNo := r.PathValue("orderNo")
-	order, err := s.orders.Repo().GetOrderByNo(orderNo)
+	order, err := s.orders.GetOrderByNo(orderNo)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
@@ -625,7 +546,7 @@ func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 	if owned {
 		switch order.Status {
 		case models.OrderPaid, models.OrderProcessing, models.OrderDelivered, models.OrderCompleted:
-			cards, _ := s.orders.Repo().GetOrderCards(order.ID)
+			cards, _ := s.orders.GetOrderCards(order.ID)
 			list := []map[string]any{}
 			for _, c := range cards {
 				list = append(list, cardJSON(c))
@@ -649,7 +570,7 @@ func hmacEqual(a, b string) bool {
 }
 
 func (s *Server) apiPage(w http.ResponseWriter, r *http.Request) {
-	st := s.siteSettings()
+	st := s.settings.SiteSettings()
 	slug := r.PathValue("slug")
 	if slug == "privacy" {
 		writeJSON(w, 200, map[string]any{"content": st.Privacy})
@@ -673,7 +594,7 @@ func (s *Server) apiAdminSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "unauthorized")
 		return
 	}
-	username, _ := repository.AdminUsername(s.db, id)
+	username, _ := s.admin.AdminUsername(id)
 	writeJSON(w, 200, map[string]any{"ok": true, "username": username, "role": role})
 }
 
@@ -689,73 +610,44 @@ func (s *Server) apiAdminLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	username := strings.TrimSpace(input.Username)
 	ip := clientIP(r)
-	// 账号锁定：连续失败 5 次锁定 10 分钟。
-	if s.loginLocked(username) {
-		logging.Security().Warn("admin login locked", zap.String("username", username), zap.String("ip", ip))
-		writeError(w, 403, "尝试次数过多，账号已锁定，请 10 分钟后再试")
-		return
-	}
-	adminID, hash, totpSecret, totpEnabled, err := repository.AdminByUsername(s.db, username)
-	if err == repository.ErrAdminNotFound {
-		// 恒定时间：对不存在用户也执行一次 PBKDF2，避免用户名枚举时间侧信道。
-		_ = models.HashPassword(input.Password)
-		logging.Security().Warn("admin login failed", zap.String("username", username), zap.String("ip", ip), zap.String("reason", "not_found"))
-		writeError(w, 403, "invalid credentials")
-		return
-	}
+	adminID, totpEnabled, err := s.admin.Login(username, input.Password)
 	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	if !models.CheckPassword(input.Password, hash) {
-		s.recordLoginFail(username)
-		msg := "invalid credentials"
-		reason := "bad_password"
-		if s.loginLocked(username) {
-			msg = "尝试次数过多，账号已锁定，请 10 分钟后再试"
+		reason := "internal"
+		msg := ""
+		switch {
+		case errors.Is(err, service.ErrLoginLocked):
 			reason = "locked"
+			msg = "尝试次数过多，账号已锁定，请 10 分钟后再试"
+		case errors.Is(err, service.ErrBadCredentials):
+			reason = "bad_credentials"
+			msg = "invalid credentials"
+		default:
+			writeInternalError(w, err)
+			return
 		}
 		logging.Security().Warn("admin login failed", zap.String("username", username), zap.String("ip", ip), zap.String("reason", reason))
 		writeError(w, 403, msg)
 		return
 	}
-	s.clearLoginFails(username)
 	logging.Security().Info("admin login ok", zap.String("username", username), zap.String("ip", ip))
 	if totpEnabled {
 		if strings.TrimSpace(input.Otp) == "" {
 			// 未提供 OTP，返回待验证状态
 			logging.Security().Info("admin totp required", zap.String("username", username), zap.String("ip", ip))
-			token := models.RandomToken(24)
-			s.sessMu.Lock()
-			s.sessions["2fa:"+token] = sessionInfo{AdminID: adminID, Expiry: time.Now().Add(5 * time.Minute)}
-			s.sessMu.Unlock()
+			token := s.admin.BeginTotpPending(adminID)
 			writeJSON(w, 200, map[string]any{"ok": true, "totp_required": true, "token": token})
 			return
 		}
-		decrypted, err := s.totpCipher.Decrypt(totpSecret)
-		if err != nil {
-			writeError(w, 500, "totp secret decrypt failed")
-			return
-		}
-		if !security.VerifyTotp(decrypted, input.Otp, time.Now()) {
+		if err := s.admin.VerifyLoginTotp(adminID, strings.TrimSpace(input.Otp)); err != nil {
+			if !errors.Is(err, service.ErrInvalidOtp) {
+				writeInternalError(w, err)
+				return
+			}
 			logging.Security().Warn("admin totp failed", zap.String("username", username), zap.String("ip", ip))
 			writeError(w, 403, "invalid otp")
 			return
 		}
 		logging.Security().Info("admin totp ok", zap.String("username", username), zap.String("ip", ip))
-		// 旧明文升级为加密存储（首次验证成功后回写）；失败须中断，防止迁移失败被掩盖
-		if !s.totpCipher.IsEncrypted(totpSecret) {
-			enc, err := s.totpCipher.Encrypt(decrypted)
-			if err != nil {
-				writeError(w, 500, "totp secret encrypt failed")
-				return
-			}
-			if err := repository.SetAdminTOTPSecret(s.db, adminID, enc); err != nil {
-				s.notifier.NotifySystemError("TOTP 旧明文升级失败 admin=" + fmt.Sprint(adminID) + ": " + err.Error())
-				writeError(w, 500, "totp secret upgrade failed")
-				return
-			}
-		}
 	}
 	if err := s.startSession(w, r, adminID); err != nil {
 		writeInternalError(w, err)
@@ -773,44 +665,20 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	s.sessMu.Lock()
-	info, ok := s.sessions["2fa:"+input.Token]
-	if ok {
-		delete(s.sessions, "2fa:"+input.Token)
-	}
-	s.sessMu.Unlock()
+	adminID, ok := s.admin.TakeTotpPending(input.Token)
 	if !ok {
 		writeError(w, 401, "invalid or expired token")
 		return
 	}
-	_, totpSecret, err := repository.AdminTOTP(s.db, info.AdminID)
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	decrypted, err := s.totpCipher.Decrypt(totpSecret)
-	if err != nil {
-		writeError(w, 500, "totp secret decrypt failed")
-		return
-	}
-	if !security.VerifyTotp(decrypted, input.Otp, time.Now()) {
+	if err := s.admin.VerifyLoginTotp(adminID, input.Otp); err != nil {
+		if !errors.Is(err, service.ErrInvalidOtp) {
+			writeInternalError(w, err)
+			return
+		}
 		writeError(w, 403, "invalid otp")
 		return
 	}
-	// 旧明文升级为加密存储（首次验证成功后回写）；失败须中断，防止迁移失败被掩盖
-	if !s.totpCipher.IsEncrypted(totpSecret) {
-		enc, err := s.totpCipher.Encrypt(decrypted)
-		if err != nil {
-			writeError(w, 500, "totp secret encrypt failed")
-			return
-		}
-		if err := repository.SetAdminTOTPSecret(s.db, info.AdminID, enc); err != nil {
-			s.notifier.NotifySystemError("TOTP 旧明文升级失败 admin=" + fmt.Sprint(info.AdminID) + ": " + err.Error())
-			writeError(w, 500, "totp secret upgrade failed")
-			return
-		}
-	}
-	if err := s.startSession(w, r, info.AdminID); err != nil {
+	if err := s.startSession(w, r, adminID); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -819,10 +687,7 @@ func (s *Server) apiAdminLoginVerify(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
 	if id, ok := s.sessionID(r); ok {
-		_ = repository.DeleteSession(s.db, id)
-		s.sessMu.Lock()
-		delete(s.sessions, id)
-		s.sessMu.Unlock()
+		_ = s.admin.DeleteSession(id)
 	}
 	// 同时清除两种名称（HTTPS 的 __Host- 与纯 HTTP 的普通名）。
 	http.SetCookie(w, &http.Cookie{Name: "__Host-shop_session", Value: "", Path: "/", MaxAge: -1, Secure: true})
@@ -831,38 +696,18 @@ func (s *Server) apiAdminLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
-	dayStart := models.StartOfDayIn(models.Now(), models.LocationFromTimezone(s.siteSettings().Timezone))
-
-	// 今日/待处理指标（订单仓储）
-	todayOrders, todaySales, pendingOrders, paymentFailed, deliveryFailed, todayRevenue, err := s.orders.Repo().OrderCounts()
+	dayStart := models.StartOfDayIn(models.Now(), models.LocationFromTimezone(s.settings.SiteSettings().Timezone))
+	data, err := s.stats.Dashboard(dayStart, s.settings.LowStockThreshold())
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	todayPaidCards, _ := s.keys.SoldCountSince(dayStart)
-
-	// 今日毛利 = 今日营收 - 今日售出卡密的商品成本
-	todayCost, _ := s.orders.Repo().CostSince(dayStart)
-	todayProfit := todayRevenue - todayCost
-
-	// 商品/卡密库存（商品仓储）
-	products, availableCards, soldCards, lockedCards, err := s.keys.StockStats()
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-
-	// 库存不足
 	lowStock := []map[string]any{}
-	lowViews, _ := s.products.Repo().LowStock(s.lowStockThreshold())
-	for _, v := range lowViews {
+	for _, v := range data.LowStock {
 		lowStock = append(lowStock, map[string]any{"id": v.Product.ID, "name": v.Product.Name, "price_cents": v.Product.PriceCents, "available": v.Available})
 	}
-
-	// 最近交易
 	recent := []map[string]any{}
-	recentOrders, _ := s.orders.Repo().RecentOrders(8)
-	for _, o := range recentOrders {
+	for _, o := range data.RecentOrders {
 		recent = append(recent, map[string]any{
 			"id": o.ID, "order_no": o.OrderNo, "product_name": o.ProductName,
 			"qty": o.Qty, "amount": fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
@@ -879,19 +724,19 @@ func (s *Server) apiDashboard(w http.ResponseWriter, r *http.Request) {
 	uptime := int64(time.Since(s.startTime).Seconds())
 
 	writeJSON(w, 200, map[string]any{
-		"today_orders":     todayOrders,
-		"today_sales":      todaySales,
-		"today_revenue":    todayRevenue,
-		"today_cost":       todayCost,
-		"today_profit":     todayProfit,
-		"today_paid_cards": todayPaidCards,
-		"pending_orders":   pendingOrders,
-		"payment_failed":   paymentFailed,
-		"delivery_failed":  deliveryFailed,
-		"products":         products,
-		"available_cards":  availableCards,
-		"sold_cards":       soldCards,
-		"locked_cards":     lockedCards,
+		"today_orders":     data.TodayOrders,
+		"today_sales":      data.TodaySales,
+		"today_revenue":    data.TodayRevenue,
+		"today_cost":       data.TodayCost,
+		"today_profit":     data.TodayProfit,
+		"today_paid_cards": data.TodayPaidCards,
+		"pending_orders":   data.PendingOrders,
+		"payment_failed":   data.PaymentFailed,
+		"delivery_failed":  data.DeliveryFailed,
+		"products":         data.Products,
+		"available_cards":  data.AvailableCards,
+		"sold_cards":       data.SoldCards,
+		"locked_cards":     data.LockedCards,
 		"low_stock":        lowStock,
 		"recent_orders":    recent,
 		"system": map[string]any{
@@ -908,17 +753,7 @@ func (s *Server) apiAdminSalesReport(w http.ResponseWriter, r *http.Request) {
 	if d, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil && d > 0 && d <= 90 {
 		days = d
 	}
-	daily, err := s.orders.Repo().DailyRevenue(days)
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	products, err := s.orders.Repo().ProductSales(10)
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	orderTime, migrationEstimate, unknown, err := s.orders.Repo().CostSourceStats()
+	daily, products, orderTime, migrationEstimate, unknown, err := s.stats.SalesReport(days)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -934,18 +769,8 @@ func (s *Server) apiAdminSalesReport(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// lowStockThreshold 低库存告警阈值 (可用卡密数量)。
-func (s *Server) lowStockThreshold() int {
-	raw := strings.TrimSpace(mustGetSetting(s, "low_stock_threshold"))
-	n, err := strconv.Atoi(raw)
-	if err != nil || n <= 0 {
-		return 10
-	}
-	return n
-}
-
 func (s *Server) apiAdminProducts(w http.ResponseWriter, r *http.Request) {
-	views, err := s.products.Repo().ListViews(false)
+	views, err := s.products.List(false)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1108,7 +933,7 @@ func (s *Server) apiAdminProductUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	oldName := s.products.Repo().GetName(id)
+	oldName := s.products.GetName(id)
 	if err := s.products.Update(p, id); err != nil {
 		writeInternalError(w, err)
 		return
@@ -1123,7 +948,7 @@ func (s *Server) apiAdminCards(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	cards, err := s.keys.ListByProduct(id)
+	cards, err := s.products.Cards(id)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1153,7 +978,7 @@ func (s *Server) apiAdminCardsImport(w http.ResponseWriter, r *http.Request) {
 			lines = append(lines, line)
 		}
 	}
-	added, skipped, err := s.keys.Add(id, lines, input.Dedupe)
+	added, skipped, err := s.products.ImportCards(id, lines, input.Dedupe)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1169,7 +994,7 @@ func (s *Server) apiAdminCardsExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	cards, err := s.keys.ListByProduct(id)
+	cards, err := s.products.Cards(id)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1193,7 +1018,7 @@ func (s *Server) apiAdminCardDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	_ = s.keys.DeleteAvailable(id)
+	_ = s.products.DeleteCard(id)
 	s.audit(r, "card_delete", "card", fmt.Sprintf("%d", id), "", "deleted")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -1227,12 +1052,12 @@ func orderFilterArgs(r *http.Request) (string, []any) {
 
 func (s *Server) apiAdminOrdersExport(w http.ResponseWriter, r *http.Request) {
 	where, args := orderFilterArgs(r)
-	orders, err := s.orders.Repo().ListOrders(where, args, 5000)
+	orders, err := s.orders.ListOrders(where, args, 5000)
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	tz := models.LocationFromTimezone(s.siteSettings().Timezone)
+	tz := models.LocationFromTimezone(s.settings.SiteSettings().Timezone)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
 	w.Write([]byte("\xEF\xBB\xBF"))
@@ -1262,7 +1087,7 @@ func csvSafe(s string) string {
 
 func (s *Server) apiAdminOrders(w http.ResponseWriter, r *http.Request) {
 	where, args := orderFilterArgs(r)
-	orders, err := s.orders.Repo().ListOrders(where, args, 500)
+	orders, err := s.orders.ListOrders(where, args, 500)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1280,17 +1105,17 @@ func (s *Server) apiAdminOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	o, err := s.orders.Repo().GetOrderByID(id)
+	o, err := s.orders.GetOrderByID(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
 	}
-	cards, _ := s.orders.Repo().GetOrderCards(o.ID)
+	cards, _ := s.orders.GetOrderCards(o.ID)
 	list := []map[string]any{}
 	for _, c := range cards {
 		list = append(list, cardJSON(c))
 	}
-	logs, _ := s.orders.Repo().Logs(o.ID)
+	logs, _ := s.orders.Logs(o.ID)
 	logList := []map[string]any{}
 	for _, e := range logs {
 		logList = append(logList, map[string]any{
@@ -1313,12 +1138,7 @@ func (s *Server) apiAdminOrderExpire(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	if o, oerr := s.orders.Repo().GetOrderByID(id); oerr == nil && o.TradeID != "" {
-		go func(tradeID string) {
-			_ = s.payClient().CancelTransaction(tradeID)
-		}(o.TradeID)
-	}
-	if err := s.orders.Expire(id); err != nil {
+	if err := s.orders.ExpireWithGateway(id); err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -1333,17 +1153,12 @@ func (s *Server) apiAdminOrderCancel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	o, err := s.orders.Repo().GetOrderByID(id)
+	o, err := s.orders.GetOrderByID(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
 	}
-	if o.TradeID != "" {
-		go func(tradeID string) {
-			_ = s.payClient().CancelTransaction(tradeID)
-		}(o.TradeID)
-	}
-	if err := s.orders.Cancel(id); err != nil {
+	if err := s.orders.CancelWithGateway(id); err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -1371,7 +1186,7 @@ func (s *Server) apiAdminOrderSetStatus(w http.ResponseWriter, r *http.Request) 
 		writeError(w, 400, "invalid status")
 		return
 	}
-	o, err := s.orders.Repo().GetOrderByID(id)
+	o, err := s.orders.GetOrderByID(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
@@ -1394,13 +1209,9 @@ func (s *Server) apiAdminOrderResend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	o, err := s.orders.Repo().GetOrderByID(id)
-	if err == nil && (o.Status == models.OrderDelivered || o.Status == models.OrderPaid || o.Status == models.OrderCompleted || o.Status == models.OrderDeliveryFailed) {
-		cards, _ := s.orders.Repo().GetOrderCards(o.ID)
-		if len(cards) > 0 {
-			go s.notifier.SendPaid(o, cards)
-			_ = s.orders.Repo().AddLog(o.ID, "resend", "管理员重新发送卡密", o.Status, o.Status, 0)
-		}
+	if err := s.orders.Resend(id); err != nil {
+		writeInternalError(w, err)
+		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -1418,22 +1229,10 @@ func (s *Server) apiAdminOrdersBatchResend(w http.ResponseWriter, r *http.Reques
 		writeError(w, 400, "批量重发最多 100 单")
 		return
 	}
-	sent := 0
-	for _, id := range input.IDs {
-		o, err := s.orders.Repo().GetOrderByID(id)
-		if err != nil {
-			continue
-		}
-		if o.Status != models.OrderDelivered && o.Status != models.OrderPaid && o.Status != models.OrderCompleted && o.Status != models.OrderDeliveryFailed {
-			continue
-		}
-		cards, _ := s.orders.Repo().GetOrderCards(o.ID)
-		if len(cards) == 0 {
-			continue
-		}
-		go s.notifier.SendPaid(o, cards)
-		_ = s.orders.Repo().AddLog(o.ID, "resend", "批量重发卡密", o.Status, o.Status, 0)
-		sent++
+	sent, err := s.orders.BatchResend(input.IDs)
+	if err != nil {
+		writeInternalError(w, err)
+		return
 	}
 	s.audit(r, "orders_batch_resend", "orders", "", "", fmt.Sprintf("sent=%d", sent))
 	writeJSON(w, 200, map[string]any{"ok": true, "sent": sent})
@@ -1444,7 +1243,7 @@ func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) 
 		writeError(w, 404, "not found")
 		return
 	}
-	before, err := s.orders.Repo().GetOrderStatus(id)
+	before, err := s.orders.GetOrderStatus(id)
 	if err != nil {
 		writeError(w, 404, "not found")
 		return
@@ -1458,15 +1257,15 @@ func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) apiAdminSettings(w http.ResponseWriter, r *http.Request) {
-	cfg := s.paymentConfig()
+	cfg := s.settings.PaymentConfig()
 	writeJSON(w, 200, map[string]any{
 		"bepusdt_base_url":      cfg.BepusdtBaseURL,
 		"bepusdt_api_token_set": cfg.BepusdtToken != "",
-		"fiat":                  s.fiat(),
-		"trade_types":           strings.Join(s.tradeTypes(), ","),
+		"fiat":                  s.settings.Fiat(),
+		"trade_types":           strings.Join(s.settings.TradeTypes(), ","),
 		"bepusdt_timeout_sec":   cfg.BepusdtTimeoutSec,
 		"shop_public_base_url":  cfg.PublicBaseURL,
-		"bepusdt_notify_path":   s.bepusdtNotifyPath(),
+		"bepusdt_notify_path":   s.settings.NotifyPath(),
 		"bepusdt_notify_url":    cfg.NotifyURL,
 	})
 }
@@ -1477,68 +1276,19 @@ func (s *Server) apiAdminSettingsSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	setIfPresent := func(key, field string) {
-		if v, ok := input[field]; ok {
-			_ = repository.SetSetting(s.db, key, strings.TrimSpace(str(v)))
-		}
-	}
-	setIfPresent("bepusdt_timeout_sec", "bepusdt_timeout_sec")
-	if v, ok := input["bepusdt_base_url"]; ok {
-		u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-		_ = repository.SetSetting(s.db, "bepusdt_base_url", u)
-	}
-	if v, ok := input["fiat"]; ok {
-		f, err := normalizeFiat(strings.TrimSpace(str(v)))
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-		// 注意键名为 bepusdt_fiat（读取方），旧代码误写 "fiat" 导致配置不生效。
-		_ = repository.SetSetting(s.db, "bepusdt_fiat", f)
-	}
-	if v, ok := input["trade_types"]; ok {
-		tt, err := normalizeTradeTypes(strings.TrimSpace(str(v)))
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-		_ = repository.SetSetting(s.db, "bepusdt_trade_types", tt)
-	}
-	for _, field := range []string{"shop_public_base_url", "bepusdt_notify_url"} {
-		if v, ok := input[field]; ok {
-			u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)
-			if err != nil {
-				writeError(w, 400, err.Error())
-				return
-			}
-			_ = repository.SetSetting(s.db, field, u)
-		}
-	}
-	// 回调路径需字符校验且不得与已有路由冲突，非法值回退默认（不保存）
-	if v := strings.TrimSpace(str(input["bepusdt_notify_path"])); v != "" {
-		if !strings.HasPrefix(v, "/") {
-			v = "/" + v
-		}
-		if reNotifyPath.MatchString(v) && !notifyPathConflicts(v) {
-			_ = repository.SetSetting(s.db, "bepusdt_notify_path", v)
-		}
-	}
-	if v := strings.TrimSpace(str(input["bepusdt_api_token"])); v != "" {
-		_ = repository.SetSecret(s.db, "bepusdt_api_token", v, s.totpCipher)
+	if err := s.settings.SavePayment(input); err != nil {
+		writeError(w, 400, err.Error())
+		return
 	}
 	s.audit(r, "payment_update", "settings", "payment", "", "支付配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
-	cfg := s.notifier.CurrentConfig()
-	events, _ := repository.GetSetting(s.db, "notify_events")
-	adminEmail, _ := repository.GetSetting(s.db, "notify_admin_email")
-	if strings.TrimSpace(events) == "" {
+	cfg := s.notifySvc.CurrentConfig()
+	events := s.settings.Get("notify_events")
+	adminEmail := s.settings.Get("notify_admin_email")
+	if events == "" {
 		events = "order_created,payment_success,delivered,low_stock,system_error"
 	}
 	writeJSON(w, 200, map[string]any{
@@ -1553,7 +1303,7 @@ func (s *Server) apiAdminNotify(w http.ResponseWriter, r *http.Request) {
 		"webhook_secret_set": cfg.WebhookSecret != "",
 		"notify_events":      events,
 		"notify_admin_email": adminEmail,
-		"event_templates":    s.notifier.EventTemplates(),
+		"event_templates":    s.notifySvc.EventTemplates(),
 	})
 }
 
@@ -1563,45 +1313,9 @@ func (s *Server) apiAdminNotifySave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	setIfPresent := func(key, field string) {
-		if v, ok := input[field]; ok {
-			_ = repository.SetSetting(s.db, key, strings.TrimSpace(str(v)))
-		}
-	}
-	setIfPresent("smtp_host", "smtp_host")
-	setIfPresent("smtp_port", "smtp_port")
-	setIfPresent("smtp_from", "smtp_from")
-	setIfPresent("telegram_chat_id", "telegram_chat_id")
-	setIfPresent("webhook_url", "webhook_url")
-	setIfPresent("notify_events", "notify_events")
-	setIfPresent("notify_admin_email", "notify_admin_email")
-	if v := strings.TrimSpace(str(input["smtp_username"])); v != "" {
-		_ = repository.SetSetting(s.db, "smtp_username", v)
-	}
-	if v := strings.TrimSpace(str(input["smtp_password"])); v != "" {
-		_ = repository.SetSecret(s.db, "smtp_password", v, s.totpCipher)
-	}
-	if v := strings.TrimSpace(str(input["telegram_bot_token"])); v != "" {
-		_ = repository.SetSecret(s.db, "telegram_bot_token", v, s.totpCipher)
-	}
-	if v := strings.TrimSpace(str(input["webhook_secret"])); v != "" {
-		_ = repository.SetSecret(s.db, "webhook_secret", v, s.totpCipher)
-	}
-	// 事件模板：evt_tpl_<kind>_<event>（空值回退默认模板）
-	if v, ok := input["event_templates"]; ok {
-		if m, ok := v.(map[string]any); ok {
-			for ev, tpl := range m {
-				tm, ok := tpl.(map[string]any)
-				if !ok {
-					continue
-				}
-				for _, kind := range []string{"telegram", "mail_subject", "mail_body"} {
-					if val, ok := tm[kind]; ok {
-						_ = repository.SetSetting(s.db, "evt_tpl_"+kind+"_"+ev, strings.TrimSpace(str(val)))
-					}
-				}
-			}
-		}
+	if err := s.settings.SaveNotify(input); err != nil {
+		writeError(w, 400, err.Error())
+		return
 	}
 	s.audit(r, "notify_update", "settings", "notify", "", "通知配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -1625,7 +1339,7 @@ func (s *Server) apiAdminNotifyTestEvent(w http.ResponseWriter, r *http.Request)
 		writeError(w, 400, "invalid event")
 		return
 	}
-	if err := s.notifier.SendTestEvent(input.Event, strings.TrimSpace(input.Channel)); err != nil {
+	if err := s.notifySvc.SendTestEvent(input.Event, strings.TrimSpace(input.Channel)); err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -1641,7 +1355,7 @@ func (s *Server) apiAdminNotifyTestEmail(w http.ResponseWriter, r *http.Request)
 		writeError(w, 400, "invalid email")
 		return
 	}
-	if err := s.notifier.SendTestEmail(strings.TrimSpace(input.Email)); err != nil {
+	if err := s.notifySvc.SendTestEmail(strings.TrimSpace(input.Email)); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1649,7 +1363,7 @@ func (s *Server) apiAdminNotifyTestEmail(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) apiAdminNotifyTestTelegram(w http.ResponseWriter, r *http.Request) {
-	if err := s.notifier.SendTestTelegram(); err != nil {
+	if err := s.notifySvc.SendTestTelegram(); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1657,15 +1371,15 @@ func (s *Server) apiAdminNotifyTestTelegram(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
-	st := s.siteSettings()
-	rawCopyright, _ := repository.GetSetting(s.db, "site_copyright")
-	if strings.TrimSpace(rawCopyright) == "" {
+	st := s.settings.SiteSettings()
+	rawCopyright := s.settings.Get("site_copyright")
+	if rawCopyright == "" {
 		rawCopyright = "© {{year}} {{site_title}}. All rights reserved."
 	}
 	writeJSON(w, 200, map[string]any{
 		"site_title":            st.Title,
 		"site_subtitle":         st.Subtitle,
-		"shop_public_base_url":  s.paymentConfig().PublicBaseURL,
+		"shop_public_base_url":  s.settings.PaymentConfig().PublicBaseURL,
 		"site_announcement":     st.Announcement,
 		"seo_description":       st.SEODescription,
 		"seo_keywords":          st.SEOKeywords,
@@ -1674,25 +1388,20 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		"site_copyright":        rawCopyright,
 		"privacy_policy":        st.Privacy,
 		"terms_of_service":      st.Terms,
-		"turnstile_site_key":    s.turnstileSiteKey(),
-		"turnstile_secret_set":  s.turnstileSecret() != "",
-		"maintenance_enabled":   mustGetSetting(s, "maintenance_enabled"),
-		"maintenance_message":   mustGetSetting(s, "maintenance_message"),
-		"maintenance_pass_set":  func() bool { v, _ := repository.GetSecret(s.db, "maintenance_password", s.totpCipher); return v != "" }(),
-		"site_links":            parseSiteLinks(mustGetSetting(s, "site_links")),
-		"default_product_image": s.defaultProductImage(),
-		"site_logo":             s.siteLogoURL(),
-		"site_favicon":          s.siteFaviconURL(),
+		"turnstile_site_key":    s.settings.TurnstileSiteKey(),
+		"turnstile_secret_set":  s.settings.TurnstileSecret() != "",
+		"maintenance_enabled":   s.settings.Get("maintenance_enabled"),
+		"maintenance_message":   s.settings.Get("maintenance_message"),
+		"maintenance_pass_set":  s.settings.MaintenancePassSet(),
+		"site_links":            s.settings.SiteLinks(),
+		"default_product_image": s.settings.DefaultProductImage(),
+		"site_logo":             s.settings.SiteLogoURL(),
+		"site_favicon":          s.settings.SiteFaviconURL(),
 		"site_locale":           st.Locale,
 		"site_currency":         st.Currency,
 		"site_timezone":         st.Timezone,
 		"stock_display_mode":    st.StockDisplay,
 	})
-}
-
-func mustGetSetting(s *Server, key string) string {
-	v, _ := repository.GetSetting(s.db, key)
-	return v
 }
 
 func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
@@ -1701,77 +1410,9 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	setIfPresent := func(key, field string) {
-		if v, ok := input[field]; ok {
-			_ = repository.SetSetting(s.db, key, strings.TrimSpace(str(v)))
-		}
-	}
-	for key, field := range map[string]string{
-		"site_title": "site_title", "site_subtitle": "site_subtitle", "site_announcement": "site_announcement",
-		"seo_description": "seo_description", "seo_keywords": "seo_keywords", "site_contact": "site_contact",
-		"site_friend_links": "site_friend_links", "site_copyright": "site_copyright",
-		"privacy_policy": "privacy_policy", "terms_of_service": "terms_of_service", "turnstile_site_key": "turnstile_site_key",
-		"maintenance_message": "maintenance_message",
-		"site_locale":         "site_locale", "site_currency": "site_currency", "site_timezone": "site_timezone",
-		"stock_display_mode": "stock_display_mode",
-	} {
-		setIfPresent(key, field)
-	}
-	// 站点公开地址（订单/通知链接使用）。
-	if v, ok := input["shop_public_base_url"]; ok {
-		u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-		_ = repository.SetSetting(s.db, "shop_public_base_url", u)
-	}
-	// 图片类 URL 仅接受 http/https 绝对地址（空值表示使用默认占位图）。
-	for _, f := range []string{"default_product_image", "site_logo", "site_favicon"} {
-		if v, ok := input[f]; ok {
-			u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)
-			if err != nil {
-				writeError(w, 400, err.Error())
-				return
-			}
-			_ = repository.SetSetting(s.db, f, u)
-		}
-	}
-	if v, ok := input["site_links"]; ok {
-		if items, ok := v.([]any); ok {
-			clean := []map[string]string{}
-			for _, item := range items {
-				m, ok := item.(map[string]any)
-				if !ok {
-					continue
-				}
-				name := strings.TrimSpace(str(m["name"]))
-				if name == "" {
-					continue
-				}
-				category := "link"
-				if c := strings.TrimSpace(str(m["category"])); c == "contact" || c == "联系方式" {
-					category = "contact"
-				}
-				clean = append(clean, map[string]string{"name": name, "url": strings.TrimSpace(str(m["url"])), "category": category})
-			}
-			if len(clean) > 50 {
-				clean = clean[:50]
-			}
-			if raw, err := json.Marshal(clean); err == nil {
-				_ = repository.SetSetting(s.db, "site_links", string(raw))
-			}
-		}
-	}
-	if _, exists := input["maintenance_enabled"]; exists {
-		_ = repository.SetSetting(s.db, "maintenance_enabled", strings.TrimSpace(str(input["maintenance_enabled"])))
-	}
-	if v := strings.TrimSpace(str(input["maintenance_password"])); v != "" {
-		// 存储 SHA-256 哈希，不再明文保存。
-		_ = repository.SetSecret(s.db, "maintenance_password", hashMaintenancePassword(v), s.totpCipher)
-	}
-	if v := strings.TrimSpace(str(input["turnstile_secret"])); v != "" {
-		_ = repository.SetSecret(s.db, "turnstile_secret", v, s.totpCipher)
+	if err := s.settings.SaveSite(input); err != nil {
+		writeError(w, 400, err.Error())
+		return
 	}
 	s.audit(r, "site_update", "settings", "site", "", "站点配置已更新")
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -1779,7 +1420,7 @@ func (s *Server) apiAdminSiteSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminAccount(w http.ResponseWriter, r *http.Request) {
 	id := s.currentAdminID(r)
-	username, _ := repository.AdminUsername(s.db, id)
+	username, _ := s.admin.AdminUsername(id)
 	writeJSON(w, 200, map[string]any{"username": username})
 }
 
@@ -1795,7 +1436,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	hash, err := repository.AdminPasswordHash(s.db, id)
+	hash, err := s.admin.AdminPasswordHash(id)
 	if err != nil {
 		writeError(w, 500, "no admin")
 		return
@@ -1809,7 +1450,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "username empty")
 		return
 	}
-	oldUsername, _ := repository.AdminUsername(s.db, id)
+	oldUsername, _ := s.admin.AdminUsername(id)
 	if input.NewPassword != "" {
 		if err := models.ValidatePasswordStrength(input.NewPassword); err != nil {
 			writeError(w, 400, err.Error())
@@ -1825,7 +1466,7 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "username too long")
 		return
 	}
-	if err := repository.UpdateAdminAccount(s.db, id, username, hash); err != nil {
+	if err := s.admin.UpdateAccount(id, username, hash); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -1837,12 +1478,14 @@ func (s *Server) apiAdminAccountSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminTotpStatus(w http.ResponseWriter, r *http.Request) {
 	id := s.currentAdminID(r)
-	enabled, secret, _ := repository.AdminTOTP(s.db, id)
-	resp := map[string]any{"enabled": enabled, "issuer": s.siteSettings().Title}
-	if !enabled && secret != "" {
-		if plain, err := s.totpCipher.Decrypt(secret); err == nil {
-			resp["secret"] = plain // 仅绑定时返回，用于扫码
-		}
+	enabled, plainSecret, err := s.admin.TotpStatus(id)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	resp := map[string]any{"enabled": enabled, "issuer": s.settings.SiteSettings().Title}
+	if !enabled && plainSecret != "" {
+		resp["secret"] = plainSecret // 仅绑定时返回，用于扫码
 	}
 	writeJSON(w, 200, resp)
 }
@@ -1850,26 +1493,16 @@ func (s *Server) apiAdminTotpStatus(w http.ResponseWriter, r *http.Request) {
 // apiAdminTotpGenerate 生成新的 TOTP 密钥（未启用时）。
 func (s *Server) apiAdminTotpGenerate(w http.ResponseWriter, r *http.Request) {
 	id := s.currentAdminID(r)
-	enabled, _, _ := repository.AdminTOTP(s.db, id)
-	if enabled {
+	secret, err := s.admin.GenerateTotp(id)
+	if errors.Is(err, service.ErrTotpAlreadyEnabled) {
 		writeError(w, 400, "TOTP already enabled")
 		return
 	}
-	secret, err := security.GenerateTotpSecret()
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	encrypted, err := s.totpCipher.Encrypt(secret)
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	if err := repository.SetAdminTOTPSecret(s.db, id, encrypted); err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	writeJSON(w, 200, map[string]any{"secret": secret, "issuer": s.siteSettings().Title})
+	writeJSON(w, 200, map[string]any{"secret": secret, "issuer": s.settings.SiteSettings().Title})
 }
 
 func (s *Server) apiAdminTotpEnable(w http.ResponseWriter, r *http.Request) {
@@ -1882,20 +1515,11 @@ func (s *Server) apiAdminTotpEnable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	if !security.VerifyTotp(input.Secret, input.Otp, time.Now()) {
-		writeError(w, 403, "invalid otp")
-		return
-	}
-	encrypted, err := s.totpCipher.Encrypt(input.Secret)
-	if err != nil {
-		writeError(w, 500, "totp secret encrypt failed")
-		return
-	}
-	if err := repository.SetAdminTOTPSecret(s.db, id, encrypted); err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	if err := repository.SetAdminTOTPEnabled(s.db, id, true); err != nil {
+	if err := s.admin.EnableTotp(id, input.Secret, input.Otp); err != nil {
+		if errors.Is(err, service.ErrInvalidOtp) {
+			writeError(w, 403, "invalid otp")
+			return
+		}
 		writeInternalError(w, err)
 		return
 	}
@@ -1909,21 +1533,11 @@ func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 		Otp string `json:"otp"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
-	_, secret, err := repository.AdminTOTP(s.db, id)
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	decrypted, err := s.totpCipher.Decrypt(secret)
-	if err != nil {
-		writeError(w, 500, "totp secret decrypt failed")
-		return
-	}
-	if !security.VerifyTotp(decrypted, input.Otp, time.Now()) {
-		writeError(w, 403, "invalid otp")
-		return
-	}
-	if err := repository.SetAdminTOTPEnabled(s.db, id, false); err != nil {
+	if err := s.admin.DisableTotp(id, input.Otp); err != nil {
+		if errors.Is(err, service.ErrInvalidOtp) {
+			writeError(w, 403, "invalid otp")
+			return
+		}
 		writeInternalError(w, err)
 		return
 	}
@@ -1934,22 +1548,14 @@ func (s *Server) apiAdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 // ---------- 管理员管理 (仅 admin) ----------
 
 func (s *Server) apiAdminListAdmins(w http.ResponseWriter, r *http.Request) {
-	rows, err := repository.ListAdmins(s.db)
+	admins, err := s.admin.ListAdmins()
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	defer rows.Close()
 	out := []map[string]any{}
-	for rows.Next() {
-		var id int64
-		var username, role string
-		var createdAt int64
-		if err := rows.Scan(&id, &username, &role, &createdAt); err != nil {
-			writeInternalError(w, err)
-			return
-		}
-		out = append(out, map[string]any{"id": id, "username": username, "role": role, "created_at": createdAt})
+	for _, a := range admins {
+		out = append(out, map[string]any{"id": a.ID, "username": a.Username, "role": a.Role, "created_at": a.CreatedAt})
 	}
 	writeJSON(w, 200, map[string]any{"admins": out})
 }
@@ -1981,7 +1587,7 @@ func (s *Server) apiAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
 	if role != models.RoleAdmin && role != models.RoleOperator && role != models.RoleViewer {
 		role = models.RoleOperator
 	}
-	if err := repository.CreateAdmin(s.db, username, models.HashPassword(input.Password), role); err != nil {
+	if err := s.admin.CreateAdmin(username, input.Password, role); err != nil {
 		writeError(w, 400, "create failed (username may exist)")
 		return
 	}
@@ -2004,13 +1610,13 @@ func (s *Server) apiAdminSetRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid role")
 		return
 	}
-	before, _ := repository.AdminRole(s.db, id)
-	if err := repository.SetAdminRoleGuarded(s.db, id, role); err != nil {
-		if err == repository.ErrAdminNotFound {
+	before, _ := s.admin.AdminRole(id)
+	if err := s.admin.SetRole(id, role); err != nil {
+		if errors.Is(err, service.ErrAdminNotFound) {
 			writeError(w, 404, "admin not found")
 			return
 		}
-		if err == repository.ErrLastAdmin {
+		if errors.Is(err, service.ErrLastAdmin) {
 			writeError(w, 400, "cannot demote the last admin")
 			return
 		}
@@ -2031,21 +1637,15 @@ func (s *Server) apiAdminDeleteAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "cannot delete yourself")
 		return
 	}
-	cur, _ := repository.AdminRole(s.db, id)
-	if cur == models.RoleAdmin {
-		admins, _ := repository.AdminCountByRole(s.db, models.RoleAdmin)
-		if admins <= 1 {
+	uname, _ := s.admin.AdminUsername(id)
+	if err := s.admin.DeleteAdmin(id); err != nil {
+		if errors.Is(err, service.ErrLastAdmin) {
 			writeError(w, 400, "cannot delete the last admin")
 			return
 		}
-	}
-	uname, _ := repository.AdminUsername(s.db, id)
-	if err := repository.DeleteAdmin(s.db, id); err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	// 立即吊销被删管理员的全部会话
-	s.purgeAdminSessions(id)
 	s.audit(r, "admin_delete", "admin", fmt.Sprintf("%d", id), uname, "deleted")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -2053,7 +1653,7 @@ func (s *Server) apiAdminDeleteAdmin(w http.ResponseWriter, r *http.Request) {
 // ---------- 审计日志 (仅 admin) ----------
 
 func (s *Server) apiAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
-	logs, err := repository.AuditLogs(s.db, 200)
+	logs, err := s.admin.AuditLogs(200)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -2072,7 +1672,7 @@ func (s *Server) apiAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
 // ---------- 优惠券管理 ----------
 
 func (s *Server) apiAdminCoupons(w http.ResponseWriter, r *http.Request) {
-	coupons, err := s.orders.Repo().ListCoupons()
+	coupons, err := s.orders.ListCoupons()
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -2138,7 +1738,7 @@ func (s *Server) apiAdminCouponCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	if err := s.orders.Repo().CreateCoupon(c); err != nil {
+	if err := s.orders.CreateCoupon(c); err != nil {
 		writeError(w, 400, "create failed (code may exist)")
 		return
 	}
@@ -2163,7 +1763,7 @@ func (s *Server) apiAdminCouponUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.ID = id
-	if err := s.orders.Repo().UpdateCoupon(c); err != nil {
+	if err := s.orders.UpdateCoupon(c); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -2177,22 +1777,16 @@ func (s *Server) apiAdminCouponDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
-	_ = s.orders.Repo().DeleteCoupon(id)
+	_ = s.orders.DeleteCoupon(id)
 	s.audit(r, "coupon_delete", "coupon", fmt.Sprintf("%d", id), "", "deleted")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func (s *Server) apiAdminSystemBackup(w http.ResponseWriter, r *http.Request) {
-	settings, err := repository.AllSettings(s.db)
+	settings, err := s.settings.BackupSettings()
 	if err != nil {
 		writeInternalError(w, err)
 		return
-	}
-	// 备份不包含密钥类配置：避免明文密钥随文件外泄；恢复后需在后台重新填写。
-	for k := range settings {
-		if secretSettingsKey(k) {
-			delete(settings, k)
-		}
 	}
 	w.Header().Set("Content-Disposition", "attachment; filename=liteshop-settings.json")
 	writeJSON(w, 200, map[string]any{"app": "liteshop", "settings": settings})
@@ -2216,25 +1810,13 @@ func (s *Server) apiAdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad json")
 		return
 	}
-	count := 0
-	for k, v := range payload.Settings {
-		if len(k) > 80 || len(v) > 20000 {
-			continue
-		}
-		// 密钥类配置禁止被备份覆盖（恢复后需重新填写）。
-		if secretSettingsKey(k) {
-			continue
-		}
-		if err := repository.SetSetting(s.db, k, v); err != nil {
-			writeInternalError(w, err)
-			return
-		}
-		count++
+	count, err := s.settings.RestoreSettings(payload.Settings)
+	if err != nil {
+		writeInternalError(w, err)
+		return
 	}
-	s.sessMu.Lock()
-	s.sessions = make(map[string]sessionInfo)
-	s.sessMu.Unlock()
-	_ = repository.DeleteAllSessions(s.db)
+	s.admin.ClearPendingTotps()
+	_ = s.admin.DeleteAllSessions()
 	// 配置恢复后清空限流器，避免旧 IP 限制残留影响管理员操作
 	s.limitersMu.Lock()
 	s.limiters = make(map[string]*RateLimiter)
@@ -2252,24 +1834,22 @@ func (s *Server) apiAdminSystemReset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "confirm required")
 		return
 	}
-	if err := repository.ResetAllTables(s.db); err != nil {
+	if err := s.settings.ResetAll(); err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	s.sessMu.Lock()
-	s.sessions = make(map[string]sessionInfo)
-	s.sessMu.Unlock()
-	_ = repository.DeleteAllSessions(s.db)
+	s.admin.ClearPendingTotps()
+	_ = s.admin.DeleteAllSessions()
 	s.audit(r, "system_reset", "system", "all", "all data", "reset")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func (s *Server) apiSetupStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"initialized": repository.HasAdmin(s.db), "site_title": s.siteSettings().Title})
+	writeJSON(w, 200, map[string]any{"initialized": s.admin.HasAdmin(), "site_title": s.settings.SiteSettings().Title})
 }
 
 func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
-	if repository.HasAdmin(s.db) {
+	if s.admin.HasAdmin() {
 		writeError(w, 400, "already initialized")
 		return
 	}
@@ -2310,7 +1890,7 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 	if siteTitle == "" {
 		siteTitle = "LiteShop"
 	}
-	inserted, err := repository.SeedAdmin(s.db, username, input.Password)
+	inserted, err := s.admin.SeedAdmin(username, input.Password)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -2319,58 +1899,18 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "already initialized")
 		return
 	}
-	settings := map[string]string{
-		"site_title":          siteTitle,
-		"site_copyright":      "© {{year}} {{site_title}}. All rights reserved.",
-		"bepusdt_fiat":        "CNY",
-		"bepusdt_timeout_sec": "1200",
-	}
-	if input.Fiat != "" {
-		f, err := normalizeFiat(strings.TrimSpace(input.Fiat))
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-		settings["bepusdt_fiat"] = f
-	}
-	if strings.TrimSpace(input.PublicBaseURL) != "" {
-		u, err := normalizeHTTPURL(strings.TrimSpace(input.PublicBaseURL), false)
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-		settings["shop_public_base_url"] = u
-	}
-	if strings.TrimSpace(input.BepusdtBaseURL) != "" {
-		u, err := normalizeHTTPURL(strings.TrimSpace(input.BepusdtBaseURL), false)
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-		settings["bepusdt_base_url"] = u
-	}
-	if strings.TrimSpace(input.BepusdtAPIToken) != "" {
-		settings["bepusdt_api_token"] = strings.TrimSpace(input.BepusdtAPIToken)
-	}
-	if strings.TrimSpace(input.TradeTypes) != "" {
-		tt, err := normalizeTradeTypes(strings.TrimSpace(input.TradeTypes))
-		if err != nil {
-			writeError(w, 400, err.Error())
-			return
-		}
-		settings["bepusdt_trade_types"] = tt
-	}
-	if strings.TrimSpace(input.TurnstileSite) != "" {
-		settings["turnstile_site_key"] = strings.TrimSpace(input.TurnstileSite)
-	}
-	if strings.TrimSpace(input.TurnstileSecret) != "" {
-		settings["turnstile_secret"] = strings.TrimSpace(input.TurnstileSecret)
-	}
-	for k, v := range settings {
-		if err := repository.SetSetting(s.db, k, v); err != nil {
-			writeInternalError(w, err)
-			return
-		}
+	if err := s.settings.ApplySetup(service.SetupInput{
+		SiteTitle:       siteTitle,
+		PublicBaseURL:   input.PublicBaseURL,
+		BepusdtBaseURL:  input.BepusdtBaseURL,
+		BepusdtAPIToken: input.BepusdtAPIToken,
+		TradeTypes:      input.TradeTypes,
+		Fiat:            input.Fiat,
+		TurnstileSite:   input.TurnstileSite,
+		TurnstileSecret: input.TurnstileSecret,
+	}); err != nil {
+		writeError(w, 400, err.Error())
+		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }

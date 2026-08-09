@@ -20,10 +20,11 @@ type CategoryView struct {
 // Service 商品业务逻辑。
 type ProductService struct {
 	repo *repository.ProductRepository
+	keys *repository.KeyRepository
 }
 
-func NewProductService(repo *repository.ProductRepository) *ProductService {
-	return &ProductService{repo: repo}
+func NewProductService(repo *repository.ProductRepository, keys *repository.KeyRepository) *ProductService {
+	return &ProductService{repo: repo, keys: keys}
 }
 
 // ListCategories 返回按分类分组的商品（可选筛选）。
@@ -125,6 +126,47 @@ func (s *ProductService) GetBySlug(slug string) (View, error) {
 // AllCategories 返回上架商品分类。
 func (s *ProductService) AllCategories() ([]string, error) {
 	return s.repo.AllCategories()
+}
+
+// List 返回商品视图（activeOnly=true 仅上架）。
+func (s *ProductService) List(activeOnly bool) ([]View, error) {
+	return s.repo.ListViews(activeOnly)
+}
+
+// LowStock 返回低于阈值的商品。
+func (s *ProductService) LowStock(threshold int) ([]View, error) {
+	return s.repo.LowStock(threshold)
+}
+
+// GetName 返回商品名（不存在返回空串）。
+func (s *ProductService) GetName(id int64) string {
+	return s.repo.GetName(id)
+}
+
+// ---- 卡密（KeyRepository 归入商品服务，handler 不再直连） ----
+
+func (s *ProductService) Cards(productID int64) ([]models.Card, error) {
+	return s.keys.ListByProduct(productID)
+}
+
+func (s *ProductService) ImportCards(productID int64, contents []string, dedupe bool) (added, skipped int, err error) {
+	return s.keys.Add(productID, contents, dedupe)
+}
+
+func (s *ProductService) DeleteCard(cardID int64) error {
+	return s.keys.DeleteAvailable(cardID)
+}
+
+func (s *ProductService) AvailableCount(productID int64) (int, error) {
+	return s.keys.AvailableCount(productID)
+}
+
+func (s *ProductService) SoldCountSince(ts int64) (int, error) {
+	return s.keys.SoldCountSince(ts)
+}
+
+func (s *ProductService) StockStats() (products, available, sold, locked int, err error) {
+	return s.keys.StockStats()
 }
 
 // Repo 暴露仓储给上层查询。
