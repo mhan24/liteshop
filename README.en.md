@@ -129,7 +129,7 @@ Cancel / expire: release stock + call BEpusdt `cancel-transaction`.
 | Database | SQLite (modernc.org/sqlite) |
 | Logging | go.uber.org/zap + lumberjack |
 | Reverse proxy | Caddy |
-| Payment | BEpusdt |
+| Payment | BEpusdt (behind a Gateway interface) |
 | Security | Cloudflare Turnstile |
 
 ---
@@ -144,7 +144,7 @@ internal/db/            database connection layer: sqlite.go / postgres.go (futu
 internal/db/schema/     schema evolution: migration runner + migrations/*.sql (single entry for schema changes)
 internal/db/repository/ all data access (Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log)
 internal/models/        models & helpers
-internal/payment/       BEpusdt integration
+internal/payment/       payment gateway abstraction: interface.go (Gateway) + bepusdt.go (BEPusdt impl)
 internal/notify/        notifications (event templates / mail / Telegram / Webhook)
 internal/jobs/          task bus + scheduler + order_expire / email_retry / cleanup / backup
 internal/logging/       zap logging (app / payment / security)
@@ -262,6 +262,8 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary + storefront/.ou
 
 ## BEpusdt integration
 
+- The payment layer depends only on the `payment.Gateway` interface (create transaction / cancel transaction / verify callback); order business logic is not bound to BEpusdt;
+- Switching gateways (other USDT / Stripe / PayPal) only requires a new `Gateway` adapter; business and callback handling stay unchanged;
 - Get the API token from the BEpusdt admin panel (stored encrypted)
 - Create transaction → redirect to checkout; cancel/expire calls `cancel-transaction`
 - Payment success callback `/notify/bepusdt` (path customizable)

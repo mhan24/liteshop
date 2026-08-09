@@ -74,7 +74,7 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 
 	orderRepo := repository.NewOrderRepositoryWithTZ(database, models.LocationFromTimezone(s.settings.SiteSettings().Timezone))
 	keyRepo := repository.NewKeyRepository(database)
-	s.orders = service.NewOrderService(orderRepo, s.payClient, s.settings.PaymentServiceConfig)
+	s.orders = service.NewOrderService(orderRepo, s.paymentGateway, s.settings.PaymentServiceConfig)
 	s.orders.SendPaid = notifier.SendPaid
 	s.orders.OnOrderCreated = func(o models.Order) {
 		payload := notifier.OrderPayload(notify.EventOrderCreated, o, nil, nil)
@@ -103,7 +103,7 @@ func NewHandler(cfg config.Config, database *sql.DB) (http.Handler, error) {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
-	mux.HandleFunc("POST "+s.settings.NotifyPath(), s.handleBepusdtNotify)
+	mux.HandleFunc("POST "+s.settings.NotifyPath(), s.handlePaymentNotify)
 	s.registerAPI(mux)
 	s.registerDocs(mux)
 	mux.Handle("GET /admin/assets/", http.StripPrefix("/admin", http.FileServer(adminAssetsFS())))
@@ -152,10 +152,10 @@ func pathID(r *http.Request, name string) (int64, error) {
 	return strconv.ParseInt(r.PathValue(name), 10, 64)
 }
 
-// payClient 按当前数据库配置构造支付客户端（每次调用读取最新配置）。
-func (s *Server) payClient() *payment.Client {
+// paymentGateway 按当前数据库配置构造支付网关（每次调用读取最新配置）。
+func (s *Server) paymentGateway() payment.Gateway {
 	cfg := s.settings.PaymentConfig()
-	return payment.New(cfg.BepusdtBaseURL, cfg.BepusdtToken)
+	return payment.NewBEPusdt(cfg.BepusdtBaseURL, cfg.BepusdtToken)
 }
 
 var turnstileHTTP = &http.Client{Timeout: 10 * time.Second}
@@ -243,7 +243,7 @@ func validEmail(v string) bool {
 	return strings.Contains(v[at+1:], ".")
 }
 
-func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePaymentNotify(w http.ResponseWriter, r *http.Request) {
 	payCfg := s.settings.PaymentConfig()
 	if payCfg.BepusdtToken == "" {
 		http.Error(w, "bepusdt token not configured", 500)
@@ -254,7 +254,7 @@ func (s *Server) handleBepusdtNotify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", 400)
 		return
 	}
-	params, err := payment.ParseAndVerifyCallback(body, payCfg.BepusdtToken)
+	params, err := s.paymentGateway().VerifyCallback(body)
 	if err != nil {
 		logging.Payment().Warn("bepusdt callback verify failed",
 			zap.Int("body_bytes", len(body)),

@@ -24,7 +24,7 @@ type PaymentConfig struct {
 type OrderService struct {
 	repo  *repository.OrderRepository
 	keys  *repository.KeyRepository
-	payFn func() *payment.Client
+	payFn func() payment.Gateway
 	cfgFn func() PaymentConfig
 
 	// 通知回调（由装配层注入，避免 service ↔ notify/jobs 循环依赖）。
@@ -59,7 +59,7 @@ func wrapCouponError(err error) error {
 	return err
 }
 
-func NewOrderService(repo *repository.OrderRepository, payFn func() *payment.Client, cfgFn func() PaymentConfig) *OrderService {
+func NewOrderService(repo *repository.OrderRepository, payFn func() payment.Gateway, cfgFn func() PaymentConfig) *OrderService {
 	return &OrderService{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
 
@@ -217,7 +217,7 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 	redirectURL := cfg.PublicBaseURL + "/order/" + order.OrderNo + "?token=" + order.ViewToken
 	paymentURL, tradeID, err := s.payFn().CreateTransaction(payment.CreateInput{
 		OrderID:     order.OrderNo,
-		AmountYuan:  float64(order.AmountCents) / 100,
+		Amount:      float64(order.AmountCents) / 100,
 		Fiat:        cfg.Fiat,
 		TradeType:   tradeType,
 		Name:        p.Name,

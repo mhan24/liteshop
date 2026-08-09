@@ -14,29 +14,22 @@ import (
 	"time"
 )
 
-type Client struct {
+// BEPusdt 是 Gateway 的 BEpusdt 实现。
+type BEPusdt struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
 }
 
-func New(baseURL, token string) *Client {
-	return &Client{
+// 编译期断言：BEPusdt 必须实现 Gateway。
+var _ Gateway = (*BEPusdt)(nil)
+
+func NewBEPusdt(baseURL, token string) *BEPusdt {
+	return &BEPusdt{
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		Token:   token,
 		HTTP:    &http.Client{Timeout: 15 * time.Second},
 	}
-}
-
-type CreateInput struct {
-	OrderID     string
-	AmountYuan  float64
-	Fiat        string
-	TradeType   string
-	Name        string
-	NotifyURL   string
-	RedirectURL string
-	TimeoutSec  int
 }
 
 type createResponse struct {
@@ -49,11 +42,11 @@ type createResponse struct {
 	} `json:"data"`
 }
 
-func (c *Client) CreateTransaction(in CreateInput) (string, string, error) {
+func (c *BEPusdt) CreateTransaction(in CreateInput) (string, string, error) {
 	if c.Token == "" {
-		return "", "", fmt.Errorf("BEPUSDT_API_TOKEN is empty")
+		return "", "", ErrGatewayNotConfigured
 	}
-	amount := strconv.FormatFloat(in.AmountYuan, 'f', -1, 64)
+	amount := strconv.FormatFloat(in.Amount, 'f', -1, 64)
 	params := map[string]string{
 		"order_id":     in.OrderID,
 		"amount":       amount,
@@ -67,7 +60,7 @@ func (c *Client) CreateTransaction(in CreateInput) (string, string, error) {
 	params["signature"] = Sign(params, c.Token)
 	body := map[string]any{
 		"order_id":     in.OrderID,
-		"amount":       in.AmountYuan,
+		"amount":       in.Amount,
 		"fiat":         in.Fiat,
 		"trade_type":   in.TradeType,
 		"name":         in.Name,
@@ -98,9 +91,9 @@ func (c *Client) CreateTransaction(in CreateInput) (string, string, error) {
 	return out.Data.PaymentURL, out.Data.TradeID, nil
 }
 
-func (c *Client) CancelTransaction(tradeID string) error {
+func (c *BEPusdt) CancelTransaction(tradeID string) error {
 	if c.Token == "" {
-		return fmt.Errorf("BEPUSDT_API_TOKEN is empty")
+		return ErrGatewayNotConfigured
 	}
 	if tradeID == "" {
 		return fmt.Errorf("trade_id is empty")
@@ -134,6 +127,11 @@ func (c *Client) CancelTransaction(tradeID string) error {
 		return fmt.Errorf("bepusdt cancel transaction failed: status=%d message=%s body=%s", out.StatusCode, out.Message, string(respBody))
 	}
 	return nil
+}
+
+// VerifyCallback 校验 BEpusdt 回调签名并解析参数。
+func (c *BEPusdt) VerifyCallback(body []byte) (CallbackParams, error) {
+	return ParseAndVerifyCallback(body, c.Token)
 }
 
 func Sign(params map[string]string, token string) string {

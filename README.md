@@ -129,7 +129,7 @@ HTTP handler (internal/api)
 | 数据库 | SQLite (modernc.org/sqlite) |
 | 日志 | go.uber.org/zap + lumberjack |
 | 反向代理 | Caddy |
-| 支付 | BEpusdt |
+| 支付 | BEpusdt（Gateway 接口抽象） |
 | 安全 | Cloudflare Turnstile |
 
 ---
@@ -144,7 +144,7 @@ internal/db/            数据库连接层：sqlite.go / postgres.go（未来备
 internal/db/schema/     schema 演进：迁移执行器 + migrations/*.sql（唯一 schema 变更入口）
 internal/db/repository/ 全部数据访问（Order / Product / Key / Coupon / Admin / Session / Setting / Secret / MailQueue / Log）
 internal/models/        模型与工具
-internal/payment/       BEpusdt 支付对接
+internal/payment/       支付网关抽象：interface.go（Gateway）+ bepusdt.go（BEpusdt 实现）
 internal/notify/        通知（事件模板 / 邮件 / Telegram / Webhook）
 internal/jobs/          任务总线 + 调度器 + order_expire / email_retry / cleanup / backup
 internal/logging/       zap 日志（app / payment / security）
@@ -261,6 +261,8 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制 + storefront/
 
 ## BEpusdt 对接
 
+- 支付模块只依赖 `payment.Gateway` 接口（创建交易 / 取消交易 / 校验回调），订单业务不绑定 BEpusdt；
+- 换网关（其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器，业务与回调处理无需改动；
 - 后台获取 API Token（加密存储）
 - 创建交易 → 跳转收银台；取消/过期调用 `cancel-transaction`
 - 支付成功回调 `/notify/bepusdt`（路径可自定义）
