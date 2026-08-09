@@ -56,6 +56,8 @@
 - Migration system: numbered .sql migrations (`internal/db/schema/migrations/`), each run exactly once and recorded
 - Admin security: PBKDF2-SHA256, TOTP 2FA, **lockout after 5 failed logins for 10 minutes**, timing-equalized login
 - Security: RBAC, audit logs, endpoint-wide rate limiting, Turnstile, CSP, HSTS, security headers, CSV injection guard, fully parameterized SQL
+- Tiered rate limiting: public endpoints are strict (orders 20/min, lookup 20, products 60, detail 120, view links 10), admin API is looser (300/min/IP) so exports/stats never crowd out customers
+- Audit query optimization: `audit_logs` has (admin_id,id) / (action,id) / (target_type,target_id,id) indexes
 - Observability: component-level health check `/health` (database / payment), version injection, structured startup banner
 - Log correlation: every HTTP request gets an auto-generated `request_id` (response header `X-Request-ID`); payment logs carry `request_id` / `order_id` / `trace_id` (gateway trade ID), so one payment flow can be traced end to end
 - Database connection: `journal_mode=WAL` + `busy_timeout=5000` + `foreign_keys=ON` + `_txlock=immediate` applied at startup
@@ -245,6 +247,16 @@ cd admin-ui && npm run lint && npm run format
 
 ## Deployment (server)
 
+### Release process (tag → release)
+
+Pushing a `v*` tag triggers the CI Release workflow: build admin-ui / storefront → Go binary (version from the tag) → package `liteshop-release.tgz` + `SHA256` checksum → create a GitHub Release with assets:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The artifact feeds `install.sh` via `BUILD_ARTIFACT` for fast deployment (checksum guards against tampering).
+
 ### One-click install (install.sh)
 
 On a fresh Ubuntu / Debian / CentOS / Rocky / Alma server, point the domain A record to the server:
@@ -304,6 +316,12 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 - Dynamic pages are never cached; canonical / OG / JSON-LD are emitted by Nuxt; sitemap includes product URLs dynamically.
 - The site origin comes from the database `public_base_url` — no Host/env dependency.
 - SSR caching policy: dynamic pages and product listings stay `no-store` (correct for now); ISR / edge cache can be evaluated later under high traffic — not implemented today.
+
+### Data size management (planned, not implemented)
+
+- Orders older than 2 years will be archived to `order_archive` (history stays queryable without slowing the hot table);
+- Logs / outbox / audit cleanup is already implemented (30–180 days); periodic `VACUUM` is a follow-up;
+- Archive thresholds will be tuned against real growth — no action needed at current volume.
 
 ---
 

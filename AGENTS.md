@@ -58,6 +58,8 @@
 - 订单/支付/查询链路改动后跑 `go test -bench=. ./internal/integration/` 对比基准，防性能回退；备份改动必须跑恢复演练测试；
 - 健康检查 `/health` 必须保留 database（size/migration_version/last_backup/integrity）与 jobs（queue_size/last_success）指标；
 - 安全响应头（nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / CSP / HSTS / Cookie Secure）改动必须同步 `internal/api/security_test.go`；
+- 审计日志索引（admin_id/action/target）为查询基线，新增审计查询必须走索引；限流分级约定：公共严格、管理接口 300/min/IP，新接口按分级挂 `rateLimitMiddleware`；
+- 正式发布走 `v*` tag（CI 生成 tgz + SHA256 + GitHub Release），禁止手动拼包；
 - SSR 缓存策略：动态页面与商品列表保持 no-store，ISR/edge cache 暂不实施；
 - 数据库连接启动即确认 `journal_mode=WAL` / `busy_timeout=5000` / `foreign_keys=ON`；服务必须支持 SIGTERM 优雅停机（停止接收 → 排空 → worker 退出 → 关库）；
 - API 变更必须同步 `admin-ui npm run gen:api` 重新生成 `src/api/types.ts`（CI 有 diff 校验），前端禁止手写接口类型；

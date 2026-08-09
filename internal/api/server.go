@@ -490,13 +490,17 @@ func (s *Server) requireAdminAPI(next http.Handler) http.Handler {
 
 // requireRole 要求至少指定角色权限。
 func (s *Server) requireRole(min string, next http.Handler) http.Handler {
+	// 管理接口限流（稍宽）：默认 300 次/分钟/IP，避免导出/统计影响公共接口的严格限流。
+	limited := s.rateLimitMiddleware("admin_api", 300, func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.roleAtLeast(r, min) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		next.ServeHTTP(w, r)
+		limited(w, r)
 	})
 }
 

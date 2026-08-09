@@ -56,6 +56,8 @@ English: [README.en.md](README.en.md)
 - 迁移体系：编号 .sql 迁移（`internal/db/schema/migrations/`），只执行一次并记录
 - 管理员安全：PBKDF2-SHA256、TOTP 2FA、**登录失败 5 次锁定 10 分钟**、登录时序均摊防枚举
 - 安全：RBAC、审计日志、全接口限流、Turnstile、CSP、HSTS、安全响应头、CSV 注入防护、SQL 全参数化
+- 限流分级：公共严格（下单 20/min、订单查询 20、商品列表 60、详情 120、查看链接 10），管理接口稍宽（300/min/IP），导出/统计不挤占公共额度
+- 审计查询优化：`audit_logs` 建有 (admin_id,id) / (action,id) / (target_type,target_id,id) 索引
 - 可观测性：组件级健康检查 `/health`（database / payment）、版本注入、结构化启动横幅
 - 日志关联：每个 HTTP 请求自动生成 `request_id`（响应头 `X-Request-ID`），支付日志携带 `request_id` / `order_id` / `trace_id`（网关交易号），一条支付链路可整线串起
 - 数据库连接：`journal_mode=WAL` + `busy_timeout=5000` + `foreign_keys=ON` + `_txlock=immediate`（启动即生效，并发读写友好）
@@ -245,6 +247,16 @@ cd admin-ui && npm run lint && npm run format
 
 ## 部署（服务器）
 
+### 发布流程（tag → release）
+
+打 `v*` tag 即触发 CI Release：构建 admin-ui / storefront → Go 二进制（版本号取自 tag）→ 打包 `liteshop-release.tgz` + `SHA256` 校验和 → 自动创建 GitHub Release 并附产物：
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+产物可直接用于 `install.sh` 的 `BUILD_ARTIFACT` 快速部署（校验和防篡改）。
+
 ### 一键安装（install.sh）
 
 在全新 Ubuntu / Debian / CentOS / Rocky / Alma 服务器上，域名 A 记录指向服务器后：
@@ -303,6 +315,12 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 
 - 动态页面不缓存；站点源取自数据库 `public_base_url`，不依赖 Host/环境变量。
 - SSR 缓存策略：动态页面与商品列表保持 `no-store`（正确）；未来流量大时再评估 ISR / edge cache，当前不做
+
+### 数据体积管理（规划，暂不实施）
+
+- 订单保留 2 年后归档到 `order_archive`（可查询历史，不拖慢热表）；
+- 日志 / outbox / audit 定期清理已实现（30~180 天）；定期 `VACUUM` 回收空间作为后续项；
+- 上线前按实际增长量评估归档阈值，当前体量无需处理。
 
 ---
 

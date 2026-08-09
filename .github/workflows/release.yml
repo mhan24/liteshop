@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    name: Build release artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Build admin-ui
+        working-directory: admin-ui
+        run: |
+          npm ci
+          npm run build
+          mkdir -p ../internal/api/admin-ui
+          cp -r dist/* ../internal/api/admin-ui/
+
+      - name: Build storefront
+        working-directory: storefront
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Go binary (version from tag)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          COMMIT="${GITHUB_SHA:0:7}"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-X shop/internal/version.Version=${VERSION} -X shop/internal/version.Commit=${COMMIT} -X shop/internal/version.Date=${DATE}" \
+            -o shop ./cmd/shop
+
+      - name: Package tgz + checksum
+        run: |
+          mkdir -p dist/storefront
+          cp shop dist/
+          cp -r storefront/.output dist/storefront/
+          tar -czf liteshop-release.tgz -C dist .
+          sha256sum liteshop-release.tgz > liteshop-release.tgz.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            liteshop-release.tgz
+            liteshop-release.tgz.sha256
+          generate_release_notes: true
