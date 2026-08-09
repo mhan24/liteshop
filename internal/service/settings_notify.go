@@ -1,6 +1,10 @@
 package service
 
-import "strings"
+import (
+	"errors"
+	"strconv"
+	"strings"
+)
 
 // SaveNotify 保存通知配置（SMTP / Telegram / Webhook / 事件模板）。
 func (s *SettingsService) SaveNotify(input map[string]any) error {
@@ -10,11 +14,17 @@ func (s *SettingsService) SaveNotify(input map[string]any) error {
 		}
 	}
 	set("smtp_host", "smtp_host")
-	set("smtp_port", "smtp_port")
 	set("smtp_from", "smtp_from")
 	set("telegram_chat_id", "telegram_chat_id")
 	set("notify_events", "notify_events")
 	set("notify_admin_email", "notify_admin_email")
+	if v := strings.TrimSpace(str(input["smtp_port"])); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 65535 {
+			return errors.New("smtp_port 必须是 1-65535 的整数")
+		}
+		_ = s.Set("smtp_port", v)
+	}
 	if v := strings.TrimSpace(str(input["webhook_url"])); v != "" {
 		u, err := normalizeHTTPURL(v, false)
 		if err != nil {

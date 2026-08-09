@@ -95,4 +95,13 @@ func TestSettingsServiceSaveNotifyWebhookURL(t *testing.T) {
 	if st.settings["webhook_url"] != "https://hooks.example.com/abc" {
 		t.Fatalf("webhook_url = %q", st.settings["webhook_url"])
 	}
+	if err := svc.SaveNotify(map[string]any{"smtp_port": "abc"}); err == nil {
+		t.Fatal("invalid smtp_port should error")
+	}
+	if err := svc.SaveNotify(map[string]any{"smtp_port": "587"}); err != nil {
+		t.Fatalf("valid smtp_port: %v", err)
+	}
+	if st.settings["smtp_port"] != "587" {
+		t.Fatalf("smtp_port = %q, want 587", st.settings["smtp_port"])
+	}
 }
