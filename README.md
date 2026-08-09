@@ -257,6 +257,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 
 - Go：`go test ./...`（迁移、签名验签、密码哈希、状态机、优惠券/免费订单、会话、登录锁定、任务总线、调度器、worker panic 隔离、备份、邮件重试、健康检查）
 - service 层可脱离数据库用 mock 仓储测试（如设置保存/校验）
+- **集成测试**：`internal/testutil`（临时 SQLite 测试库 + MockGateway + NotifyRecorder）覆盖支付回调、重复回调幂等、取消订单释放库存并关闭网关交易、超时订单自动过期、真实 HTTP 回调路由（含验签/网关 stub）
 - CI（`.github/workflows/ci.yml`）：Go `vet` / `build` / `test` + 后台/前台构建
 
 ---

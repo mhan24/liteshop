@@ -257,6 +257,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 
 - Go: `go test ./...` (migrations, signature verification, password hashing, state machine, coupons/free orders, sessions, login lockout, task bus, scheduler, worker panic isolation, backup, mail retry, health check)
 - Service layer can be tested without a database using mock repositories (e.g. settings save/validation)
+- **Integration tests**: `internal/testutil` (temp SQLite DB + MockGateway + NotifyRecorder) covers payment callback, duplicate-callback idempotency, cancel-order stock release + gateway cancellation, stale-order expiry, and the real HTTP callback route (signature verification + gateway stub)
 - CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + admin-ui and storefront builds
 
 ---
