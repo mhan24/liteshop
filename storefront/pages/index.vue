@@ -42,11 +42,27 @@
           @click="reset"
         >{{ t('resetFilter') }}</button>
       </form>
+      <div class="mt-2 flex justify-end">
+        <div class="inline-flex border rounded-lg overflow-hidden">
+          <button
+            type="button"
+            :class="viewMode === 'grid' ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+            class="px-3 py-1.5 text-sm transition"
+            @click="setView('grid')"
+          >{{ t('viewGrid') }}</button>
+          <button
+            type="button"
+            :class="viewMode === 'list' ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+            class="px-3 py-1.5 text-sm border-l transition"
+            @click="setView('list')"
+          >{{ t('viewList') }}</button>
+        </div>
+      </div>
     </div>
 
     <div v-for="cat in categories" :key="cat.name || cat.default_key" class="mt-6">
       <h2 class="text-xl font-bold mb-3">{{ catTitle(cat) }}</h2>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div v-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div v-for="p in cat.products" :key="p.product.id" class="bg-white rounded-xl border p-4 shadow-sm">
           <NuxtLink :to="productUrl(p.product)" class="block">
             <div class="aspect-square w-full overflow-hidden rounded-lg bg-gray-100 flex items-center justify-center">
@@ -64,6 +80,38 @@
           <p class="text-gray-500 text-sm">{{ t('stock') }} {{ stockLabel(p.available) }}</p>
           <NuxtLink v-if="p.available > 0" :to="productUrl(p.product)" class="inline-block mt-3 bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2">{{ t('buyNow') }}</NuxtLink>
           <span v-else class="inline-block mt-3 bg-gray-300 text-white rounded-full px-4 py-2">{{ t('soldOut') }}</span>
+        </div>
+      </div>
+      <div v-else class="bg-white rounded-xl border divide-y overflow-hidden shadow-sm">
+        <div v-for="p in cat.products" :key="p.product.id" class="flex items-center gap-4 p-3">
+          <NuxtLink :to="productUrl(p.product)" class="shrink-0">
+            <div class="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
+              <img
+                :src="imgSrc(p.product.image_url)"
+                :alt="p.product.name"
+                loading="lazy"
+                class="max-w-full max-h-full w-auto h-auto"
+              />
+            </div>
+          </NuxtLink>
+          <div class="flex-1 min-w-0">
+            <h3 class="font-semibold truncate">
+              <NuxtLink :to="productUrl(p.product)" class="hover:text-brand">{{ p.product.name }}</NuxtLink>
+            </h3>
+            <p class="text-gray-500 text-sm truncate mt-0.5">{{ markdownText(p.product.description) }}</p>
+          </div>
+          <div class="text-right shrink-0">
+            <p class="text-xl font-bold">{{ money(p.product.price_cents) }}</p>
+            <p class="text-gray-500 text-xs">{{ t('stock') }} {{ stockLabel(p.available) }}</p>
+          </div>
+          <div class="shrink-0">
+            <NuxtLink
+              v-if="p.available > 0"
+              :to="productUrl(p.product)"
+              class="inline-block bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-1.5 text-sm"
+            >{{ t('buyNow') }}</NuxtLink>
+            <span v-else class="inline-block bg-gray-300 text-white rounded-full px-4 py-1.5 text-sm">{{ t('soldOut') }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -92,6 +140,34 @@ const { data, pending, refresh } = await useAsyncData('products', () =>
     max_price: applied.max_price || undefined,
   })
 )
+// 首页视图模式：图片模式（默认）/ 列表模式。
+// 用 cookie 让 SSR 与客户端渲染一致（避免 hydration 不一致），localStorage 兼容旧版本选择。
+const viewCookie = useCookie<'grid' | 'list'>('liteshop_view_mode', { default: () => 'grid' })
+const viewMode = ref<'grid' | 'list'>('grid')
+if (import.meta.server) {
+  if (viewCookie.value === 'grid' || viewCookie.value === 'list') viewMode.value = viewCookie.value
+} else {
+  if (viewCookie.value === 'grid' || viewCookie.value === 'list') {
+    viewMode.value = viewCookie.value
+  } else {
+    // 旧版本只存了 localStorage：挂载后再应用，避免 hydration 不一致，并写回 cookie
+    const local = localStorage.getItem('liteshop_view_mode')
+    if (local === 'grid' || local === 'list') {
+      onMounted(() => {
+        viewMode.value = local
+        viewCookie.value = local
+      })
+    }
+  }
+}
+function setView(m: 'grid' | 'list') {
+  viewMode.value = m
+  if (import.meta.client) {
+    viewCookie.value = m
+    localStorage.setItem('liteshop_view_mode', m)
+  }
+}
+
 const categories = computed(() => (data.value as any)?.categories || [])
 const allCategories = computed(() => (data.value as any)?.categories_all || [])
 const isFiltering = computed(() =>
