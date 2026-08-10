@@ -82,6 +82,12 @@
           <el-option :label="t('site.stockFuzzy')" value="fuzzy" />
         </el-select>
       </el-form-item>
+      <el-form-item :label="t('site.homeViewMode')">
+        <el-radio-group v-model="form.home_view_mode">
+          <el-radio label="grid">{{ t('site.viewGrid') }}</el-radio>
+          <el-radio label="list">{{ t('site.viewList') }}</el-radio>
+        </el-radio-group>
+      </el-form-item>
 
       <el-divider content-position="left">{{ t('site.linksTitle') }}</el-divider>
       <el-form-item :label="t('site.links')">

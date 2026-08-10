@@ -23,6 +23,14 @@ func (s *SettingsService) SaveSite(input map[string]any) error {
 	} {
 		set(key, field)
 	}
+	// 首页默认视图：只允许 grid（图片模式）/ list（列表模式）
+	if v, ok := input["home_view_mode"]; ok {
+		vm := strings.TrimSpace(str(v))
+		if vm != "list" {
+			vm = "grid"
+		}
+		_ = s.Set("home_view_mode", vm)
+	}
 	// 站点公开地址（订单/通知链接使用）。
 	if v, ok := input["shop_public_base_url"]; ok {
 		u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)

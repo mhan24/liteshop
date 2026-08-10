@@ -215,6 +215,7 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"currency_symbol":       currencySymbol(st.Currency),
 		"timezone":              st.Timezone,
 		"stock_display_mode":    st.StockDisplay,
+		"home_view_mode":        s.settings.HomeViewMode(),
 		"default_product_image": s.settings.DefaultProductImage(),
 		"turnstile_site_key":    s.settings.TurnstileSiteKey(),
 		"logo_url":              s.settings.SiteLogoURL(),
@@ -1407,6 +1408,7 @@ func (s *Server) apiAdminSite(w http.ResponseWriter, r *http.Request) {
 		"site_currency":         st.Currency,
 		"site_timezone":         st.Timezone,
 		"stock_display_mode":    st.StockDisplay,
+		"home_view_mode":        s.settings.HomeViewMode(),
 	})
 }
 

@@ -79,6 +79,14 @@ func (s *SettingsService) DefaultProductImage() string {
 func (s *SettingsService) SiteLogoURL() string    { return strings.TrimSpace(s.Get("site_logo")) }
 func (s *SettingsService) SiteFaviconURL() string { return strings.TrimSpace(s.Get("site_favicon")) }
 
+// HomeViewMode 首页默认视图模式：grid（图片模式）/ list（列表模式），默认图片模式。
+func (s *SettingsService) HomeViewMode() string {
+	if strings.TrimSpace(s.Get("home_view_mode")) == "list" {
+		return "list"
+	}
+	return "grid"
+}
+
 // LowStockThreshold 低库存告警阈值（可用卡密数量）。
 func (s *SettingsService) LowStockThreshold() int {
 	n, err := strconv.Atoi(s.Get("low_stock_threshold"))

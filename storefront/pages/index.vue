@@ -140,10 +140,11 @@ const { data, pending, refresh } = await useAsyncData('products', () =>
     max_price: applied.max_price || undefined,
   })
 )
-// 首页视图模式：图片模式（默认）/ 列表模式。
-// 用 cookie 让 SSR 与客户端渲染一致（避免 hydration 不一致），localStorage 兼容旧版本选择。
-const viewCookie = useCookie<'grid' | 'list'>('liteshop_view_mode', { default: () => 'grid' })
-const viewMode = ref<'grid' | 'list'>('grid')
+// 首页视图模式：默认值来自后台站点设置（home_view_mode），用户可手动切换。
+// 用户选择写入 cookie（SSR/客户端一致，避免 hydration 不一致）与 localStorage（旧版本兼容）。
+const defaultView = computed<'grid' | 'list'>(() => (site.value?.home_view_mode === 'list' ? 'list' : 'grid'))
+const viewCookie = useCookie<'grid' | 'list'>('liteshop_view_mode')
+const viewMode = ref<'grid' | 'list'>(defaultView.value)
 if (import.meta.server) {
   if (viewCookie.value === 'grid' || viewCookie.value === 'list') viewMode.value = viewCookie.value
 } else {

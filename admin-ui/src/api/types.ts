@@ -2847,6 +2847,7 @@ export interface components {
             currency_symbol?: string;
             timezone?: string;
             stock_display_mode?: string;
+            home_view_mode?: string;
             default_product_image?: string;
             turnstile_site_key?: string;
             logo_url?: string;

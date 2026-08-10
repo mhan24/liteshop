@@ -275,6 +275,8 @@ components:
           type: string
         stock_display_mode:
           type: string
+        home_view_mode:
+          type: string
         default_product_image:
           type: string
         turnstile_site_key:
