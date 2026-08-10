@@ -49,12 +49,12 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div v-for="p in cat.products" :key="p.product.id" class="bg-white rounded-xl border p-4 shadow-sm">
           <NuxtLink :to="productUrl(p.product)" class="block">
-            <div class="aspect-square w-full overflow-hidden rounded-lg bg-gray-100">
+            <div class="aspect-square w-full overflow-hidden rounded-lg bg-gray-100 flex items-center justify-center">
               <img
                 :src="imgSrc(p.product.image_url)"
                 :alt="p.product.name"
                 loading="lazy"
-                class="w-full h-full object-cover"
+                class="max-w-full max-h-full w-auto h-auto"
               />
             </div>
           </NuxtLink>

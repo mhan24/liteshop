@@ -4,9 +4,9 @@
       <NuxtLink to="/" class="text-sm text-gray-500">{{ t('backProducts') }}</NuxtLink>
       <div v-if="pending" class="py-10 text-gray-400">{{ t('loading') }}</div>
       <div v-else-if="product">
-        <div class="aspect-square w-full overflow-hidden rounded-xl bg-gray-100">
-          <img :src="imgSrc(product.image_url)" :alt="product.name" class="w-full h-full object-cover" />
-        </div>
+      <div class="aspect-square w-full overflow-hidden rounded-xl bg-gray-100 flex items-center justify-center">
+        <img :src="imgSrc(product.image_url)" :alt="product.name" class="max-w-full max-h-full w-auto h-auto" />
+      </div>
         <h1 class="text-2xl font-bold mt-3">{{ product.name }}</h1>
         <div class="md-body text-gray-600 mt-2" v-html="renderMarkdown(product.description)"></div>
         <p class="text-2xl font-bold mt-4">{{ siteMoney(product.price_cents) }}</p>
