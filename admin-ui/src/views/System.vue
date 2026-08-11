@@ -28,11 +28,7 @@
       </CardHeader>
       <CardContent class="space-y-3">
         <p class="text-sm text-muted-foreground">{{ t('system.dangerNote') }}</p>
-        <Input
-          v-model="confirmText"
-          class="max-w-60"
-          :placeholder="t('system.deleteConfirm')"
-        />
+        <Input v-model="confirmText" class="max-w-60" :placeholder="t('system.deleteConfirm')" />
         <Button variant="destructive" size="sm" :disabled="confirmText !== 'DELETE'" @click="reset">
           {{ t('system.reset') }}
         </Button>

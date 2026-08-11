@@ -123,9 +123,13 @@ async function doLookup(token: string) {
   searched.value = true
   orders.value = []
   try {
-    const data: any = await api.get('/orders', {
-      contact: form.contact,
-    }, token ? { 'X-Turnstile-Response': token } : undefined)
+    const data: any = await api.get(
+      '/orders',
+      {
+        contact: form.contact,
+      },
+      token ? { 'X-Turnstile-Response': token } : undefined,
+    )
     orders.value = data.orders || []
   } catch (e: any) {
     alert(e?.data?.error || e?.message || t('queryFail'))
@@ -166,13 +170,24 @@ function statusText(status: string) {
 }
 function badgeClass(status: string) {
   const m: any = {
-    paid: 'bg-emerald-500/15 text-emerald-700', processing: 'bg-emerald-500/15 text-emerald-700',
-    delivered: 'bg-emerald-500/15 text-emerald-700', completed: 'bg-emerald-500/15 text-emerald-700',
-    waiting_payment: 'bg-amber-500/15 text-amber-700', created: 'bg-muted text-muted-foreground',
-    expired: 'bg-red-500/15 text-red-700', payment_failed: 'bg-red-500/15 text-red-700',
-    delivery_failed: 'bg-red-500/15 text-red-700', cancelled: 'bg-muted text-muted-foreground',
+    paid: 'bg-emerald-500/15 text-emerald-700',
+    processing: 'bg-emerald-500/15 text-emerald-700',
+    delivered: 'bg-emerald-500/15 text-emerald-700',
+    completed: 'bg-emerald-500/15 text-emerald-700',
+    waiting_payment: 'bg-amber-500/15 text-amber-700',
+    created: 'bg-muted text-muted-foreground',
+    expired: 'bg-red-500/15 text-red-700',
+    payment_failed: 'bg-red-500/15 text-red-700',
+    delivery_failed: 'bg-red-500/15 text-red-700',
+    cancelled: 'bg-muted text-muted-foreground',
   }
   return m[status] || 'bg-muted text-muted-foreground'
 }
-useHead({ title: t('orderQuery'), meta: [{ name: 'description', content: t('orderQueryDesc') }, { name: 'robots', content: 'noindex,nofollow' }] })
+useHead({
+  title: t('orderQuery'),
+  meta: [
+    { name: 'description', content: t('orderQueryDesc') },
+    { name: 'robots', content: 'noindex,nofollow' },
+  ],
+})
 </script>

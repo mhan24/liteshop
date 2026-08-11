@@ -31,12 +31,7 @@
             <Info class="h-4 w-4" />
             <AlertDescription>{{ t('account.totpScanHint') }}</AlertDescription>
           </Alert>
-          <img
-            v-if="qrDataUrl"
-            :src="qrDataUrl"
-            alt="TOTP QR"
-            class="h-48 w-48 rounded-lg border bg-white p-1"
-          />
+          <img v-if="qrDataUrl" :src="qrDataUrl" alt="TOTP QR" class="h-48 w-48 rounded-lg border bg-white p-1" />
           <p class="text-sm text-muted-foreground">
             {{ t('account.totpSecret') }}: <code class="mono font-semibold">{{ totp.secret }}</code>
           </p>

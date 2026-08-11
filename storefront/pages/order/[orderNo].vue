@@ -3,21 +3,30 @@
     <CardContent>
       <h1 class="mb-3 text-xl font-bold">{{ t('orderDetail') }}</h1>
       <dl class="grid grid-cols-3 gap-2 text-sm">
-        <dt class="text-muted-foreground">{{ t('orderNo') }}</dt><dd class="col-span-2 font-mono">{{ order.order_no }}</dd>
-        <dt class="text-muted-foreground">{{ t('product') }}</dt><dd class="col-span-2">{{ order.product_name }} x{{ order.qty }}</dd>
-        <dt class="text-muted-foreground">{{ t('amount') }}</dt><dd class="col-span-2 font-semibold">{{ money(order.amount_cents) }} {{ order.fiat }}</dd>
-        <dt class="text-muted-foreground">{{ t('tradeType') }}</dt><dd class="col-span-2">{{ order.trade_type }}</dd>
-        <dt class="text-muted-foreground">{{ t('paymentGateway') }}</dt><dd class="col-span-2">{{ gatewayLabel(order) }}</dd>
+        <dt class="text-muted-foreground">{{ t('orderNo') }}</dt>
+        <dd class="col-span-2 font-mono">{{ order.order_no }}</dd>
+        <dt class="text-muted-foreground">{{ t('product') }}</dt>
+        <dd class="col-span-2">{{ order.product_name }} x{{ order.qty }}</dd>
+        <dt class="text-muted-foreground">{{ t('amount') }}</dt>
+        <dd class="col-span-2 font-semibold">{{ money(order.amount_cents) }} {{ order.fiat }}</dd>
+        <dt class="text-muted-foreground">{{ t('tradeType') }}</dt>
+        <dd class="col-span-2">{{ order.trade_type }}</dd>
+        <dt class="text-muted-foreground">{{ t('paymentGateway') }}</dt>
+        <dd class="col-span-2">{{ gatewayLabel(order) }}</dd>
         <dt class="text-muted-foreground">{{ t('status') }}</dt>
         <dd class="col-span-2">
           <span class="inline-flex items-center gap-1">
             {{ statusText(order.status) }}
-            <span v-if="order.status === 'waiting_payment'" class="text-xs text-muted-foreground">{{ t('autoRefresh') }}</span>
+            <span v-if="order.status === 'waiting_payment'" class="text-xs text-muted-foreground">{{
+              t('autoRefresh')
+            }}</span>
           </span>
         </dd>
-        <dt class="text-muted-foreground">{{ t('createdAt') }}</dt><dd class="col-span-2">{{ date(order.created_at) }}</dd>
+        <dt class="text-muted-foreground">{{ t('createdAt') }}</dt>
+        <dd class="col-span-2">{{ date(order.created_at) }}</dd>
         <template v-if="order.paid_at">
-          <dt class="text-muted-foreground">{{ t('paidAt') }}</dt><dd class="col-span-2">{{ date(order.paid_at) }}</dd>
+          <dt class="text-muted-foreground">{{ t('paidAt') }}</dt>
+          <dd class="col-span-2">{{ date(order.paid_at) }}</dd>
         </template>
       </dl>
       <Alert v-if="order.status === 'pending_delivery'" class="mt-3">
@@ -59,13 +68,17 @@ const { data } = await useAsyncData(() =>
   api.get('/orders/' + route.params.orderNo, {
     contact: route.query.contact || undefined,
     token: route.query.token || undefined,
-  })
+  }),
 )
 const order = computed(() => (data.value as any)?.order || {})
 const cards = computed(() => (data.value as any)?.cards || [])
 
-function money(c: number) { return ((c || 0) / 100).toFixed(2) }
-function date(ts: number) { return siteDate(ts) }
+function money(c: number) {
+  return ((c || 0) / 100).toFixed(2)
+}
+function date(ts: number) {
+  return siteDate(ts)
+}
 function statusText(status: string) {
   return (t(`orderStatus.${status}`) as string) || status
 }
@@ -82,9 +95,7 @@ async function cancel() {
   try {
     const token = String(route.query.token || '')
     const contact = String(route.query.contact || '')
-    const query = token
-      ? 'token=' + encodeURIComponent(token)
-      : 'contact=' + encodeURIComponent(contact)
+    const query = token ? 'token=' + encodeURIComponent(token) : 'contact=' + encodeURIComponent(contact)
     await api.post('/orders/' + route.params.orderNo + '/cancel?' + query)
     await refresh()
   } catch (e: any) {

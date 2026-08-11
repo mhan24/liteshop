@@ -30,9 +30,7 @@
                   <TableCell>{{ t('wholesaleFrom') }} {{ t.min_qty }}</TableCell>
                   <TableCell>
                     {{ siteMoney(wholesalePrice(t.min_qty)) }}
-                    <Badge v-if="t.discount < 100" class="ml-1 bg-red-500/15 text-red-700">
-                      {{ t.discount }}%
-                    </Badge>
+                    <Badge v-if="t.discount < 100" class="ml-1 bg-red-500/15 text-red-700"> {{ t.discount }}% </Badge>
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -48,7 +46,9 @@
                   type="button"
                   :class="[
                     'rounded-lg border-2 bg-card px-3 py-2.5 text-left transition',
-                    form.gateway === 'bepusdt' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50',
+                    form.gateway === 'bepusdt'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/50',
                   ]"
                   @click="form.gateway = 'bepusdt'"
                 >
@@ -60,7 +60,9 @@
                   type="button"
                   :class="[
                     'rounded-lg border-2 bg-card px-3 py-2.5 text-left transition',
-                    form.gateway === 'hashpay' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50',
+                    form.gateway === 'hashpay'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/50',
                   ]"
                   @click="form.gateway = 'hashpay'"
                 >
@@ -333,9 +335,6 @@ onBeforeUnmount(() => {
   }
 })
 
-function money(c?: number) {
-  return ((c || 0) / 100).toFixed(2)
-}
 function imgSrc(url: string) {
   return url || (data.value as any)?.default_product_image || '/default-product.svg'
 }
@@ -358,9 +357,7 @@ async function createOrder(token: string) {
     })
     if (res.order_no) {
       if (res.payment_url) window.open(res.payment_url, '_blank', 'noopener')
-      const q = res.token
-        ? 'token=' + encodeURIComponent(res.token)
-        : 'contact=' + encodeURIComponent(form.contact)
+      const q = res.token ? 'token=' + encodeURIComponent(res.token) : 'contact=' + encodeURIComponent(form.contact)
       window.location.href = '/order/' + res.order_no + '?' + q
     }
   } catch (e: any) {

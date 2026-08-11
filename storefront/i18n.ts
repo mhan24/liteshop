@@ -126,7 +126,8 @@ export const zhDict: Record<string, string> = {
 export const enDict: Record<string, string> = {
   products: 'Products',
   orderQuery: 'Order lookup',
-  orderQueryDesc: 'Check order status, cards and payment progress by email, or recover recent orders with just your checkout email.',
+  orderQueryDesc:
+    'Check order status, cards and payment progress by email, or recover recent orders with just your checkout email.',
   buyNow: 'Buy now',
   soldOut: 'Sold out',
   stock: 'Stock',
@@ -195,7 +196,7 @@ export const enDict: Record<string, string> = {
   recoverByEmail: 'Find orders by email',
   noOrders: 'No orders found.',
   viewOrder: 'View order',
-  sendAllLinks: 'Didn\'t receive the link? Send it to my email',
+  sendAllLinks: "Didn't receive the link? Send it to my email",
   linkSent: 'The view link has been sent to your email',
   linkFail: 'Failed to send',
   paidOrderSent: 'Paid · cards sent to your email',

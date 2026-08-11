@@ -13,12 +13,7 @@
           <Input v-model="form.username" autocomplete="username" @keyup.enter="submit" />
         </FormField>
         <FormField :label="t('login.password')" required>
-          <Input
-            v-model="form.password"
-            type="password"
-            autocomplete="current-password"
-            @keyup.enter="submit"
-          />
+          <Input v-model="form.password" type="password" autocomplete="current-password" @keyup.enter="submit" />
         </FormField>
         <FormField v-if="totpStep" :label="t('login.otp')" required>
           <Input

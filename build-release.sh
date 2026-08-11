@@ -14,13 +14,12 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 echo "[+] 构建 admin-ui..."
 cd "$ROOT/admin-ui"
-npm install --no-audit --no-fund
+npm ci --no-audit --no-fund
 npm run build
 
 echo "[+] 构建 storefront..."
 cd "$ROOT/storefront"
-rm -f package-lock.json; rm -rf node_modules
-npm install --no-audit --no-fund
+npm ci --no-audit --no-fund
 npm run build
 
 echo "[+] 构建 Go 二进制..."

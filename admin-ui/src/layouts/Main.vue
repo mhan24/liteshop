@@ -28,12 +28,8 @@
         <div class="flex-1"></div>
 
         <div class="flex items-center gap-1">
-          <Button :variant="locale === 'zh' ? 'secondary' : 'ghost'" size="sm" @click="locale = 'zh'">
-            中文
-          </Button>
-          <Button :variant="locale === 'en' ? 'secondary' : 'ghost'" size="sm" @click="locale = 'en'">
-            EN
-          </Button>
+          <Button :variant="locale === 'zh' ? 'secondary' : 'ghost'" size="sm" @click="locale = 'zh'"> 中文 </Button>
+          <Button :variant="locale === 'en' ? 'secondary' : 'ghost'" size="sm" @click="locale = 'en'"> EN </Button>
         </div>
 
         <DropdownMenu>

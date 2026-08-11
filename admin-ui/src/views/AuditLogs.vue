@@ -13,8 +13,12 @@
             <Badge variant="secondary">{{ actionText(row.action) }}</Badge>
           </template>
           <template #target="{ row }">{{ row.target_type }} {{ row.target_id }}</template>
-          <template #before="{ row }"><span class="mono text-xs">{{ row.before || '-' }}</span></template>
-          <template #after="{ row }"><span class="mono text-xs">{{ row.after || '-' }}</span></template>
+          <template #before="{ row }"
+            ><span class="mono text-xs">{{ row.before || '-' }}</span></template
+          >
+          <template #after="{ row }"
+            ><span class="mono text-xs">{{ row.after || '-' }}</span></template
+          >
         </DataTable>
       </CardContent>
     </Card>

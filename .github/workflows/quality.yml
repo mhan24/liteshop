@@ -1,0 +1,122 @@
+name: Quality gates
+
+on:
+  workflow_call:
+
+jobs:
+  admin-ui:
+    name: Admin UI (lint / format / typecheck / build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: admin-ui/package-lock.json
+
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Format check
+        run: npm run format:check
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Regenerate API types (OpenAPI → TS)
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/api/types.ts
+      - name: Build
+        run: npm run build
+
+      - name: Upload admin bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-ui-dist
+          path: internal/api/admin-ui
+          retention-days: 1
+
+  storefront:
+    name: Storefront (lint / format / typecheck / build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: storefront
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: storefront/package-lock.json
+
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Format check
+        run: npm run format:check
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+
+  go:
+    name: Go (fmt / vet / staticcheck / govulncheck / build / test)
+    needs: [admin-ui]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download admin bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: admin-ui-dist
+          path: internal/api/admin-ui
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Download deps
+        run: go mod download
+
+      - name: Gofmt check
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "gofmt needed for:"
+            echo "$files"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+      - name: Govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -count=1
+
+      - name: Build linux binary (arm64)
+        run: |
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o shop-linux-arm64 ./cmd/shop
+        shell: bash
+
+      - name: Upload Go binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: shop-linux-arm64
+          path: shop-linux-arm64

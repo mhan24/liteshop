@@ -1,5 +1,14 @@
 # 更新日志
 
+## v0.3.1（2026-08-12）— 质量门禁与发布工作流（P0）
+
+- storefront 补齐 ESLint / Prettier / TypeScript typecheck（`nuxt typecheck`），并修复既有 lint/type 问题（Turnstile 全局类型、markdown-it 15 validateLink、空 catch、未使用变量等）
+- admin-ui 增加 `typecheck`（vue-tsc）与 `format:check`
+- 统一构建依赖安装为 **`npm ci`**：移除 install.sh / build-release.sh 中“删 lockfile + npm install”的做法
+- CI 重构为可复用质量门禁（`.github/workflows/quality.yml`）：admin/storefront 执行 lint、format:check、typecheck、build；Go 增加 gofmt、staticcheck、govulncheck；gen:api diff 校验保留
+- Release 依赖同一套质量门禁通过后才打包发布
+- 工作流改为 **PR → CI → Tag → 部署**（写入 AGENTS.md），禁止直接推送 main 并立即部署
+
 ## v0.3.0（2026-08-11）— 前后台迁移 shadcn-vue
 
 ### 后台（admin-ui）

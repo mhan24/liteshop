@@ -1,11 +1,5 @@
 <template>
-  <img
-    :src="imgSrc"
-    :alt="alt || ''"
-    class="h-full w-full rounded-lg object-cover"
-    loading="lazy"
-    @error="onError"
-  />
+  <img :src="imgSrc" :alt="alt || ''" class="h-full w-full rounded-lg object-cover" loading="lazy" @error="onError" />
 </template>
 
 <script setup lang="ts">

@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { watch } from 'vue'
 import { zhDict, enDict } from '../i18n'
 
 export function useI18n() {

@@ -25,13 +25,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { Loader2 } from '@lucide/vue'
-import {
-  Dialog,
-  DialogFooter,
-  DialogHeader,
-  DialogScrollContent,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog, DialogFooter, DialogHeader, DialogScrollContent, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 
 withDefaults(

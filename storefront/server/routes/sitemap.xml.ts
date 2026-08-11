@@ -5,8 +5,10 @@ export default defineEventHandler(async (event) => {
   try {
     const site: any = await $fetch(reqOrigin + '/api/v1/site')
     if (site?.public_base_url) origin = String(site.public_base_url).replace(/\/+$/, '')
-  } catch {}
-  let urls: string[] = []
+  } catch {
+    /* 忽略站点配置获取失败，使用请求源 */
+  }
+  const urls: string[] = []
   try {
     const data: any = await $fetch(origin + '/api/v1/products')
     for (const cat of data.categories || []) {
@@ -15,7 +17,9 @@ export default defineEventHandler(async (event) => {
         urls.push(`/product/${slug}`)
       }
     }
-  } catch {}
+  } catch {
+    /* 忽略商品列表获取失败，仅输出基础页面 */
+  }
   const items = ['/', '/order', '/page/privacy', '/page/terms', ...urls]
     .map((p) => `  <url><loc>${origin}${p}</loc></url>`)
     .join('\n')

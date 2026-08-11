@@ -48,7 +48,13 @@
       </FormField>
 
       <FormField :label="t('products.description')">
-        <MdEditor v-model="form.description" :language="editorLang" :preview="false" class="w-full" style="height: 420px" />
+        <MdEditor
+          v-model="form.description"
+          :language="editorLang"
+          :preview="false"
+          class="w-full"
+          style="height: 420px"
+        />
       </FormField>
 
       <FormField :label="t('products.faq')">

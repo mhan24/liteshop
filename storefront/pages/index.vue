@@ -9,11 +9,7 @@
     <Card class="mb-4">
       <CardContent class="space-y-3">
         <form class="flex flex-wrap items-center gap-2" @submit.prevent="submit">
-          <Input
-            v-model="filters.q"
-            :placeholder="t('searchPlaceholder')"
-            class="min-w-40 flex-1"
-          />
+          <Input v-model="filters.q" :placeholder="t('searchPlaceholder')" class="min-w-40 flex-1" />
           <Select v-model="categoryFilter">
             <SelectTrigger class="w-36">
               <SelectValue :placeholder="t('allCategories')" />
@@ -23,46 +19,20 @@
               <SelectItem v-for="c in allCategories" :key="c" :value="c">{{ c }}</SelectItem>
             </SelectContent>
           </Select>
-          <Input
-            v-model="filters.min_price"
-            type="number"
-            step="0.01"
-            :placeholder="t('minPrice')"
-            class="w-24"
-          />
+          <Input v-model="filters.min_price" type="number" step="0.01" :placeholder="t('minPrice')" class="w-24" />
           <span class="text-sm text-muted-foreground">-</span>
-          <Input
-            v-model="filters.max_price"
-            type="number"
-            step="0.01"
-            :placeholder="t('maxPrice')"
-            class="w-24"
-          />
+          <Input v-model="filters.max_price" type="number" step="0.01" :placeholder="t('maxPrice')" class="w-24" />
           <Button size="sm" type="submit">{{ t('searchBtn') }}</Button>
-          <Button
-            v-if="isFiltering"
-            variant="ghost"
-            size="sm"
-            class="text-muted-foreground"
-            @click="reset"
-          >
+          <Button v-if="isFiltering" variant="ghost" size="sm" class="text-muted-foreground" @click="reset">
             {{ t('resetFilter') }}
           </Button>
         </form>
         <div class="flex justify-end">
           <div class="flex items-center gap-1">
-            <Button
-              :variant="viewMode === 'grid' ? 'secondary' : 'ghost'"
-              size="sm"
-              @click="setView('grid')"
-            >
+            <Button :variant="viewMode === 'grid' ? 'secondary' : 'ghost'" size="sm" @click="setView('grid')">
               {{ t('viewGrid') }}
             </Button>
-            <Button
-              :variant="viewMode === 'list' ? 'secondary' : 'ghost'"
-              size="sm"
-              @click="setView('list')"
-            >
+            <Button :variant="viewMode === 'list' ? 'secondary' : 'ghost'" size="sm" @click="setView('list')">
               {{ t('viewList') }}
             </Button>
           </div>
@@ -76,7 +46,12 @@
         <Card v-for="p in cat.products" :key="p.product.id" class="transition hover:shadow-md">
           <div class="flex aspect-square w-full items-center justify-center overflow-hidden bg-muted">
             <NuxtLink :to="productUrl(p.product)" class="flex h-full w-full items-center justify-center">
-              <img :src="imgSrc(p.product.image_url)" :alt="p.product.name" loading="lazy" class="h-auto max-h-full w-auto max-w-full" />
+              <img
+                :src="imgSrc(p.product.image_url)"
+                :alt="p.product.name"
+                loading="lazy"
+                class="h-auto max-h-full w-auto max-w-full"
+              />
             </NuxtLink>
           </div>
           <CardContent class="space-y-1">
@@ -100,7 +75,12 @@
           <div v-for="p in cat.products" :key="p.product.id" class="flex items-center gap-4 p-4">
             <NuxtLink :to="productUrl(p.product)" class="shrink-0">
               <div class="flex h-16 w-16 items-center justify-center overflow-hidden rounded-lg bg-muted">
-                <img :src="imgSrc(p.product.image_url)" :alt="p.product.name" loading="lazy" class="h-auto max-h-full w-auto max-w-full" />
+                <img
+                  :src="imgSrc(p.product.image_url)"
+                  :alt="p.product.name"
+                  loading="lazy"
+                  class="h-auto max-h-full w-auto max-w-full"
+                />
               </div>
             </NuxtLink>
             <div class="min-w-0 flex-1">
@@ -157,7 +137,7 @@ const { data, pending, refresh } = await useAsyncData('products', () =>
     category: applied.category !== 'all' ? applied.category : undefined,
     min_price: applied.min_price || undefined,
     max_price: applied.max_price || undefined,
-  })
+  }),
 )
 // 首页视图模式：默认值来自后台站点设置（home_view_mode），用户可手动切换。
 // 用户选择写入 cookie（SSR/客户端一致，避免 hydration 不一致）与 localStorage（旧版本兼容）。
@@ -190,13 +170,16 @@ function setView(m: 'grid' | 'list') {
 
 const categories = computed(() => (data.value as any)?.categories || [])
 const allCategories = computed(() => (data.value as any)?.categories_all || [])
-const isFiltering = computed(() =>
-  applied.q || applied.category !== 'all' || applied.min_price || applied.max_price
-)
+const isFiltering = computed(() => applied.q || applied.category !== 'all' || applied.min_price || applied.max_price)
 
 function submit() {
   filters.category = categoryFilter.value
-  Object.assign(applied, { q: filters.q.trim(), category: categoryFilter.value, min_price: filters.min_price.trim(), max_price: filters.max_price.trim() })
+  Object.assign(applied, {
+    q: filters.q.trim(),
+    category: categoryFilter.value,
+    min_price: filters.min_price.trim(),
+    max_price: filters.max_price.trim(),
+  })
   refresh()
 }
 function reset() {
@@ -223,7 +206,11 @@ function stockLabel(n: number) {
   return s
 }
 function catTitle(cat: any) {
-  return cat.default_key === 'pinned' ? t('pinned') : cat.default_key === 'default_category' ? t('defaultCategory') : cat.name
+  return cat.default_key === 'pinned'
+    ? t('pinned')
+    : cat.default_key === 'default_category'
+      ? t('defaultCategory')
+      : cat.name
 }
 const siteDesc = computed(() => (site.value?.subtitle || site.value?.seo_description || '').slice(0, 160))
 const siteImage = computed(() => site.value?.default_product_image || '')

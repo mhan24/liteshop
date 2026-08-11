@@ -1,9 +1,6 @@
 <template>
   <div class="relative">
-    <div
-      v-if="loading"
-      class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/70"
-    >
+    <div v-if="loading" class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/70">
       <Loader2 class="h-6 w-6 animate-spin text-primary" />
     </div>
     <div class="overflow-x-auto">
@@ -40,14 +37,7 @@
 
 <script setup lang="ts">
 import { Loader2 } from '@lucide/vue'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 export interface DataColumn {
   label: string

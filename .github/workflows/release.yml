@@ -5,15 +5,20 @@ on:
     tags: ['v*']
 
 jobs:
+  quality:
+    name: Quality gates
+    uses: ./.github/workflows/quality.yml
+
   release:
     name: Build release artifact
+    needs: [quality]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - uses: actions/setup-go@v5
         with:
@@ -25,8 +30,6 @@ jobs:
         run: |
           npm ci
           npm run build
-          mkdir -p ../internal/api/admin-ui
-          cp -r dist/* ../internal/api/admin-ui/
 
       - name: Build storefront
         working-directory: storefront

@@ -213,10 +213,10 @@ cd storefront && npm install && npm run dev
 
 ```bash
 # Admin assets → internal/api/admin-ui (embedded in the Go binary)
-cd admin-ui && npm install && npm run build && cd ..
+cd admin-ui && npm ci && npm run lint && npm run format:check && npm run typecheck && npm run build && cd ..
 
 # Storefront SSR output → storefront/.output
-cd storefront && npm install && npm run build && cd ..
+cd storefront && npm ci && npm run lint && npm run format:check && npm run typecheck && npm run build && cd ..
 
 # Single binary (embedded admin), optionally with version info
 go build -ldflags "-X shop/internal/version.Version=0.3.0 -X shop/internal/version.Commit=$(git rev-parse --short HEAD)" -o shop ./cmd/shop
@@ -301,7 +301,11 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (injects git tag
 - **Integration tests** (`internal/integration` + `internal/testutil`): temp SQLite + `MockGateway` / `NotifyRecorder`, covering both gateways' callbacks, **duplicate-callback idempotency**, cancel/timeout stock release, real HTTP callback routes, **100 concurrent buyers for 1 card**, Outbox dead letters, backup restore, legacy upgrades
 - **Benchmarks**: `go test -bench=. ./internal/integration/`
 - **Dependency baselines**: `govulncheck ./...` clean (Go 1.25.12); `npm audit` 0 runtime vulnerabilities (admin-ui only has the documented build-time js-yaml advisory)
-- CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + gen:api diff check + both frontends build
+- CI quality gates (`.github/workflows/quality.yml`, shared by CI and Release):
+  - admin-ui: `npm ci` → lint → format:check → typecheck → gen:api diff → build
+  - storefront: `npm ci` → lint → format:check → typecheck → build
+  - Go: gofmt / vet / staticcheck / govulncheck / build / test + arm64 binary
+- Release only packages (tgz + SHA256) after the same quality gates pass
 
 ---
 

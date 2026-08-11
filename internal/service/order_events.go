@@ -5,12 +5,6 @@ import (
 	"shop/internal/models"
 )
 
-// fireOrderEvents 支付成功 + 发货事件。
-func (s *OrderService) fireOrderEvents(order models.Order, cards []models.Card) {
-	s.publish(events.OrderPaidEvent{Order: order, Cards: cards})
-	s.publish(events.OrderDeliveredEvent{Order: order, Cards: cards})
-}
-
 // fireCreatedEvents 订单创建事件 + 低库存检查。
 func (s *OrderService) fireCreatedEvents(order models.Order) {
 	s.publish(events.OrderCreatedEvent{Order: order})

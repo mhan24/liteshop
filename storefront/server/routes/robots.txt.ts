@@ -4,7 +4,9 @@ export default defineEventHandler(async (event) => {
   try {
     const site: any = await $fetch(reqOrigin + '/api/v1/site')
     if (site?.public_base_url) origin = String(site.public_base_url).replace(/\/+$/, '')
-  } catch {}
+  } catch {
+    /* 忽略站点配置获取失败，返回默认 robots */
+  }
   setHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
   setHeader(event, 'Cache-Control', 'public, max-age=3600')
   return [

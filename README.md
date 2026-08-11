@@ -213,10 +213,10 @@ cd storefront && npm install && npm run dev
 
 ```bash
 # 后台静态资源 → internal/api/admin-ui（内嵌进 Go 二进制）
-cd admin-ui && npm install && npm run build && cd ..
+cd admin-ui && npm ci && npm run lint && npm run format:check && npm run typecheck && npm run build && cd ..
 
 # 前台 SSR 产物 → storefront/.output
-cd storefront && npm install && npm run build && cd ..
+cd storefront && npm ci && npm run lint && npm run format:check && npm run typecheck && npm run build && cd ..
 
 # 单二进制（内嵌后台），可带版本信息
 go build -ldflags "-X shop/internal/version.Version=0.3.0 -X shop/internal/version.Commit=$(git rev-parse --short HEAD)" -o shop ./cmd/shop
@@ -301,7 +301,11 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（注入 git 
 - **集成测试**（`internal/integration` + `internal/testutil`）：临时 SQLite 测试库 + `MockGateway` / `NotifyRecorder`，覆盖双网关回调发卡、**重复回调幂等**、取消/超时释放库存、真实 HTTP 回调路由、**100 并发抢 1 卡**、Outbox 死信、备份恢复、旧库升级
 - **性能基准**：`go test -bench=. ./internal/integration/`
 - **依赖基线**：`govulncheck ./...` 无漏洞（Go 1.25.12）；`npm audit` 运行时 0 漏洞（admin-ui 仅构建期 js-yaml 告警，不可达）
-- CI（`.github/workflows/ci.yml`）：Go `vet` / `build` / `test` + gen:api diff 校验 + 前后台构建
+- CI 质量门禁（`.github/workflows/quality.yml`，CI 与 Release 共用）：
+  - admin-ui：`npm ci` → lint → format:check → typecheck → gen:api diff → build
+  - storefront：`npm ci` → lint → format:check → typecheck → build
+  - Go：gofmt / vet / staticcheck / govulncheck / build / test + arm64 二进制
+- Release 必须依赖同一套质量门禁通过后才打包（tgz + SHA256）
 
 ---
 

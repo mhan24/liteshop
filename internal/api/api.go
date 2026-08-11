@@ -111,17 +111,6 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/coupons/{id}/delete", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCouponDelete)))
 }
 
-func faqJSON(faq []models.FAQItem) string {
-	if len(faq) == 0 {
-		return ""
-	}
-	raw, err := json.Marshal(faq)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
-}
-
 func productJSON(p models.Product) map[string]any {
 	faq := []map[string]string{}
 	for _, f := range p.FAQ {
@@ -486,15 +475,15 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for _, o := range orders {
 		item := map[string]any{
-			"product_name": o.ProductName,
-			"qty":          o.Qty,
-			"amount":       fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
-			"fiat":         o.Fiat,
-			"trade_type":   o.TradeType,
+			"product_name":    o.ProductName,
+			"qty":             o.Qty,
+			"amount":          fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
+			"fiat":            o.Fiat,
+			"trade_type":      o.TradeType,
 			"payment_gateway": o.PaymentGateway,
-			"status":       o.Status,
-			"created_at":   o.CreatedAt,
-			"paid_at":      o.PaidAt,
+			"status":          o.Status,
+			"created_at":      o.CreatedAt,
+			"paid_at":         o.PaidAt,
 		}
 		// 不返回订单号/查看 URL（避免邮箱枚举与令牌外泄）：
 		// 买家通过"发送查看链接到邮箱"接口获取访问链接（只发往登记邮箱）。

@@ -13,12 +13,7 @@
         <CardTitle class="text-base">{{ t('cards.import') }}</CardTitle>
       </CardHeader>
       <CardContent class="space-y-3">
-        <Textarea
-          v-model="cardsText"
-          class="font-mono"
-          rows="6"
-          placeholder="CARD-001&#10;CARD-002"
-        />
+        <Textarea v-model="cardsText" class="font-mono" rows="6" placeholder="CARD-001&#10;CARD-002" />
         <div class="flex items-center gap-2">
           <Checkbox id="dedupe" :checked="dedupe" @update:checked="dedupe = $event" />
           <Label for="dedupe" class="text-sm">{{ t('cards.dedupe') }}</Label>

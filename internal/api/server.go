@@ -698,14 +698,6 @@ func (s *Server) sessionSecret() string {
 	return s.admin.SessionSecret()
 }
 
-func (s *Server) turnstileSecret() string {
-	return s.settings.TurnstileSecret()
-}
-
-func (s *Server) turnstileSiteKey() string {
-	return s.settings.TurnstileSiteKey()
-}
-
 func (s *Server) signSession(id string) string {
 	h := hmac.New(sha256.New, []byte(s.sessionSecret()))
 	h.Write([]byte(id))

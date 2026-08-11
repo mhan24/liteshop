@@ -8,18 +8,34 @@
         <Input v-model="form.shop_public_base_url" />
       </FormField>
       <FormField :label="t('site.announcement')">
-        <MdEditor v-model="form.site_announcement" :language="editorLang" :preview="false" class="w-full" style="height: 300px" />
+        <MdEditor
+          v-model="form.site_announcement"
+          :language="editorLang"
+          :preview="false"
+          class="w-full"
+          style="height: 300px"
+        />
       </FormField>
       <FormField :label="t('site.logo')" :hint="t('site.logoPlaceholder')">
         <Input v-model="form.site_logo" />
         <div v-if="form.site_logo" class="mt-2 h-16 w-40 overflow-hidden rounded-lg border bg-muted">
-          <img :src="form.site_logo" class="h-full w-full object-contain" alt="logo" @error="(e: any) => (e.target.style.display = 'none')" />
+          <img
+            :src="form.site_logo"
+            class="h-full w-full object-contain"
+            alt="logo"
+            @error="(e: any) => (e.target.style.display = 'none')"
+          />
         </div>
       </FormField>
       <FormField :label="t('site.favicon')" :hint="t('site.faviconPlaceholder')">
         <Input v-model="form.site_favicon" />
         <div v-if="form.site_favicon" class="mt-2 h-12 w-12 overflow-hidden rounded-lg border bg-muted p-0.5">
-          <img :src="form.site_favicon" class="h-full w-full object-contain" alt="favicon" @error="(e: any) => (e.target.style.display = 'none')" />
+          <img
+            :src="form.site_favicon"
+            class="h-full w-full object-contain"
+            alt="favicon"
+            @error="(e: any) => (e.target.style.display = 'none')"
+          />
         </div>
       </FormField>
       <FormField :label="t('site.defaultProductImage')" :hint="t('site.defaultProductImagePlaceholder')">
@@ -116,10 +132,22 @@
         <Input v-model="form.site_copyright" />
       </FormField>
       <FormField :label="t('site.privacy')">
-        <MdEditor v-model="form.privacy_policy" :language="editorLang" :preview="false" class="w-full" style="height: 300px" />
+        <MdEditor
+          v-model="form.privacy_policy"
+          :language="editorLang"
+          :preview="false"
+          class="w-full"
+          style="height: 300px"
+        />
       </FormField>
       <FormField :label="t('site.terms')">
-        <MdEditor v-model="form.terms_of_service" :language="editorLang" :preview="false" class="w-full" style="height: 300px" />
+        <MdEditor
+          v-model="form.terms_of_service"
+          :language="editorLang"
+          :preview="false"
+          class="w-full"
+          style="height: 300px"
+        />
       </FormField>
 
       <FormField :label="t('site.turnstileSiteKey')">
@@ -193,8 +221,8 @@ onMounted(async () => {
 function addLink() {
   form.value.site_links.push({ name: '', url: '', category: 'link' })
 }
-function removeLink(idx: number) {
-  form.value.site_links.splice(idx, 1)
+function removeLink(idx: number | string) {
+  form.value.site_links.splice(Number(idx), 1)
 }
 async function save() {
   saving.value = true

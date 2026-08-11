@@ -10,8 +10,7 @@ export function apiUrl(path: string) {
 export function useApi() {
   const base = useApiBase()
   return {
-    get: <T = any>(path: string, query?: any, headers?: any) =>
-      $fetch<T>(base + path, { query, headers }),
+    get: <T = any>(path: string, query?: any, headers?: any) => $fetch<T>(base + path, { query, headers }),
     post: <T = any>(path: string, body?: any, headers?: any) =>
       $fetch<T>(base + path, { method: 'POST', body, headers, credentials: 'include' as any }),
   }
