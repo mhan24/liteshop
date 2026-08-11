@@ -83,7 +83,8 @@
         <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm text-center">
           <h2 class="text-lg font-bold">{{ t('verifyTitle') }}</h2>
           <p class="text-sm text-gray-500 mt-1">{{ t('verifyHint') }}</p>
-          <div ref="turnstileContainer" class="cf-turnstile mt-4 flex justify-center"></div>
+          <!-- 注意：不要加 cf-turnstile 类（会触发 api.js 自动渲染，与下方显式 render 冲突） -->
+          <div ref="turnstileContainer" class="mt-4 flex justify-center"></div>
           <p v-if="turnstileError" class="text-red-600 text-sm mt-2">{{ t('verifyRetry') }}</p>
           <button type="button" class="mt-4 text-sm text-gray-500 hover:text-gray-800" @click="closeTurnstile">{{ t('verifyCancel') }}</button>
         </div>

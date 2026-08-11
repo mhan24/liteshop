@@ -320,7 +320,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 - 版本号由 `internal/version` 统一管理，构建时经 `-ldflags` 注入（build-release.sh / Release workflow 自动带 git tag / commit / date）
 - 后台 `/api/v1/admin/version` 返回版本、构建信息与 `config_version`；`/api/v1/admin/jobs` 返回任务执行记录与队列/死信指标
 - 关联 ID：每请求 `request_id`（响应头 X-Request-ID）；支付日志带 request_id / order_no / trace_id
-- 安全头回归测试：`internal/api/security_test.go` 固化 nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / admin CSP / HSTS / 会话 Cookie Secure；前台 CSP 允许内联与 eval（Nuxt 引导 + vue-i18n 消息编译所需，与后台策略一致）
+- 安全头回归测试：`internal/api/security_test.go` 固化 nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / admin CSP / HSTS / 会话 Cookie Secure；前台 CSP 允许内联与 eval（Nuxt 引导 + vue-i18n 消息编译所需，与后台策略一致），并放行 challenges.cloudflare.com（Turnstile 人机验证）
 
 ---
 

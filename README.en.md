@@ -316,7 +316,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 - Version lives in `internal/version`, injected via `-ldflags` (build-release.sh / Release workflow pick up git tag / commit / date)
 - Admin endpoints: `/api/v1/admin/version` (version/build/config_version) and `/api/v1/admin/jobs` (job runs / queue / dead events)
 - Correlation: per-request `request_id` (X-Request-ID header); payment logs carry request_id / order_no / trace_id
-- Security-header regression tests: `internal/api/security_test.go` pins nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / admin CSP / HSTS / session-cookie Secure; the storefront CSP allows inline + eval (required by Nuxt bootstrap and vue-i18n message compilation, consistent with the admin policy)
+- Security-header regression tests: `internal/api/security_test.go` pins nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / admin CSP / HSTS / session-cookie Secure; the storefront CSP allows inline + eval (required by Nuxt bootstrap and vue-i18n message compilation, consistent with the admin policy) and allows challenges.cloudflare.com (Turnstile)
 
 ---
 

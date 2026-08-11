@@ -272,7 +272,8 @@ ${ADDR} {
 	# 前台（storefront）CSP：后台 /admin 的 CSP 由 Go 应用下发。
 	@storefront not path /api* /notify* /admin* /health
 	# unsafe-inline：Nuxt 内联引导脚本；unsafe-eval：vue-i18n 运行时消息编译（与后台 CSP 一致）
-	header @storefront Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+	# challenges.cloudflare.com：Turnstile 人机验证脚本/接口/内嵌 iframe
+	header @storefront Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://challenges.cloudflare.com; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'"
 
 	header {
 		-Server
