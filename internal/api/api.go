@@ -384,7 +384,8 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	p := vw.Product
 	available := vw.Available
-	if input.Qty > available {
+	// 人工交付商品（available=-1）无库存概念，不做库存校验。
+	if p.DeliveryType != models.DeliveryTypeManual && input.Qty > available {
 		writeError(w, 400, "out of stock")
 		return
 	}
