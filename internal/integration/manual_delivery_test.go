@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	"shop/internal/db/repository"
 	"shop/internal/models"
@@ -112,7 +113,11 @@ func TestManualDeliveryFlow(t *testing.T) {
 	if last.DeliveryContent != content {
 		t.Fatalf("SendPaid order delivery_content = %q", last.DeliveryContent)
 	}
-	// 管理员侧 delivered 事件已发布
+	// 管理员侧 delivered 事件已发布（异步发布，轮询等待）
+	deadline := time.Now().Add(2 * time.Second)
+	for rec.DeliveredCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if rec.DeliveredCount() == 0 {
 		t.Fatal("delivered event should be published")
 	}
@@ -144,5 +149,34 @@ func TestManualDeliveryFreeOrder(t *testing.T) {
 	}
 	if o.Status != models.OrderPendingDelivery {
 		t.Fatalf("free manual order status = %s, want pending_delivery", o.Status)
+	}
+}
+
+// TestManualProductStockUnlimited 人工交付商品库存显示 -1（无库存概念）。
+func TestManualProductStockUnlimited(t *testing.T) {
+	_, _, _, d, pid := manualOrderEnv(t)
+	productRepo := repository.NewProductRepository(d)
+	views, err := productRepo.ListViews(false)
+	if err != nil {
+		t.Fatalf("list views: %v", err)
+	}
+	var found bool
+	for _, v := range views {
+		if v.Product.ID == pid {
+			found = true
+			if v.Available != -1 {
+				t.Fatalf("manual product available = %d, want -1", v.Available)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("manual product not found in views")
+	}
+	view, err := productRepo.GetByID(pid)
+	if err != nil {
+		t.Fatalf("get view: %v", err)
+	}
+	if view.Available != -1 {
+		t.Fatalf("manual product GetByID available = %d, want -1", view.Available)
 	}
 }

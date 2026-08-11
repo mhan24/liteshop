@@ -14,6 +14,10 @@ func (s *OrderService) fireOrderEvents(order models.Order, cards []models.Card) 
 // fireCreatedEvents 订单创建事件 + 低库存检查。
 func (s *OrderService) fireCreatedEvents(order models.Order) {
 	s.publish(events.OrderCreatedEvent{Order: order})
+	// 人工交付商品无卡密库存，不做低库存检查。
+	if order.DeliveryType == models.DeliveryTypeManual {
+		return
+	}
 	if s.keys != nil {
 		if remain, err := s.keys.AvailableCount(order.ProductID); err == nil {
 			threshold := 10

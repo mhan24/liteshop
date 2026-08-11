@@ -78,7 +78,7 @@
           <p class="text-gray-500 text-sm mt-1 line-clamp-2">{{ markdownText(p.product.description) }}</p>
           <p class="text-2xl font-bold mt-3">{{ money(p.product.price_cents) }}</p>
           <p class="text-gray-500 text-sm">{{ t('stock') }} {{ stockLabel(p.available) }}</p>
-          <NuxtLink v-if="p.available > 0" :to="productUrl(p.product)" class="inline-block mt-3 bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2">{{ t('buyNow') }}</NuxtLink>
+          <NuxtLink v-if="p.available !== 0" :to="productUrl(p.product)" class="inline-block mt-3 bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2">{{ t('buyNow') }}</NuxtLink>
           <span v-else class="inline-block mt-3 bg-gray-300 text-white rounded-full px-4 py-2">{{ t('soldOut') }}</span>
         </div>
       </div>
@@ -106,7 +106,7 @@
           </div>
           <div class="shrink-0">
             <NuxtLink
-              v-if="p.available > 0"
+              v-if="p.available !== 0"
               :to="productUrl(p.product)"
               class="inline-block bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-1.5 text-sm"
             >{{ t('buyNow') }}</NuxtLink>
@@ -194,6 +194,7 @@ function productUrl(p: any) {
   return `/product/${id}`
 }
 function stockLabel(n: number) {
+  if (n < 0) return t('stockUnlimited')
   const s = stockText(n)
   if (s === 'plenty') return t('stockPlenty')
   if (s === 'tight') return t('stockTight')

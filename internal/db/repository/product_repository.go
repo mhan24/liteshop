@@ -41,6 +41,10 @@ func (r *ProductRepository) ListViews(activeOnly bool) ([]View, error) {
 		if err := rows.Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.ImageURL, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &faqRaw, &wholeRaw, &v.Product.MinQty, &v.Product.MaxQty, &v.Product.CostCents, &v.Product.DeliveryType, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available, &v.Reserved, &v.Sold); err != nil {
 			return nil, err
 		}
+		// 人工手动交付商品无库存概念，统一返回 -1。
+		if v.Product.DeliveryType == models.DeliveryTypeManual {
+			v.Available = -1
+		}
 		v.Product.FAQ = parseFAQ(faqRaw)
 		v.Product.Wholesale = parseWholesale(wholeRaw)
 		out = append(out, v)
@@ -57,6 +61,10 @@ func (r *ProductRepository) GetByID(id int64) (View, error) {
 		FROM products p WHERE p.id = ?`, id).Scan(&v.Product.ID, &v.Product.Name, &v.Product.Description, &v.Product.ImageURL, &v.Product.PriceCents, &v.Product.Status, &v.Product.Category, &v.Product.SortOrder, &v.Product.IsPinned, &faqRaw, &wholeRaw, &v.Product.MinQty, &v.Product.MaxQty, &v.Product.CostCents, &v.Product.DeliveryType, &v.Product.CreatedAt, &v.Product.UpdatedAt, &v.Available)
 	if err != nil {
 		return v, err
+	}
+	// 人工手动交付商品无库存概念，统一返回 -1。
+	if v.Product.DeliveryType == models.DeliveryTypeManual {
+		v.Available = -1
 	}
 	v.Product.FAQ = parseFAQ(faqRaw)
 	v.Product.Wholesale = parseWholesale(wholeRaw)

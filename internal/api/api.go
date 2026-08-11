@@ -985,6 +985,10 @@ func (s *Server) apiAdminCardsImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not found")
 		return
 	}
+	if v, err := s.products.GetView(id); err == nil && v.Product.DeliveryType == models.DeliveryTypeManual {
+		writeError(w, 400, "人工交付商品无需卡密库存，请先切换为卡密自动发货")
+		return
+	}
 	var input struct {
 		Cards  string `json:"cards"`
 		Dedupe bool   `json:"dedupe"`

@@ -147,9 +147,14 @@ onMounted(() => {
 const faqItems = computed(() => (product.value?.faq || []) as any[])
 const wholesale = computed(() => (product.value?.wholesale || []) as any[])
 const minQty = computed(() => product.value?.min_qty || 1)
-const maxQty = computed(() => Math.min(product.value?.max_qty || 100, available.value || 100))
+const maxQty = computed(() => {
+  // 人工交付商品（available=-1）无库存限制，直接使用商品最大购买量
+  if (available.value < 0) return Math.max(product.value?.max_qty || 100, minQty.value)
+  return Math.min(product.value?.max_qty || 100, available.value || 100)
+})
 const available = computed(() => (data.value as any)?.available || 0)
 function stockLabel(n: number) {
+  if (n < 0) return t('stockUnlimited')
   const s = stockText(n)
   if (s === 'plenty') return t('stockPlenty')
   if (s === 'tight') return t('stockTight')

@@ -37,9 +37,17 @@
           <el-button size="small" @click="$router.push('/products/' + row.id + '/edit')">{{
             t('common.edit')
           }}</el-button>
-          <el-button size="small" @click="$router.push('/products/' + row.id + '/cards')">{{
-            t('cards.title')
-          }}</el-button>
+          <el-tooltip
+            :disabled="row.delivery_type !== 'manual'"
+            :content="t('products.cardsDisabledForManual')"
+            placement="top"
+          >
+            <el-button
+              size="small"
+              :disabled="row.delivery_type === 'manual'"
+              @click="$router.push('/products/' + row.id + '/cards')"
+            >{{ t('cards.title') }}</el-button>
+          </el-tooltip>
         </template>
       </el-table-column>
     </el-table>
