@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"shop/internal/config"
@@ -41,6 +42,9 @@ func (s *stubSettingsStore) SettingsVersion() int  { return 1 }
 func TestSettingsServiceSavePaymentWithStub(t *testing.T) {
 	st := newStubSettingsStore()
 	svc := NewSettingsService(st, nil, config.Config{})
+	if err := svc.SavePayment(map[string]any{"payment_gateway": "bepusdt,hashpay"}); err != nil {
+		t.Fatalf("enable dual gateways: %v", err)
+	}
 	if err := svc.SavePayment(map[string]any{
 		"bepusdt_base_url":    "https://pay.example.com",
 		"fiat":                "cny",
@@ -190,6 +194,45 @@ func TestSettingsServiceDualGateway(t *testing.T) {
 	}
 	if !svc.GatewayEnabled("bepusdt") || !svc.GatewayEnabled("hashpay") {
 		t.Fatalf("both gateways must be enabled: %v", enabled)
+	}
+}
+
+// TestSettingsServiceGatewayMeta 网关显示名称/简介自定义保存与读取（空值回退默认）。
+func TestSettingsServiceGatewayMeta(t *testing.T) {
+	st := newStubSettingsStore()
+	svc := NewSettingsService(st, nil, config.Config{})
+	if err := svc.SavePayment(map[string]any{"payment_gateway": "bepusdt,hashpay"}); err != nil {
+		t.Fatalf("enable dual gateways: %v", err)
+	}
+	if err := svc.SavePayment(map[string]any{
+		"gateway_bepusdt_name": "USDT 网络",
+		"gateway_bepusdt_desc": "TRC20 / ERC20",
+		"gateway_hashpay_name": "加密支付",
+		"gateway_hashpay_desc": "多链 USDT/USDC",
+	}); err != nil {
+		t.Fatalf("save meta: %v", err)
+	}
+	if svc.GatewayDisplayName("bepusdt") != "USDT 网络" || svc.GatewayDisplayName("hashpay") != "加密支付" {
+		t.Fatalf("display name mismatch: %q / %q", svc.GatewayDisplayName("bepusdt"), svc.GatewayDisplayName("hashpay"))
+	}
+	name, desc := svc.GatewayMeta("bepusdt")
+	if name != "USDT 网络" || desc != "TRC20 / ERC20" {
+		t.Fatalf("bepusdt meta = %q / %q", name, desc)
+	}
+	meta := svc.AllGatewayMeta()
+	if meta["bepusdt"]["name"] != "USDT 网络" || meta["hashpay"]["description"] != "多链 USDT/USDC" {
+		t.Fatalf("all meta = %v", meta)
+	}
+	// 未配置时为空（前端回退默认文案）。
+	if svc.GatewayDisplayName("bepusdt") == "" {
+		t.Fatal("custom name should be read")
+	}
+	// 名称超长截断到 40 字符。
+	if err := svc.SavePayment(map[string]any{"gateway_hashpay_name": strings.Repeat("长", 60)}); err != nil {
+		t.Fatalf("save long name: %v", err)
+	}
+	if got := svc.GatewayDisplayName("hashpay"); len([]rune(got)) != 40 {
+		t.Fatalf("name not truncated: %d runes", len([]rune(got)))
 	}
 }
 

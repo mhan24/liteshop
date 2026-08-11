@@ -6,7 +6,7 @@
       <dt class="text-gray-500">{{ t('product') }}</dt><dd class="col-span-2">{{ order.product_name }} x{{ order.qty }}</dd>
       <dt class="text-gray-500">{{ t('amount') }}</dt><dd class="col-span-2">{{ money(order.amount_cents) }} {{ order.fiat }}</dd>
       <dt class="text-gray-500">{{ t('tradeType') }}</dt><dd class="col-span-2">{{ order.trade_type }}</dd>
-      <dt class="text-gray-500">{{ t('paymentGateway') }}</dt><dd class="col-span-2">{{ gatewayLabel(order.payment_gateway) }}</dd>
+      <dt class="text-gray-500">{{ t('paymentGateway') }}</dt><dd class="col-span-2">{{ gatewayLabel(order) }}</dd>
       <dt class="text-gray-500">{{ t('status') }}</dt><dd class="col-span-2">
         <span class="inline-flex items-center gap-1">
           {{ statusText(order.status) }}
@@ -60,8 +60,10 @@ function date(ts: number) { return siteDate(ts) }
 function statusText(status: string) {
   return (t(`orderStatus.${status}`) as string) || status
 }
-function gatewayLabel(gateway: string) {
-  return gateway === 'hashpay' ? t('gatewayHashpay') : t('gatewayBepusdt')
+function gatewayLabel(o: any) {
+  const name = o?.payment_gateway_name?.trim()
+  if (name) return name
+  return o?.payment_gateway === 'hashpay' ? t('gatewayHashpay') : t('gatewayBepusdt')
 }
 useHead({ title: t('orderDetail'), meta: [{ name: 'robots', content: 'noindex,nofollow' }] })
 

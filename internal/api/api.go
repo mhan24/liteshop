@@ -160,7 +160,7 @@ func productJSONPublic(p models.Product) map[string]any {
 	return out
 }
 
-func orderJSON(o models.Order) map[string]any {
+func (s *Server) orderJSON(o models.Order) map[string]any {
 	return map[string]any{
 		"id":                   o.ID,
 		"order_no":             o.OrderNo,
@@ -171,6 +171,7 @@ func orderJSON(o models.Order) map[string]any {
 		"fiat":                 o.Fiat,
 		"trade_type":           o.TradeType,
 		"payment_gateway":      o.PaymentGateway,
+		"payment_gateway_name": s.settings.GatewayDisplayName(o.PaymentGateway),
 		"buyer_contact":        o.BuyerContact,
 		"status":               o.Status,
 		"payment_status":       o.PaymentStatus,
@@ -228,6 +229,7 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"favicon_url":           s.settings.SiteFaviconURL(),
 		"payment_gateway":       s.settings.GatewayName(),
 		"payment_gateways":      s.settings.EnabledGateways(),
+		"payment_gateway_meta":  s.settings.AllGatewayMeta(),
 		"maintenance": map[string]any{
 			"enabled": enabled,
 			"message": s.settings.Get("maintenance_message"),
@@ -355,6 +357,7 @@ func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
 		"default_product_image": s.settings.DefaultProductImage(),
 		"site_title":            s.settings.SiteSettings().Title,
 		"payment_gateways":      s.settings.EnabledGateways(),
+		"payment_gateway_meta":  s.settings.AllGatewayMeta(),
 	})
 }
 
@@ -576,7 +579,7 @@ func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	owned := s.orderOwned(r, order)
-	item := orderJSON(order)
+	item := s.orderJSON(order)
 	if !owned {
 		// 未验证归属时不下发买家邮箱、支付地址等敏感字段。
 		delete(item, "buyer_contact")
@@ -1170,7 +1173,7 @@ func (s *Server) apiAdminOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []map[string]any{}
 	for _, o := range orders {
-		out = append(out, orderJSON(o))
+		out = append(out, s.orderJSON(o))
 	}
 	writeJSON(w, 200, map[string]any{"orders": out})
 }
@@ -1205,7 +1208,7 @@ func (s *Server) apiAdminOrder(w http.ResponseWriter, r *http.Request) {
 			"created_at": e.CreatedAt,
 		})
 	}
-	writeJSON(w, 200, map[string]any{"order": orderJSON(o), "cards": list, "logs": logList})
+	writeJSON(w, 200, map[string]any{"order": s.orderJSON(o), "cards": list, "logs": logList})
 }
 
 func (s *Server) apiAdminOrderExpire(w http.ResponseWriter, r *http.Request) {
@@ -1387,6 +1390,10 @@ func (s *Server) apiAdminSettings(w http.ResponseWriter, r *http.Request) {
 		"hashpay_currency":         cfg.HashPayCurrency,
 		"hashpay_notify_path":      s.settings.HashPayNotifyPath(),
 		"hashpay_notify_url":       hashpayNotifyURL,
+		"gateway_bepusdt_name":     s.settings.Get("gateway_bepusdt_name"),
+		"gateway_bepusdt_desc":     s.settings.Get("gateway_bepusdt_desc"),
+		"gateway_hashpay_name":     s.settings.Get("gateway_hashpay_name"),
+		"gateway_hashpay_desc":     s.settings.Get("gateway_hashpay_desc"),
 	})
 }
 

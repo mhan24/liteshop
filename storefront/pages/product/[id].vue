@@ -44,8 +44,8 @@
                 ]"
                 @click="form.gateway = 'bepusdt'"
               >
-                <span class="block font-semibold text-sm">{{ t('gatewayBepusdt') }}</span>
-                <span class="block text-xs text-gray-500 mt-0.5">{{ t('gatewayBepusdtDesc') }}</span>
+                <span class="block font-semibold text-sm">{{ gatewayTitle('bepusdt') }}</span>
+                <span class="block text-xs text-gray-500 mt-0.5">{{ gatewayDesc('bepusdt') }}</span>
               </button>
               <button
                 v-if="paymentGateways.includes('hashpay')"
@@ -58,8 +58,8 @@
                 ]"
                 @click="form.gateway = 'hashpay'"
               >
-                <span class="block font-semibold text-sm">{{ t('gatewayHashpay') }}</span>
-                <span class="block text-xs text-gray-500 mt-0.5">{{ t('gatewayHashpayDesc') }}</span>
+                <span class="block font-semibold text-sm">{{ gatewayTitle('hashpay') }}</span>
+                <span class="block text-xs text-gray-500 mt-0.5">{{ gatewayDesc('hashpay') }}</span>
               </button>
             </div>
           </div>
@@ -207,6 +207,18 @@ const paymentGateways = computed(() => {
   const list: string[] = (data.value as any)?.payment_gateways || []
   return list.length ? list : [(data.value as any)?.payment_gateway || 'bepusdt']
 })
+// 网关自定义名称/简介（后台配置，空值回退默认文案）。
+const gatewayMeta = computed(() => (data.value as any)?.payment_gateway_meta || {})
+function gatewayTitle(gateway: string) {
+  const name = gatewayMeta.value[gateway]?.name?.trim()
+  if (name) return name
+  return gateway === 'hashpay' ? t('gatewayHashpay') : t('gatewayBepusdt')
+}
+function gatewayDesc(gateway: string) {
+  const desc = gatewayMeta.value[gateway]?.description?.trim()
+  if (desc) return desc
+  return gateway === 'hashpay' ? t('gatewayHashpayDesc') : t('gatewayBepusdtDesc')
+}
 // trade_type 形如 usdt.trc20 → 币种 USDT / 网络 TRC20；未知格式原样展示
 const networkCoin = computed(() => (t: string) => {
   const coin = t.split('.')[0]

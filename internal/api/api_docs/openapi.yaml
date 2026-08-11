@@ -306,6 +306,16 @@ components:
             - bepusdt
             - hashpay
           description: 启用的支付网关列表
+        payment_gateway_meta:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+          description: 网关自定义显示名称与简介（后台可配置，空值由前台回退默认文案）
         maintenance:
           type: object
           properties:
@@ -559,6 +569,15 @@ paths:
                       enum:
                       - bepusdt
                       - hashpay
+                  payment_gateway_meta:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        description:
+                          type: string
                   turnstile_site_key:
                     type: string
                   default_product_image:
@@ -1388,6 +1407,18 @@ paths:
                   type: string
                 hashpay_notify_path:
                   type: string
+                gateway_bepusdt_name:
+                  type: string
+                  description: BEpusdt 前台显示名称（留空回退默认）
+                gateway_bepusdt_desc:
+                  type: string
+                  description: BEpusdt 前台简介（留空回退默认）
+                gateway_hashpay_name:
+                  type: string
+                  description: HashPay 前台显示名称（留空回退默认）
+                gateway_hashpay_desc:
+                  type: string
+                  description: HashPay 前台简介（留空回退默认）
       responses:
         '200':
           description: ok

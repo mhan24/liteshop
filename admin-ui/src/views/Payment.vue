@@ -8,6 +8,12 @@
 
       <el-divider>{{ t('payment.bepusdtSection') }}</el-divider>
       <template v-if="enabled.bepusdt">
+        <el-form-item :label="t('payment.gatewayName')"
+          ><el-input v-model="form.gateway_bepusdt_name" :maxlength="40" :placeholder="t('payment.gatewayNamePlaceholder')"
+        /></el-form-item>
+        <el-form-item :label="t('payment.gatewayDesc')"
+          ><el-input v-model="form.gateway_bepusdt_desc" type="textarea" :rows="2" :maxlength="200"
+        /></el-form-item>
         <el-form-item :label="t('payment.baseUrl')"><el-input v-model="form.bepusdt_base_url" /></el-form-item>
         <el-form-item :label="t('payment.apiToken')"
           ><el-input
@@ -31,6 +37,12 @@
 
       <el-divider>{{ t('payment.hashpaySection') }}</el-divider>
       <template v-if="enabled.hashpay">
+        <el-form-item :label="t('payment.gatewayName')"
+          ><el-input v-model="form.gateway_hashpay_name" :maxlength="40" :placeholder="t('payment.gatewayNamePlaceholder')"
+        /></el-form-item>
+        <el-form-item :label="t('payment.gatewayDesc')"
+          ><el-input v-model="form.gateway_hashpay_desc" type="textarea" :rows="2" :maxlength="200"
+        /></el-form-item>
         <el-form-item :label="t('payment.hashpayBaseUrl')"><el-input v-model="form.hashpay_base_url" /></el-form-item>
         <el-form-item :label="t('payment.hashpayMerchantId')"><el-input v-model="form.hashpay_merchant_id" /></el-form-item>
         <el-form-item :label="t('payment.hashpayPrivateKey')"

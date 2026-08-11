@@ -197,6 +197,12 @@ export interface paths {
                             /** @enum {string} */
                             payment_gateway?: "bepusdt" | "hashpay";
                             payment_gateways?: ("bepusdt" | "hashpay")[];
+                            payment_gateway_meta?: {
+                                [key: string]: {
+                                    name?: string;
+                                    description?: string;
+                                };
+                            };
                             turnstile_site_key?: string;
                             default_product_image?: string;
                             site_title?: string;
@@ -1806,6 +1812,14 @@ export interface paths {
                         hashpay_currency?: string;
                         hashpay_notify_url?: string;
                         hashpay_notify_path?: string;
+                        /** @description BEpusdt 前台显示名称（留空回退默认） */
+                        gateway_bepusdt_name?: string;
+                        /** @description BEpusdt 前台简介（留空回退默认） */
+                        gateway_bepusdt_desc?: string;
+                        /** @description HashPay 前台显示名称（留空回退默认） */
+                        gateway_hashpay_name?: string;
+                        /** @description HashPay 前台简介（留空回退默认） */
+                        gateway_hashpay_desc?: string;
                     };
                 };
             };
@@ -3029,6 +3043,13 @@ export interface components {
             payment_gateway?: string;
             /** @description 启用的支付网关列表 */
             payment_gateways?: ("bepusdt" | "hashpay")[];
+            /** @description 网关自定义显示名称与简介（后台可配置，空值由前台回退默认文案） */
+            payment_gateway_meta?: {
+                [key: string]: {
+                    name?: string;
+                    description?: string;
+                };
+            };
             maintenance?: {
                 enabled?: boolean;
                 message?: string;

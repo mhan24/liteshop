@@ -138,6 +138,32 @@ func (s *SettingsService) GatewayName() string {
 	return "bepusdt"
 }
 
+// GatewayDisplayName 返回网关的自定义显示名称（未配置时为空，前端回退默认文案）。
+func (s *SettingsService) GatewayDisplayName(gateway string) string {
+	if gateway == "hashpay" {
+		return s.Get("gateway_hashpay_name")
+	}
+	return s.Get("gateway_bepusdt_name")
+}
+
+// GatewayMeta 返回网关自定义名称与简介（可为空）。
+func (s *SettingsService) GatewayMeta(gateway string) (name, description string) {
+	if gateway == "hashpay" {
+		return s.Get("gateway_hashpay_name"), s.Get("gateway_hashpay_desc")
+	}
+	return s.Get("gateway_bepusdt_name"), s.Get("gateway_bepusdt_desc")
+}
+
+// AllGatewayMeta 返回所有启用网关的自定义名称/简介（供前台渲染支付方式选择）。
+func (s *SettingsService) AllGatewayMeta() map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, g := range s.EnabledGateways() {
+		name, desc := s.GatewayMeta(g)
+		out[g] = map[string]string{"name": name, "description": desc}
+	}
+	return out
+}
+
 // EnabledGatewaysFrom 解析并校验逗号分隔的网关启用列表。
 // 非法值忽略；空结果回退 bepusdt（兼容存量/缺省配置）。
 func EnabledGatewaysFrom(raw string) []string {
@@ -325,6 +351,23 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 			return errors.New("HashPay 私钥格式错误：请粘贴 -----BEGIN PRIVATE KEY----- 开头的商户私钥（不是公钥）")
 		}
 		_ = s.SetSecret("hashpay_private_key", v)
+	}
+	// 网关显示名称 / 简介（前台支付方式选择与订单展示使用，留空回退默认文案）。
+	for _, field := range []string{
+		"gateway_bepusdt_name", "gateway_bepusdt_desc",
+		"gateway_hashpay_name", "gateway_hashpay_desc",
+	} {
+		if v, ok := input[field]; ok {
+			cleaned := strings.TrimSpace(str(v))
+			if field == "gateway_bepusdt_name" || field == "gateway_hashpay_name" {
+				if len([]rune(cleaned)) > 40 {
+					cleaned = string([]rune(cleaned)[:40])
+				}
+			} else if len([]rune(cleaned)) > 200 {
+				cleaned = string([]rune(cleaned)[:200])
+			}
+			_ = s.Set(field, cleaned)
+		}
 	}
 	return nil
 }
