@@ -2,7 +2,7 @@
 
 中文版：[README.md](README.md) ｜ Changelog: [CHANGELOG.md](CHANGELOG.md)
 
-**LiteShop v0.2.0 (codename: Moon)** — an automated digital-goods delivery (card / activation-code) shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) crypto payment gateway. The buyer storefront uses Nuxt 3 SSR + Tailwind; the admin panel uses Vue 3 + TypeScript + Element Plus + Pinia; Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
+**LiteShop v0.2.0 (codename: Moon)** — an automated digital-goods delivery (card / activation-code) shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) and [HashPay](https://github.com/TGDash/HashPay) crypto payment gateways (switchable from the admin panel). The buyer storefront uses Nuxt 3 SSR + Tailwind; the admin panel uses Vue 3 + TypeScript + Element Plus + Pinia; Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
 
 > Version history: v0.1.0 codename **Earth**; v0.2.0 codename **Moon** — layering, abstractions, observability, and stability upgrades, see [CHANGELOG](CHANGELOG.md).
 >
@@ -30,7 +30,7 @@
 - Cards: import (dedupe) / delete / export
 - Orders: view / CSV export / mark expired / cancel / set status / resend / batch resend / redeliver
 - Coupons: fixed / percent, minimum amount, max uses, product scope, validity window; **100% coupons complete the order automatically and deliver cards immediately**
-- Payment: gateway base URL / token / trade types / timeout / callback URL (changes apply immediately)
+- Payment: **gateway switch (BEpusdt / HashPay)** with per-gateway config (base URL / token / merchant private key / trade types / currency / timeout / callback URL, changes apply immediately)
 - Notifications: SMTP / Telegram / Webhook + **event templates** (order created / payment success / delivered / low stock / system error) + admin notification email + test buttons
 - Site: title / announcement / **public base URL** / logo / favicon / SEO / links / copyright / privacy / terms / Turnstile
 - Maintenance mode: toggle + notice + unlock password (hashed + AES-encrypted storage)
@@ -46,7 +46,7 @@
 - Domain events: typed events in `internal/events` (OrderPaid / OrderExpired / DeliveryFailed / LowStock …) with versioned payloads and **Fanout consumer isolation** — the service only publishes events, no scattered `bus.Publish`
 - **Outbox pattern**: payment-success/delivery events are written to `outbox_events` **in the same transaction** as the order state change; a worker publishes them; 5 consecutive failures move to `dead_events`; published events are purged after 30 days
 - Idempotency ledger: payment callbacks register the gateway trade ID as a unique key in `processed_events` (same transaction as the state change) — duplicates are processed once
-- Payment abstraction: order business depends only on `payment.Gateway`; currently BEpusdt, switching gateways does not touch business code
+- Payment abstraction: order business depends only on `payment.Gateway`; built-in BEpusdt and HashPay implementations, switchable from the admin panel without touching business code
 - Task system: goroutine + channel (mail / Telegram / Webhook) + ticker; panic isolation, startup compensation, `job_runs` records
 - Background jobs: auto-expire unpaid orders, retry failed mail, session/log/outbox/queue cleanup, daily verified backup
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files; request_id / order_id / trace_id correlation
@@ -117,13 +117,13 @@ HTTP handler (internal/api)
 ```
 Order → lock cards (atomic) → create transaction (payment.Gateway) → open checkout in a new tab
   → redirect to the order page (auto-polling)
-  → user pays → gateway callback (path changeable at runtime) → verify signature + processed_events idempotency → order paid
+  → user pays → gateway callback (path changeable at runtime; BEpusdt MD5 signature / HashPay RSA-encrypted envelope) → verify + processed_events idempotency → order paid
   → write outbox in the same transaction → worker sends delivery notification (mail/Telegram/Webhook) → cards shown
 ```
 
 - Cancel / expire: release stock + call the gateway `cancel-transaction` (atomic);
 - Transaction boundaries: checkout is a single transaction (create order + lock cards + decrement stock); failures atomically mark `payment_failed` and release cards; payment success is a single transaction and events/mail are sent **only after COMMIT**;
-- Switching gateways (other USDT / Stripe / PayPal) only requires a new `Gateway` adapter;
+- Switching gateways (BEpusdt ↔ HashPay, or future USDT / Stripe / PayPal) only requires a new `Gateway` adapter;
 - **payment.log** records every creation/callback with request_id / trace_id.
 
 ---
@@ -141,7 +141,7 @@ Order → lock cards (atomic) → create transaction (payment.Gateway) → open 
 | Logging | go.uber.org/zap + lumberjack |
 | Tasks | goroutine + channel + ticker (no MQ), Outbox pattern |
 | Reverse proxy | Caddy |
-| Payment | BEpusdt (behind the `payment.Gateway` interface) |
+| Payment | BEpusdt / HashPay (behind the `payment.Gateway` interface, switchable in admin) |
 | Security | Cloudflare Turnstile |
 
 ---
@@ -183,7 +183,7 @@ AGENTS.md               engineering conventions
 
 - Go 1.25.12+ (govulncheck baseline)
 - Node.js 18+ / npm
-- A BEpusdt instance (or another `Gateway` implementation)
+- A BEpusdt instance or a HashPay instance (runs on Cloudflare Workers; the merchant panel generates an RSA key pair)
 
 ### Local development
 
@@ -268,6 +268,15 @@ Install-time variables: `DOMAIN` (required), `EMAIL`, `BRANCH`, `SKIP_SSL=1` (pl
 
 > Runtime configuration is stored in the database via `/setup` and the admin panel; the app reads no application-level environment variables. The project does not rely on Docker.
 
+### Adding HashPay
+
+1. Deploy [HashPay](https://github.com/TGDash/HashPay) to Cloudflare Workers and finish its setup;
+2. In the HashPay merchant panel create a **Native API** merchant, save the **private key** (shown only once), and set the merchant **Callback URL** to LiteShop's HashPay notify URL (visible on the payment settings page, default `https://your-domain/notify/hashpay`);
+3. In LiteShop admin → Payment settings, switch the gateway to **HashPay**, fill in the HashPay site URL, merchant ID, private key, and currency (default USD), then save;
+4. In HashPay mode the storefront hides the payment-method selector (network/asset is chosen on HashPay's hosted checkout); orders are billed in the HashPay currency and cards are delivered automatically on payment — idempotency matches BEpusdt.
+
+> The private key is shown only once when the merchant is created; after saving it is AES-encrypted in the `secrets` table; leave blank to keep the current key.
+
 ### Build deployment (build-release.sh)
 
 ```bash
@@ -286,7 +295,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 
 - Unit & integration: `go test ./...` (migrations, signatures, hashing, state machine, coupons/free orders, sessions, lockout, task bus, scheduler, panic isolation, backup verification, mail retry, health, security headers, concurrency stress, restore drill, legacy upgrade, events/idempotency/dead-letter)
 - **Mock tests**: service depends on interfaces, so it can be tested without a database
-- **Integration tests** (`internal/integration` + `internal/testutil`): payment callback delivery, duplicate-callback idempotency, cancel/expiry stock release + gateway cancellation, real HTTP callback route (signature / dynamic path / bad signature), **100 concurrent buyers for the last card**, outbox dead-letter, backup restore drill, old-DB upgrade
+- **Integration tests** (`internal/integration` + `internal/testutil`): BEpusdt/HashPay payment callback delivery, duplicate-callback idempotency, cancel/expiry stock release + gateway cancellation, real HTTP callback route (signature / RSA envelope decryption / dynamic path / bad signature), **100 concurrent buyers for the last card**, outbox dead-letter, backup restore drill, old-DB upgrade
 - **Benchmarks**: `go test -bench=. ./internal/integration/` (order ~6.4ms / callback ~6.8ms / query ~21µs baseline)
 - **Dependency baseline**: `govulncheck ./...` clean (Go 1.25.12); `npm audit` 0 runtime vulnerabilities (admin-ui js-yaml advisory is build-time only, unreachable)
 - CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + gen:api diff check + storefront/admin builds

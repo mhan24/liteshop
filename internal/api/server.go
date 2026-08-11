@@ -111,6 +111,7 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST "+s.settings.NotifyPath(), s.handlePaymentNotify)
+	mux.HandleFunc("POST "+s.settings.HashPayNotifyPath(), s.handleHashPayNotify)
 	// 兜底：回调路径可在后台运行时修改，这里按"当前配置路径"动态匹配，
 	// 避免改路径后新交易回调 404（无需重启即生效）。
 	mux.HandleFunc("/{path...}", s.handleDynamicPath)
@@ -146,12 +147,16 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 func (s *Server) logStartupInfo() {
 	payCfg := s.settings.PaymentConfig()
 	paymentStatus := "ok"
-	if payCfg.BepusdtBaseURL == "" || payCfg.BepusdtToken == "" {
+	if payCfg.PaymentGateway == "hashpay" {
+		if payCfg.HashPayMerchantID == "" || payCfg.HashPayPrivateKey == "" {
+			paymentStatus = "not_configured"
+		}
+	} else if payCfg.BepusdtBaseURL == "" || payCfg.BepusdtToken == "" {
 		paymentStatus = "not_configured"
 	}
 	logging.App().Sugar().Infof("LiteShop %s", version.String())
 	logging.App().Sugar().Infof("database: ok (path=%s)", s.dbPath)
-	logging.App().Sugar().Infof("payment: %s (gateway=%s)", paymentStatus, payCfg.BepusdtBaseURL)
+	logging.App().Sugar().Infof("payment: %s (gateway=%s)", paymentStatus, payCfg.PaymentGateway)
 	logging.App().Sugar().Infof("listen: %s", s.cfg.ListenAddr)
 	logging.App().Sugar().Infof("admin entry: %s/admin", s.cfg.PublicBaseURL)
 	logging.App().Sugar().Infof("notify url: %s", payCfg.NotifyURL)
@@ -202,7 +207,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	payCfg := s.settings.PaymentConfig()
 	paymentStatus := "ok"
-	if payCfg.BepusdtBaseURL == "" || payCfg.BepusdtToken == "" {
+	if payCfg.PaymentGateway == "hashpay" {
+		if payCfg.HashPayMerchantID == "" || payCfg.HashPayPrivateKey == "" {
+			paymentStatus = "not_configured"
+		}
+	} else if payCfg.BepusdtBaseURL == "" || payCfg.BepusdtToken == "" {
 		paymentStatus = "not_configured"
 	}
 	var dbSize int64
@@ -338,6 +347,9 @@ func pathID(r *http.Request, name string) (int64, error) {
 // paymentGateway 按当前数据库配置构造支付网关（每次调用读取最新配置）。
 func (s *Server) paymentGateway() payment.Gateway {
 	cfg := s.settings.PaymentConfig()
+	if cfg.PaymentGateway == "hashpay" {
+		return payment.NewHashPay(cfg.HashPayBaseURL, cfg.HashPayMerchantID, cfg.HashPayPrivateKey, cfg.HashPayCurrency)
+	}
 	return payment.NewBEPusdt(cfg.BepusdtBaseURL, cfg.BepusdtToken)
 }
 
@@ -449,7 +461,9 @@ func (s *Server) handlePaymentNotify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", 400)
 		return
 	}
-	params, err := s.paymentGateway().VerifyCallback(body)
+	// 回调路径决定网关：/notify/bepusdt 一律用 BEpusdt 验签，
+	// 与当前启用的下单网关无关，避免切网关后旧交易回调无法处理。
+	params, err := payment.NewBEPusdt(payCfg.BepusdtBaseURL, payCfg.BepusdtToken).VerifyCallback(body)
 	if err != nil {
 		logging.Payment().Warn("bepusdt callback verify failed",
 			zap.String("request_id", logging.RequestID(r.Context())),
@@ -498,10 +512,77 @@ func (s *Server) handlePaymentNotify(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+// handleHashPayNotify 处理 HashPay 回调（RSA-OAEP-256+A256GCM 加密信封）。
+// HashPay 会向商户后台配置的 callback 地址投递订单状态变化：
+// paid → 确认支付并发卡；expired/invalid → 关闭订单释放库存。
+func (s *Server) handleHashPayNotify(w http.ResponseWriter, r *http.Request) {
+	payCfg := s.settings.PaymentConfig()
+	if payCfg.HashPayMerchantID == "" || payCfg.HashPayPrivateKey == "" {
+		http.Error(w, "hashpay not configured", 500)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "bad body", 400)
+		return
+	}
+	gw := payment.NewHashPay(payCfg.HashPayBaseURL, payCfg.HashPayMerchantID, payCfg.HashPayPrivateKey, payCfg.HashPayCurrency)
+	params, err := gw.VerifyCallback(body)
+	if err != nil {
+		logging.Payment().Warn("hashpay callback verify failed",
+			zap.String("request_id", logging.RequestID(r.Context())),
+			zap.Int("body_bytes", len(body)),
+			zap.String("result", "verify_failed"),
+			zap.Error(err),
+		)
+		http.Error(w, "invalid signature", 400)
+		return
+	}
+	logging.Payment().Info("hashpay callback",
+		zap.String("request_id", logging.RequestID(r.Context())),
+		zap.String("order_no", params["order_id"]),
+		zap.String("trade_id", params["trade_id"]),
+		zap.String("trace_id", params["trade_id"]),
+		zap.String("block_transaction_id", params["block_transaction_id"]),
+		zap.String("status", params["status"]),
+		zap.Time("callback_time", time.Now()),
+	)
+	switch params["status"] {
+	case "paid":
+		order, _, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], params["trade_id"], params["block_transaction_id"])
+		if err != nil {
+			logging.Payment().Error("payment callback error",
+				zap.String("request_id", logging.RequestID(r.Context())),
+				zap.String("order_no", params["order_id"]),
+				zap.String("result", "error"),
+				zap.Error(err),
+			)
+			s.notifySvc.SystemError("HashPay 支付回调处理异常 order=" + params["order_id"] + ": " + err.Error())
+		} else {
+			logging.Payment().Info("payment delivered",
+				zap.String("request_id", logging.RequestID(r.Context())),
+				zap.String("order_no", order.OrderNo),
+				zap.Int64("amount_cents", order.AmountCents),
+				zap.String("trade_id", order.TradeID),
+				zap.String("trace_id", order.TradeID),
+				zap.String("result", map[bool]string{true: "ok", false: "noop"}[changed]),
+			)
+		}
+	case "expired", "invalid", "cancelled":
+		s.orders.HandleGatewayCancel(params["order_id"])
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
+
 // handleDynamicPath 兜底路由：仅处理与当前配置一致的支付回调路径，其余 404。
 func (s *Server) handleDynamicPath(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost && r.URL.Path == s.settings.NotifyPath() {
 		s.handlePaymentNotify(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == s.settings.HashPayNotifyPath() {
+		s.handleHashPayNotify(w, r)
 		return
 	}
 	http.NotFound(w, r)

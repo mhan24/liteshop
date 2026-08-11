@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "LiteShop API",
-    "description": "LiteShop 自动发卡系统 API。公共端点无需认证；管理端点需先登录获取会话 Cookie（角色要求：admin / operator / viewer）。支付回调路径可在后台配置（默认 /notify/bepusdt）。",
+    "description": "LiteShop 自动发卡系统 API。公共端点无需认证；管理端点需先登录获取会话 Cookie（角色要求：admin / operator / viewer）。支付回调路径可在后台配置（默认 /notify/bepusdt、/notify/hashpay）。",
     "version": "0.1.0",
     "contact": { "name": "LiteShop", "url": "https://github.com/mhan24/liteshop" }
   },
@@ -162,6 +162,7 @@
           "turnstile_site_key": { "type": "string" },
           "logo_url": { "type": "string" },
           "favicon_url": { "type": "string" },
+          "payment_gateway": { "type": "string", "enum": ["bepusdt", "hashpay"], "description": "当前启用的支付网关" },
           "maintenance": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "message": { "type": "string" } } }
         }
       },
@@ -383,6 +384,18 @@
           "content": { "application/json": { "schema": { "type": "object", "properties": { "order_id": { "type": "string" }, "trade_id": { "type": "string" }, "block_transaction_id": { "type": "string" }, "status": { "type": "string" }, "signature": { "type": "string" } } } } }
         },
         "responses": { "200": { "description": "ok" }, "400": { "description": "验签失败" } }
+      }
+    },
+    "/notify/hashpay": {
+      "post": {
+        "tags": ["webhook"],
+        "summary": "HashPay 支付回调",
+        "description": "路径可在后台配置（默认 /notify/hashpay）。请求体为 RSA-OAEP-256+A256GCM 加密信封（alg/key/iv/data 均为 Base64），用商户私钥解密后读取 {timestamp, payload}；payload.status=paid 时确认支付并发卡，expired/invalid 时关闭订单释放库存。",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "alg": { "type": "string" }, "key": { "type": "string" }, "iv": { "type": "string" }, "data": { "type": "string" } } } } }
+        },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "回调解密/验签失败" } }
       }
     },
     "/api/v1/admin/login": {
@@ -650,7 +663,7 @@
         "tags": ["admin"],
         "security": [{ "sessionCookie": [] }],
         "summary": "支付设置保存（需 admin）",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "bepusdt_base_url": { "type": "string" }, "bepusdt_api_token": { "type": "string" }, "fiat": { "type": "string" }, "trade_types": { "type": "string" }, "bepusdt_timeout_sec": { "type": "integer" }, "shop_public_base_url": { "type": "string" }, "bepusdt_notify_url": { "type": "string" }, "bepusdt_notify_path": { "type": "string" } } } } } },
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "payment_gateway": { "type": "string", "enum": ["bepusdt", "hashpay"], "description": "当前启用的支付网关" }, "bepusdt_base_url": { "type": "string" }, "bepusdt_api_token": { "type": "string" }, "fiat": { "type": "string" }, "trade_types": { "type": "string" }, "bepusdt_timeout_sec": { "type": "integer" }, "shop_public_base_url": { "type": "string" }, "bepusdt_notify_url": { "type": "string" }, "bepusdt_notify_path": { "type": "string" }, "hashpay_base_url": { "type": "string" }, "hashpay_merchant_id": { "type": "string" }, "hashpay_private_key": { "type": "string", "description": "HashPay 商户私钥 PEM（留空保持不变）" }, "hashpay_currency": { "type": "string" }, "hashpay_notify_url": { "type": "string" }, "hashpay_notify_path": { "type": "string" } } } } } },
         "responses": { "200": { "description": "ok" }, "400": { "description": "参数错误" } }
       }
     },

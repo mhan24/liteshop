@@ -1,7 +1,8 @@
 openapi: 3.0.3
 info:
   title: LiteShop API
-  description: LiteShop 自动发卡系统 API。公共端点无需认证；管理端点需先登录获取会话 Cookie（角色要求：admin / operator / viewer）。支付回调路径可在后台配置（默认 /notify/bepusdt）。
+  description: LiteShop 自动发卡系统 API。公共端点无需认证；管理端点需先登录获取会话 Cookie（角色要求：admin / operator
+    / viewer）。支付回调路径可在后台配置（默认 /notify/bepusdt、/notify/hashpay）。
   version: 0.1.0
   contact:
     name: LiteShop
@@ -294,6 +295,12 @@ components:
           type: string
         favicon_url:
           type: string
+        payment_gateway:
+          type: string
+          enum:
+          - bepusdt
+          - hashpay
+          description: 当前启用的支付网关
         maintenance:
           type: object
           properties:
@@ -706,7 +713,8 @@ paths:
       tags:
       - webhook
       summary: 支付网关回调
-      description: 路径可在后台配置（默认 /notify/bepusdt）。MD5 验签后更新订单状态并发卡；status=2 支付成功，status=3 网关侧取消。
+      description: 路径可在后台配置（默认 /notify/bepusdt）。MD5 验签后更新订单状态并发卡；status=2 支付成功，status=3
+        网关侧取消。
       requestBody:
         required: true
         content:
@@ -729,12 +737,41 @@ paths:
           description: ok
         '400':
           description: 验签失败
+  /notify/hashpay:
+    post:
+      tags:
+      - webhook
+      summary: HashPay 支付回调
+      description: 路径可在后台配置（默认 /notify/hashpay）。请求体为 RSA-OAEP-256+A256GCM 加密信封（alg/key/iv/data
+        均为 Base64），用商户私钥解密后读取 {timestamp, payload}；payload.status=paid 时确认支付并发卡，expired/invalid
+        时关闭订单释放库存。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                alg:
+                  type: string
+                key:
+                  type: string
+                iv:
+                  type: string
+                data:
+                  type: string
+      responses:
+        '200':
+          description: ok
+        '400':
+          description: 回调解密/验签失败
   /api/v1/admin/login:
     post:
       tags:
       - admin
       summary: 管理员登录
-      description: 成功设置会话 Cookie；已启用 TOTP 且未提供 otp 时返回 totp_required=true 与待验证 token。连续失败 5 次锁定 10 分钟。
+      description: 成功设置会话 Cookie；已启用 TOTP 且未提供 otp 时返回 totp_required=true 与待验证 token。连续失败
+        5 次锁定 10 分钟。
       requestBody:
         required: true
         content:
@@ -1024,7 +1061,7 @@ paths:
               properties:
                 status:
                   type: string
-                  description: available（可用）/ locked（锁定）/ sold（已售出）/ disabled（停用）
+                  description: available/locked/sold/disabled
       responses:
         '200':
           description: ok
@@ -1277,6 +1314,12 @@ paths:
             schema:
               type: object
               properties:
+                payment_gateway:
+                  type: string
+                  enum:
+                  - bepusdt
+                  - hashpay
+                  description: 当前启用的支付网关
                 bepusdt_base_url:
                   type: string
                 bepusdt_api_token:
@@ -1292,6 +1335,19 @@ paths:
                 bepusdt_notify_url:
                   type: string
                 bepusdt_notify_path:
+                  type: string
+                hashpay_base_url:
+                  type: string
+                hashpay_merchant_id:
+                  type: string
+                hashpay_private_key:
+                  type: string
+                  description: HashPay 商户私钥 PEM（留空保持不变）
+                hashpay_currency:
+                  type: string
+                hashpay_notify_url:
+                  type: string
+                hashpay_notify_path:
                   type: string
       responses:
         '200':

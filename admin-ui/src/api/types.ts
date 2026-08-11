@@ -684,6 +684,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notify/hashpay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * HashPay 支付回调
+         * @description 路径可在后台配置（默认 /notify/hashpay）。请求体为 RSA-OAEP-256+A256GCM 加密信封（alg/key/iv/data 均为 Base64），用商户私钥解密后读取 {timestamp, payload}；payload.status=paid 时确认支付并发卡，expired/invalid 时关闭订单释放库存。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        alg?: string;
+                        key?: string;
+                        iv?: string;
+                        data?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description ok */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 回调解密/验签失败 */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/login": {
         parameters: {
             query?: never;
@@ -1231,6 +1284,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/cards/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 手动设置卡密状态（需 operator+，available/locked/sold/disabled） */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description available/locked/sold/disabled */
+                        status?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description ok */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 卡密不存在或已绑定订单 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/orders": {
         parameters: {
             query?: never;
@@ -1593,6 +1696,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/orders/{id}/deliver": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 人工发货（需 operator+，人工手动交付订单：待发货 → 已发货并通知买家） */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description 发货内容（卡密 / 交付说明） */
+                        content?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description ok */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/settings": {
         parameters: {
             query?: never;
@@ -1631,6 +1777,11 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /**
+                         * @description 当前启用的支付网关
+                         * @enum {string}
+                         */
+                        payment_gateway?: "bepusdt" | "hashpay";
                         bepusdt_base_url?: string;
                         bepusdt_api_token?: string;
                         fiat?: string;
@@ -1639,6 +1790,13 @@ export interface paths {
                         shop_public_base_url?: string;
                         bepusdt_notify_url?: string;
                         bepusdt_notify_path?: string;
+                        hashpay_base_url?: string;
+                        hashpay_merchant_id?: string;
+                        /** @description HashPay 商户私钥 PEM（留空保持不变） */
+                        hashpay_private_key?: string;
+                        hashpay_currency?: string;
+                        hashpay_notify_url?: string;
+                        hashpay_notify_path?: string;
                     };
                 };
             };
@@ -2858,6 +3016,11 @@ export interface components {
             turnstile_site_key?: string;
             logo_url?: string;
             favicon_url?: string;
+            /**
+             * @description 当前启用的支付网关
+             * @enum {string}
+             */
+            payment_gateway?: "bepusdt" | "hashpay";
             maintenance?: {
                 enabled?: boolean;
                 message?: string;

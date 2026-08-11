@@ -16,6 +16,7 @@ type PaymentConfig struct {
 	TimeoutSec    int
 	Fiat          string
 	TradeTypes    []string
+	Gateway       string // bepusdt / hashpay（幂等台账前缀）
 }
 
 // OrderService 订单业务逻辑（按职责拆分到 order_*.go 小文件）。

@@ -18,7 +18,7 @@ func newStubSettingsStore() *stubSettingsStore {
 	return &stubSettingsStore{
 		settings: map[string]string{},
 		secrets:  map[string]string{},
-		keys:     []string{"bepusdt_api_token", "smtp_password", "telegram_bot_token", "webhook_secret", "turnstile_secret", "maintenance_password"},
+		keys:     []string{"bepusdt_api_token", "smtp_password", "telegram_bot_token", "webhook_secret", "turnstile_secret", "maintenance_password", "hashpay_private_key"},
 	}
 }
 
@@ -79,6 +79,65 @@ func TestSettingsServiceSavePaymentInvalid(t *testing.T) {
 	}
 	if len(st.settings) != 0 {
 		t.Fatalf("invalid input must not write anything: %v", st.settings)
+	}
+}
+
+// TestSettingsServiceSaveHashPay 保存 HashPay 配置：私钥进 secrets，网关切换生效。
+func TestSettingsServiceSaveHashPay(t *testing.T) {
+	st := newStubSettingsStore()
+	svc := NewSettingsService(st, security.NewCipher("test-secret"), config.Config{})
+	if err := svc.SavePayment(map[string]any{
+		"payment_gateway":     "hashpay",
+		"hashpay_base_url":    "https://pay.hashpay.test/",
+		"hashpay_merchant_id": "merchant-1",
+		"hashpay_private_key": "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
+		"hashpay_currency":    "usd",
+		"hashpay_notify_path": "/cb/hashpay",
+	}); err != nil {
+		t.Fatalf("save hashpay: %v", err)
+	}
+	if svc.GatewayName() != "hashpay" {
+		t.Fatalf("gateway = %q, want hashpay", svc.GatewayName())
+	}
+	if st.settings["hashpay_base_url"] != "https://pay.hashpay.test" {
+		t.Fatalf("hashpay base url = %q", st.settings["hashpay_base_url"])
+	}
+	if st.settings["hashpay_currency"] != "USD" {
+		t.Fatalf("hashpay currency = %q", st.settings["hashpay_currency"])
+	}
+	if st.settings["hashpay_notify_path"] != "/cb/hashpay" {
+		t.Fatalf("hashpay notify path = %q", st.settings["hashpay_notify_path"])
+	}
+	if st.secrets["hashpay_private_key"] == "" {
+		t.Fatal("hashpay private key not stored in secrets")
+	}
+	if !svc.IsSecretKey("hashpay_private_key") {
+		t.Fatal("hashpay_private_key must be classified as secret")
+	}
+	cfg := svc.PaymentConfig()
+	if cfg.PaymentGateway != "hashpay" || cfg.HashPayPrivateKey == "" || cfg.HashPayMerchantID != "merchant-1" {
+		t.Fatalf("payment config = %+v", cfg)
+	}
+	// HashPay 模式：订单使用 hashpay 货币作为 fiat。
+	ps := svc.PaymentServiceConfig()
+	if ps.Fiat != "USD" || ps.Gateway != "hashpay" {
+		t.Fatalf("payment service config = %+v", ps)
+	}
+}
+
+// TestSettingsServiceGatewayDefault 未配置时默认 BEpusdt；非法网关值被忽略。
+func TestSettingsServiceGatewayDefault(t *testing.T) {
+	st := newStubSettingsStore()
+	svc := NewSettingsService(st, nil, config.Load())
+	if svc.GatewayName() != "bepusdt" {
+		t.Fatalf("default gateway = %q, want bepusdt", svc.GatewayName())
+	}
+	_ = st.SetSetting("payment_gateway", "stripe")
+	if svc.GatewayName() != "bepusdt" {
+		t.Fatalf("invalid gateway must fall back, got %q", svc.GatewayName())
+	}
+	if svc.HashPayNotifyPath() != "/notify/hashpay" {
+		t.Fatalf("default hashpay notify path = %q", svc.HashPayNotifyPath())
 	}
 }
 

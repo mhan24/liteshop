@@ -1,5 +1,23 @@
 # 更新日志
 
+## v0.2.1（2026-08-11）— 新增 HashPay 支付网关
+
+### 支付
+
+- 新增 [HashPay](https://github.com/TGDash/HashPay) 网关（`internal/payment/hashpay.go`）：创建订单按 `METHOD\npath\ntimestamp\nbody` 原文用商户私钥做 RSASSA-PKCS1-v1_5 SHA-256 签名；回调使用 RSA-OAEP-256+A256GCM 加密信封，解密后按 `status` 处理（paid 发卡 / expired|invalid 关闭订单释放库存），时间戳窗口 ±5 分钟防重放
+- 后台支付设置新增**网关切换**（BEpusdt / HashPay）：各自独立配置 Base URL / 商户 ID / 私钥 / 货币 / 回调路径，保存即时生效，无需重启
+- HashPay 商户私钥写入 `secrets` 表 AES-GCM 加密存储（留空保持当前密钥，不随 GET 返回明文）
+- 幂等台账按网关区分：`processed_events` 键改为 `{gateway}:{trade_id}`，BEpusdt 存量数据前缀不变
+- HashPay 回调路由 `/notify/hashpay`（路径可后台配置，动态兜底即时生效）；回调地址在后台支付页展示，便于配置 HashPay 商户 Callback
+- HashPay 模式前台隐藏收款类型选项（网络/资产由 HashPay 托管收银台选择），订单按 HashPay 货币记账（默认 USD）
+
+### 测试与文档
+
+- `internal/payment/hashpay_test.go`：RSA 签名原文校验、回调加密信封解密、时间窗/坏信封/未配置错误路径、下单签名与收银台解析
+- `internal/api/hashpay_callback_test.go`：真实 HTTP 路由（加密回调 → 发卡 / 过期释放库存 / 坏信封 400 / 动态路径即时生效）+ 重复回调幂等
+- OpenAPI 新增 `/notify/hashpay` 与 HashPay 配置字段，admin-ui 类型重新生成（gen:api）
+- README（中英双份）新增 HashPay 接入步骤
+
 ## v0.2.0（2026-08-09）— 代号：月球 Moon
 
 > 从"能用"走向"工程化"：分层、抽象、可观测性与稳定性全面升级；数据库状态与事件、备份与恢复、代码与文档全部可验证、可回滚。

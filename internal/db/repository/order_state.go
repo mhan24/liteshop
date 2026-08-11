@@ -81,7 +81,7 @@ func (r *OrderRepository) MarkPaid(orderID int64, tradeID, blockTx string, paidA
 
 // MarkPaidAndDeliver 在单事务内完成支付确认与发卡（waiting_payment → paid，locked → sold）。
 // 返回实际售出卡密数；若订单状态已不是 waiting_payment（如已被取消），返回 ErrNoRows 且不产生任何变更。
-func (r *OrderRepository) MarkPaidAndDeliver(orderID int64, tradeID, blockTx string, paidAt int64) (int64, error) {
+func (r *OrderRepository) MarkPaidAndDeliver(orderID int64, gateway, tradeID, blockTx string, paidAt int64) (int64, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
@@ -89,7 +89,7 @@ func (r *OrderRepository) MarkPaidAndDeliver(orderID int64, tradeID, blockTx str
 	defer tx.Rollback()
 	// 幂等台账：同一网关交易号只处理一次（与订单状态迁移同一事务）。
 	res, err := tx.Exec(`INSERT OR IGNORE INTO processed_events(event_key, event_type, processed_at)
-		VALUES(?, 'payment', ?)`, "bepusdt:"+tradeID, models.Now())
+		VALUES(?, 'payment', ?)`, gatewayPrefix(gateway)+tradeID, models.Now())
 	if err != nil {
 		return 0, err
 	}
@@ -119,7 +119,7 @@ func (r *OrderRepository) MarkPaidAndDeliver(orderID int64, tradeID, blockTx str
 
 // MarkPaidPendingDelivery 人工手动交付订单的支付确认：waiting_payment → pending_delivery。
 // 不锁卡不发卡，仅写入支付成功事件（OrderPaid）。
-func (r *OrderRepository) MarkPaidPendingDelivery(orderID int64, tradeID, blockTx string, paidAt int64) error {
+func (r *OrderRepository) MarkPaidPendingDelivery(orderID int64, gateway, tradeID, blockTx string, paidAt int64) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -127,7 +127,7 @@ func (r *OrderRepository) MarkPaidPendingDelivery(orderID int64, tradeID, blockT
 	defer tx.Rollback()
 	// 幂等台账：同一网关交易号只处理一次（与订单状态迁移同一事务）。
 	res, err := tx.Exec(`INSERT OR IGNORE INTO processed_events(event_key, event_type, processed_at)
-		VALUES(?, 'payment', ?)`, "bepusdt:"+tradeID, models.Now())
+		VALUES(?, 'payment', ?)`, gatewayPrefix(gateway)+tradeID, models.Now())
 	if err != nil {
 		return err
 	}
@@ -145,6 +145,14 @@ func (r *OrderRepository) MarkPaidPendingDelivery(orderID int64, tradeID, blockT
 		return err
 	}
 	return tx.Commit()
+}
+
+// gatewayPrefix 归一化网关前缀（兜底 bepusdt 兼容存量台账）。
+func gatewayPrefix(gateway string) string {
+	if gateway == "" {
+		return "bepusdt:"
+	}
+	return gateway + ":"
 }
 
 // SetManualDelivery 人工发货：pending_delivery → delivered，并保存发货内容。

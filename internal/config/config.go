@@ -8,6 +8,7 @@ type Config struct {
 	LogDir            string
 	PublicBaseURL     string
 	NotifyURL         string
+	PaymentGateway    string
 	AdminUsername     string
 	AdminPassword     string
 	SessionSecret     string
@@ -19,6 +20,10 @@ type Config struct {
 	BepusdtTradeType  string
 	BepusdtTradeTypes []string
 	BepusdtTimeoutSec int
+	HashPayBaseURL    string
+	HashPayMerchantID string
+	HashPayPrivateKey string
+	HashPayCurrency   string
 	SMTPHost          string
 	SMTPPort          int
 	SMTPUsername      string
@@ -57,6 +62,7 @@ func Load() Config {
 		LogDir:            "logs",
 		PublicBaseURL:     "http://localhost:8080",
 		NotifyURL:         "http://localhost:8080/notify/bepusdt",
+		PaymentGateway:    "bepusdt",
 		AdminUsername:     "admin",
 		AdminPassword:     "",
 		SessionSecret:     "",
@@ -68,6 +74,8 @@ func Load() Config {
 		BepusdtTradeType:  "usdt.trc20",
 		BepusdtTradeTypes: []string{"usdt.trc20"},
 		BepusdtTimeoutSec: 1200,
+		HashPayBaseURL:    "https://pay.example.com",
+		HashPayCurrency:   "USD",
 		SMTPHost:          "",
 		SMTPPort:          465,
 		SMTPUsername:      "",

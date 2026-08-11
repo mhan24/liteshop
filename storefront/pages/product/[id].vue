@@ -30,7 +30,7 @@
         </div>
 
         <form class="mt-4 grid gap-3" @submit.prevent="submit">
-          <div v-if="tradeTypes.length > 1">
+          <div v-if="gateway !== 'hashpay' && tradeTypes.length > 1">
             <label class="text-sm font-semibold">{{ t('network') }}</label>
             <div class="grid grid-cols-2 gap-2 mt-1">
               <button
@@ -169,6 +169,8 @@ function wholesalePrice(minQtyNum: number) {
   return Math.round((base * discount) / 100)
 }
 const tradeTypes = computed(() => (data.value as any)?.trade_types || [])
+// HashPay 模式：网络/资产在 HashPay 托管收银台选择，前台不再展示收款类型选项。
+const gateway = computed(() => (data.value as any)?.payment_gateway || 'bepusdt')
 // trade_type 形如 usdt.trc20 → 币种 USDT / 网络 TRC20；未知格式原样展示
 const networkCoin = computed(() => (t: string) => {
   const coin = t.split('.')[0]

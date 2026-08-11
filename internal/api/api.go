@@ -225,6 +225,7 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"turnstile_site_key":    s.settings.TurnstileSiteKey(),
 		"logo_url":              s.settings.SiteLogoURL(),
 		"favicon_url":           s.settings.SiteFaviconURL(),
+		"payment_gateway":       s.settings.GatewayName(),
 		"maintenance": map[string]any{
 			"enabled": enabled,
 			"message": s.settings.Get("maintenance_message"),
@@ -390,12 +391,23 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tradeType := strings.TrimSpace(input.TradeType)
-	if tradeType == "" {
-		tradeType = s.settings.TradeTypes()[0]
-	}
-	if !s.settings.TradeTypeAllowed(tradeType) {
-		writeError(w, 400, "invalid trade type")
-		return
+	if s.settings.GatewayName() == "hashpay" {
+		// HashPay 收银台由买家自选网络/资产，前台不展示收款类型选项；
+		// 订单上记录请求货币作为交易类型（对账用）。
+		if tradeType == "" {
+			tradeType = s.settings.PaymentConfig().HashPayCurrency
+			if tradeType == "" {
+				tradeType = "USD"
+			}
+		}
+	} else {
+		if tradeType == "" {
+			tradeType = s.settings.TradeTypes()[0]
+		}
+		if !s.settings.TradeTypeAllowed(tradeType) {
+			writeError(w, 400, "invalid trade type")
+			return
+		}
 	}
 	orderNo, paymentURL, _, _, err := s.orders.CreateOrder(p, input.Qty, input.Contact, tradeType, input.CouponCode)
 	if err != nil {
@@ -1338,15 +1350,26 @@ func (s *Server) apiAdminOrderDeliver(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiAdminSettings(w http.ResponseWriter, r *http.Request) {
 	cfg := s.settings.PaymentConfig()
+	hashpayNotifyURL := s.settings.Get("hashpay_notify_url")
+	if hashpayNotifyURL == "" && cfg.PublicBaseURL != "" {
+		hashpayNotifyURL = cfg.PublicBaseURL + s.settings.HashPayNotifyPath()
+	}
 	writeJSON(w, 200, map[string]any{
-		"bepusdt_base_url":      cfg.BepusdtBaseURL,
-		"bepusdt_api_token_set": cfg.BepusdtToken != "",
-		"fiat":                  s.settings.Fiat(),
-		"trade_types":           strings.Join(s.settings.TradeTypes(), ","),
-		"bepusdt_timeout_sec":   cfg.BepusdtTimeoutSec,
-		"shop_public_base_url":  cfg.PublicBaseURL,
-		"bepusdt_notify_path":   s.settings.NotifyPath(),
-		"bepusdt_notify_url":    cfg.NotifyURL,
+		"payment_gateway":          cfg.PaymentGateway,
+		"bepusdt_base_url":         cfg.BepusdtBaseURL,
+		"bepusdt_api_token_set":    cfg.BepusdtToken != "",
+		"fiat":                     s.settings.Fiat(),
+		"trade_types":              strings.Join(s.settings.TradeTypes(), ","),
+		"bepusdt_timeout_sec":      cfg.BepusdtTimeoutSec,
+		"shop_public_base_url":     cfg.PublicBaseURL,
+		"bepusdt_notify_path":      s.settings.NotifyPath(),
+		"bepusdt_notify_url":       cfg.NotifyURL,
+		"hashpay_base_url":         cfg.HashPayBaseURL,
+		"hashpay_merchant_id":      cfg.HashPayMerchantID,
+		"hashpay_private_key_set":  cfg.HashPayPrivateKey != "",
+		"hashpay_currency":         cfg.HashPayCurrency,
+		"hashpay_notify_path":      s.settings.HashPayNotifyPath(),
+		"hashpay_notify_url":       hashpayNotifyURL,
 	})
 }
 

@@ -2,7 +2,7 @@
 
 English: [README.en.md](README.en.md) ｜ 更新日志：[CHANGELOG.md](CHANGELOG.md)
 
-**LiteShop v0.2.0（代号：月球 Moon）** —— 基于 **Go + SQLite** 的自动发卡系统，对接 [BEpusdt](https://github.com/v03413/BEpusdt) 加密货币收单网关。买家前台使用 Nuxt 3 SSR + Tailwind；管理后台使用 Vue 3 + TypeScript + Element Plus + Pinia；Go 提供 JSON API、支付回调、内嵌后台与后台任务。
+**LiteShop v0.2.0（代号：月球 Moon）** —— 基于 **Go + SQLite** 的自动发卡系统，对接 [BEpusdt](https://github.com/v03413/BEpusdt) 与 [HashPay](https://github.com/TGDash/HashPay) 加密货币收单网关（后台可切换）。买家前台使用 Nuxt 3 SSR + Tailwind；管理后台使用 Vue 3 + TypeScript + Element Plus + Pinia；Go 提供 JSON API、支付回调、内嵌后台与后台任务。
 
 > 版本沿革：v0.1.0 代号**地球（Earth）**；v0.2.0 代号**月球（Moon）**——分层、抽象、可观测性与稳定性全面升级，详见 [CHANGELOG](CHANGELOG.md)。
 >
@@ -30,7 +30,7 @@ English: [README.en.md](README.en.md) ｜ 更新日志：[CHANGELOG.md](CHANGELO
 - 卡密：导入（去重）/ 删除 / 导出
 - 订单：查看 / CSV 导出 / 标记过期 / 取消 / 改状态 / 重发 / 批量重发 / 补发
 - 优惠券：固定 / 百分比、最低金额、使用次数、适用商品、有效期；**100% 券订单自动完成并直接发卡**
-- 支付：网关 Base URL / Token / 收款类型 / 超时 / 回调地址（修改即时生效）
+- 支付：**网关切换（BEpusdt / HashPay）** + 各网关独立配置（Base URL / Token / 商户私钥 / 收款类型 / 货币 / 超时 / 回调地址，修改即时生效）
 - 通知：SMTP / Telegram / Webhook + **事件模板**（订单创建 / 付款成功 / 发货 / 库存不足 / 系统异常）+ 管理员通知邮箱 + 测试按钮
 - 站点：标题 / 公告 / **公开地址** / Logo / Favicon / SEO / 链接 / 版权 / 隐私 / 条款 / Turnstile
 - 维护模式：开关 + 提示文案 + 解锁密码（哈希 + 加密存储）
@@ -46,7 +46,7 @@ English: [README.en.md](README.en.md) ｜ 更新日志：[CHANGELOG.md](CHANGELO
 - 领域事件：`internal/events` 类型化事件（OrderPaid / OrderExpired / DeliveryFailed / LowStock …）+ 版本化载荷 + **Fanout 消费者隔离**，service 只发布事件、不散落 `bus.Publish`
 - **Outbox 模式**：支付成功/发货事件与订单状态**同事务**写入 `outbox_events`，worker 发布；连续失败 5 次进 `dead_events`；已发布事件 30 天清理
 - 幂等台账：支付回调以网关交易号唯一键登记 `processed_events`（与状态迁移同事务），重复通知只处理一次
-- 支付抽象：订单业务只依赖 `payment.Gateway` 接口，当前实现为 BEpusdt，换网关不改业务
+- 支付抽象：订单业务只依赖 `payment.Gateway` 接口，内置 BEpusdt 与 HashPay 两个实现，后台一键切换，换网关不改业务
 - 任务系统：goroutine + channel（邮件 / Telegram / Webhook）+ ticker；panic 隔离、启动补偿、`job_runs` 执行记录
 - 后台任务：订单超时自动关闭、失败邮件重试、会话/日志/outbox/队列清理、每日数据库备份（含完整性校验）
 - 日志（zap）：app / payment / security 三通道，50MB 轮转保留 7 份；request_id / order_id / trace_id 关联
@@ -119,13 +119,13 @@ HTTP handler (internal/api)
 ```
 下单 → 锁定卡密（原子事务）→ 创建交易（payment.Gateway）→ 新标签页打开收银台
   → 原页跳订单详情页（自动轮询）
-  → 用户转账 → 网关回调（路径可运行时修改）→ 验签 + processed_events 幂等 → 订单 paid
+→ 用户转账 → 网关回调（路径可运行时修改；BEpusdt MD5 验签 / HashPay RSA 解密信封）→ 验签 + processed_events 幂等 → 订单 paid
   → 同事务写 outbox → worker 发卡通知（邮件/Telegram/Webhook）→ 前台显示卡密
 ```
 
 - 取消 / 过期：释放库存 + 调用网关 `cancel-transaction` 关闭交易（原子事务）；
 - 事务边界：下单 = 单事务（建单 + 锁卡 + 扣库存），失败原子置 `payment_failed` 并释放卡密；支付成功 = 单事务（paid + 发卡），**COMMIT 后才发布事件/发邮件**；
-- 换网关（其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器；
+- 换网关（BEpusdt ↔ HashPay 或未来其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器；
 - **payment.log** 记录每次创建/回调：订单号、金额、交易 ID、回调时间、结果 + request_id / trace_id。
 
 ---
@@ -143,7 +143,7 @@ HTTP handler (internal/api)
 | 日志 | go.uber.org/zap + lumberjack |
 | 任务 | goroutine + channel + ticker（无 MQ），Outbox 模式 |
 | 反向代理 | Caddy |
-| 支付 | BEpusdt（`payment.Gateway` 接口抽象） |
+| 支付 | BEpusdt / HashPay（`payment.Gateway` 接口抽象，后台切换） |
 | 安全 | Cloudflare Turnstile |
 
 ---
@@ -160,7 +160,7 @@ internal/db/schema/     schema 演进：迁移执行器 + migrations/*.sql（唯
 internal/db/repository/ 全部数据访问：SQLite 实现 + Store（settings/secrets/admin/session/audit）
 internal/db/settings_migrations.go  配置结构升级（settings_version）
 internal/models/        模型、共享类型（ProductView/AdminRow/…）与领域错误
-internal/payment/       支付网关抽象：interface.go（Gateway）+ bepusdt.go（BEPusdt 实现）
+internal/payment/       支付网关抽象：interface.go（Gateway）+ bepusdt.go（BEpusdt）+ hashpay.go（HashPay）
 internal/notify/        通知（事件模板 / 邮件 / Telegram / Webhook）
 internal/jobs/          任务总线 + 调度器 + order_expire / email_retry / outbox_publish / cleanup / backup
 internal/logging/       zap 日志（app / payment / security）+ 关联 ID
@@ -185,7 +185,7 @@ AGENTS.md               工程约定（分层 / 小文件 / 接口化 / 迁移 /
 
 - Go 1.25.12+（govulncheck 基线）
 - Node.js 18+ / npm
-- 一个 BEpusdt 实例（或接入其他 `Gateway` 实现）
+- 一个 BEpusdt 实例 或 一个 HashPay 实例（运行在 Cloudflare Workers，商户后台生成 RSA 密钥对）
 
 ### 本地开发
 
@@ -270,6 +270,15 @@ curl -sSL https://raw.githubusercontent.com/mhan24/liteshop/main/install.sh | \
 
 > 运行时配置（站点地址、支付、通知等）在 `/setup` 初始化与后台写入数据库，应用不读取任何环境变量。项目不依赖 Docker。
 
+### 接入 HashPay
+
+1. 部署 [HashPay](https://github.com/TGDash/HashPay) 到 Cloudflare Workers 并完成后台初始化；
+2. 在 HashPay 后台创建 **Native API** 商户，保存只显示一次的**私钥**，并把该商户的 **Callback 地址**填为 LiteShop 的 HashPay 回调地址（后台支付页可查看，默认 `https://你的域名/notify/hashpay`）；
+3. LiteShop 后台「支付设置」切换网关为 **HashPay**，填入 HashPay 站点地址、商户 ID、私钥与货币（默认 USD）并保存；
+4. HashPay 模式下前台不再展示收款类型选项（网络/资产由 HashPay 托管收银台选择）；订单按 HashPay 货币记账，支付成功后自动发卡，回调幂等与 BEpusdt 一致。
+
+> 私钥仅创建商户时显示一次，后台保存后加密写入 `secrets` 表，留空表示保持当前密钥。
+
 ### 构建部署（build-release.sh）
 
 ```bash
@@ -290,7 +299,7 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop 二进制（自动注�
 - **mock 测试**：service 依赖接口，可脱离数据库用内存 stub
 - **集成测试**（`internal/integration` + `internal/testutil`）：
   - 临时 SQLite 测试库（完整迁移 + 造数）；`MockGateway` / `NotifyRecorder`
-  - 覆盖：支付回调发卡、**重复回调幂等**、取消/超时释放库存并关闭网关交易、真实 HTTP 回调路由（验签 / 动态路径 / 错误签名）、**100 并发抢 1 卡**、Outbox 死信、备份恢复演练、旧库升级
+  - 覆盖：BEpusdt/HashPay 支付回调发卡、**重复回调幂等**、取消/超时释放库存并关闭网关交易、真实 HTTP 回调路由（验签 / RSA 信封解密 / 动态路径 / 错误签名）、**100 并发抢 1 卡**、Outbox 死信、备份恢复演练、旧库升级
 - **性能基准**：`go test -bench=. ./internal/integration/`（下单 ~6.4ms / 回调 ~6.8ms / 查询 ~21µs 基线）
 - **依赖基线**：`govulncheck ./...` 无漏洞（Go 1.25.12）；`npm audit` 运行时 0 漏洞（admin-ui 仅构建期 js-yaml 告警，不可达）
 - CI（`.github/workflows/ci.yml`）：Go `vet` / `build` / `test` + gen:api diff 校验 + 前后台构建
