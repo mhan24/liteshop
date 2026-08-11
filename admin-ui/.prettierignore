@@ -1,5 +1,1 @@
-dist
-node_modules
-auto-imports.d.ts
-components.d.ts
-package-lock.json
+src/api/types.ts
