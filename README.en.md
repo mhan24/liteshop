@@ -132,7 +132,7 @@ Order (buyer picks gateway) → lock cards (atomic) → create transaction (paym
 
 | Layer | Stack |
 | --- | --- |
-| Storefront | Nuxt 3 SSR + Tailwind CSS |
+| Storefront | Nuxt 3 SSR + Tailwind CSS 4 + daisyUI 5 |
 | Admin | Vue 3 + Vite + TypeScript + Tailwind CSS + daisyUI + Pinia + VueUse + @lucide/vue |
 | Admin quality | ESLint (flat config + typescript-eslint + eslint-plugin-vue) + Prettier |
 | API types | OpenAPI → TS auto-generated (`admin-ui npm run gen:api` → `src/api/types.ts`) |

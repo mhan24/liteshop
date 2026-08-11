@@ -134,7 +134,7 @@ HTTP handler (internal/api)
 
 | 层 | 技术 |
 | --- | --- |
-| 前台 | Nuxt 3 SSR + Tailwind CSS |
+| 前台 | Nuxt 3 SSR + Tailwind CSS 4 + daisyUI 5 |
 | 后台 | Vue 3 + Vite + TypeScript + Tailwind CSS + daisyUI + Pinia + VueUse + @lucide/vue |
 | 后台质量 | ESLint（flat config + typescript-eslint + eslint-plugin-vue）+ Prettier |
 | API 类型 | OpenAPI → TS 自动生成（`admin-ui npm run gen:api` → `src/api/types.ts`） |

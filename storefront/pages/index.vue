@@ -44,17 +44,17 @@
         >{{ t('resetFilter') }}</button>
         </form>
         <div class="flex justify-end">
-        <div class="btn-group btn-group-sm">
+        <div class="join">
           <button
             type="button"
             :class="viewMode === 'grid' ? 'btn-active' : ''"
-            class="btn btn-sm"
+            class="btn btn-sm join-item"
             @click="setView('grid')"
           >{{ t('viewGrid') }}</button>
           <button
             type="button"
             :class="viewMode === 'list' ? 'btn-active' : ''"
-            class="btn btn-sm"
+            class="btn btn-sm join-item"
             @click="setView('list')"
           >{{ t('viewList') }}</button>
         </div>

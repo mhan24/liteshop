@@ -1,4 +1,7 @@
+import tailwindcss from '@tailwindcss/vite'
+
 export default defineNuxtConfig({
+  compatibilityDate: '2026-08-11',
   devServer: { port: 3001, host: '127.0.0.1' },
   runtimeConfig: {
     public: { apiBase: '/api/v1' },
@@ -17,16 +20,13 @@ export default defineNuxtConfig({
     '/setup': { headers: { 'cache-control': 'no-store' } },
   },
   css: ['~/assets/css/main.css'],
-  postcss: {
-    plugins: {
-      tailwindcss: {},
-      autoprefixer: {},
-    },
+  vite: {
+    plugins: [tailwindcss()],
   },
   app: {
     head: {
       title: 'LiteShop',
-      htmlAttrs: { lang: 'zh-CN' },
+      htmlAttrs: { lang: 'zh-CN', 'data-theme': 'liteshop' },
       // key: 'icon' 让后台设置的自定义 favicon（layouts/default.vue）可覆盖内置图标，避免重复输出
       link: [{ rel: 'icon', key: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
       meta: [

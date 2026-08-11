@@ -21,6 +21,11 @@
 - 清理 eslint 配置中对已删除自动生成文件的 ignore 条目；代码中不再残留任何 Element Plus 引用（`npm audit` 仍为 AGENTS.md 记录的 js-yaml 构建期基线告警）
 - 测试修复：`TestManualDeliveryFlow` 的 SendPaid 断言改为轮询等待（人工发货通知为异步发送，原即时断言在慢速机器上必现失败）
 
+### 前台重构（v0.2.2 增补）
+
+- 前台（storefront）同步升级到 **Tailwind CSS 4 + daisyUI 5**（移除 Tailwind 3 / daisyUI 4 / autoprefixer / postcss 配置与 `tailwind.config.ts`），主题同样切换为 **Wise DESIGN.md** 配色与胶囊按钮风格
+- Nuxt 3 升级至最新 3.21.x，新增 `compatibilityDate`；`btn-group` 迁移为 daisyUI 5 的 `join`，清理写死的旧品牌色（含 favicon 与 md-body 渲染样式）
+
 ## v0.2.1（2026-08-11）— 新增 HashPay 支付网关
 
 ### 支付
