@@ -15,23 +15,30 @@ import (
 )
 
 type Product struct {
-	ID          int64
-	Name        string
-	Description string
-	ImageURL    string
-	PriceCents  int64
-	Status      string
-	Category    string
-	SortOrder   int
-	IsPinned    bool
-	FAQ         []FAQItem
-	Wholesale   []WholesaleTier // 阶梯价
-	MinQty      int
-	MaxQty      int
-	CostCents   int64
-	CreatedAt   int64
-	UpdatedAt   int64
+	ID           int64
+	Name         string
+	Description  string
+	ImageURL     string
+	PriceCents   int64
+	Status       string
+	Category     string
+	SortOrder    int
+	IsPinned     bool
+	FAQ          []FAQItem
+	Wholesale    []WholesaleTier // 阶梯价
+	MinQty       int
+	MaxQty       int
+	CostCents    int64
+	DeliveryType string // auto=卡密自动发货 / manual=人工手动交付
+	CreatedAt    int64
+	UpdatedAt    int64
 }
+
+// 商品交付方式。
+const (
+	DeliveryTypeAuto   = "auto"   // 卡密自动发货（默认）
+	DeliveryTypeManual = "manual" // 人工手动交付
+)
 
 // WholesaleTier 阶梯价档位。
 type WholesaleTier struct {
@@ -99,6 +106,8 @@ type Order struct {
 	TradeID            string
 	PaymentURL         string
 	BlockTransactionID string
+	DeliveryType       string // 订单创建时的交付方式快照
+	DeliveryContent    string // 人工手动交付内容（发货时填写）
 	CreatedAt          int64
 	UpdatedAt          int64
 	PaidAt             int64
@@ -106,16 +115,17 @@ type Order struct {
 
 // 订单状态机状态值。
 const (
-	OrderCreated        = "created"         // 订单记录已创建
-	OrderWaitingPayment = "waiting_payment" // 已创建 BEpusdt 交易，等待支付
-	OrderPaid           = "paid"            // 支付成功，开始发卡
-	OrderProcessing     = "processing"      // 发卡处理中
-	OrderDelivered      = "delivered"       // 卡密已发放
-	OrderCompleted      = "completed"       // 已完成（终态）
-	OrderPaymentFailed  = "payment_failed"  // 支付异常（如创建交易失败）
-	OrderDeliveryFailed = "delivery_failed" // 发卡失败，待后台处理
-	OrderCancelled      = "cancelled"       // 用户取消
-	OrderExpired        = "expired"         // 支付超时过期
+	OrderCreated         = "created"          // 订单记录已创建
+	OrderWaitingPayment  = "waiting_payment"  // 已创建 BEpusdt 交易，等待支付
+	OrderPaid            = "paid"             // 支付成功，开始发卡
+	OrderProcessing      = "processing"       // 发卡处理中
+	OrderPendingDelivery = "pending_delivery" // 已支付，等待人工发货
+	OrderDelivered       = "delivered"        // 卡密已发放
+	OrderCompleted       = "completed"        // 已完成（终态）
+	OrderPaymentFailed   = "payment_failed"   // 支付异常（如创建交易失败）
+	OrderDeliveryFailed  = "delivery_failed"  // 发卡失败，待后台处理
+	OrderCancelled       = "cancelled"        // 用户取消
+	OrderExpired         = "expired"          // 支付超时过期
 )
 
 // PaymentStatus 支付生命周期状态（与订单状态解耦，独立列 payment_status）。
@@ -143,9 +153,14 @@ var validOrderTransitions = map[string]map[string]bool{
 		OrderCancelled: true,
 	},
 	OrderPaid: {
-		OrderProcessing:     true,
-		OrderDeliveryFailed: true,
-		OrderCompleted:      true,
+		OrderProcessing:      true,
+		OrderPendingDelivery: true,
+		OrderDeliveryFailed:  true,
+		OrderCompleted:       true,
+	},
+	OrderPendingDelivery: {
+		OrderDelivered: true,
+		OrderCompleted: true,
 	},
 	OrderProcessing: {
 		OrderDelivered:      true,
@@ -179,7 +194,7 @@ func IsOrderFinal(status string) bool {
 func IsValidOrderStatus(s string) bool {
 	switch s {
 	case OrderCreated, OrderWaitingPayment, OrderPaid, OrderProcessing,
-		OrderDelivered, OrderCompleted, OrderPaymentFailed,
+		OrderPendingDelivery, OrderDelivered, OrderCompleted, OrderPaymentFailed,
 		OrderDeliveryFailed, OrderCancelled, OrderExpired:
 		return true
 	}

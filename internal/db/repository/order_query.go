@@ -6,12 +6,12 @@ import (
 
 // GetOrderByNo 按订单号查订单。
 func (r *OrderRepository) GetOrderByNo(orderNo string) (models.Order, error) {
-	return scanOrder(r.db.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE order_no = ?`, orderNo))
+	return scanOrder(r.db.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE order_no = ?`, orderNo))
 }
 
 // GetOrderByID 按 ID 查订单。
 func (r *OrderRepository) GetOrderByID(id int64) (models.Order, error) {
-	return scanOrder(r.db.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE id = ?`, id))
+	return scanOrder(r.db.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE id = ?`, id))
 }
 
 // OrdersByContact 按下单邮箱查最近订单。
@@ -19,7 +19,7 @@ func (r *OrderRepository) OrdersByContact(contact string, limit int) ([]models.O
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := r.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE buyer_contact = ? ORDER BY id DESC LIMIT ?`, contact, limit)
+	rows, err := r.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE buyer_contact = ? ORDER BY id DESC LIMIT ?`, contact, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func (r *OrderRepository) ListOrders(where string, args []any, limit int) ([]mod
 	if limit <= 0 {
 		limit = 500
 	}
-	query := `SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE ` + where + ` ORDER BY id DESC LIMIT ?`
+	query := `SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE ` + where + ` ORDER BY id DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
@@ -88,7 +88,7 @@ func (r *OrderRepository) RecentOrders(limit int) ([]models.Order, error) {
 	if limit <= 0 {
 		limit = 8
 	}
-	rows, err := r.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := r.db.Query(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}

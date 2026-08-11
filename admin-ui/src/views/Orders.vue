@@ -107,6 +107,7 @@ const statusOptions = computed(() => ({
   waiting_payment: t('orders.status.waiting_payment'),
   paid: t('orders.status.paid'),
   processing: t('orders.status.processing'),
+  pending_delivery: t('orders.status.pending_delivery'),
   delivered: t('orders.status.delivered'),
   completed: t('orders.status.completed'),
   payment_failed: t('orders.status.payment_failed'),
@@ -148,6 +149,7 @@ function statusType(status: string): any {
   const m: any = {
     paid: 'success',
     processing: 'success',
+    pending_delivery: 'warning',
     delivered: 'success',
     completed: 'success',
     waiting_payment: 'warning',

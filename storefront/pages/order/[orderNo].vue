@@ -17,13 +17,20 @@
         <dt class="text-gray-500">{{ t('paidAt') }}</dt><dd class="col-span-2">{{ date(order.paid_at) }}</dd>
       </template>
     </dl>
+    <p v-if="order.status === 'pending_delivery'" class="mt-3 bg-blue-50 text-blue-700 border border-blue-100 rounded p-3 text-sm">
+      {{ t('pendingDeliveryHint') }}
+    </p>
     <div v-if="order.status === 'waiting_payment' && order.payment_url" class="mt-4 flex gap-2">
       <a :href="order.payment_url" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 font-semibold">{{ t('continuePay') }}</a>
       <button @click="cancel" class="border border-red-500 text-red-500 rounded-full px-4 py-2 font-semibold hover:bg-red-50">
         {{ t('cancelOrder') }}
       </button>
     </div>
-    <div v-if="cards.length" class="mt-5">
+    <div v-if="order.delivery_type === 'manual' && order.delivery_content" class="mt-5">
+      <h2 class="font-bold mb-2">{{ t('deliveryInfo') }}</h2>
+      <div class="bg-gray-900 text-green-200 rounded p-3 font-mono whitespace-pre-wrap">{{ order.delivery_content }}</div>
+    </div>
+    <div v-else-if="cards.length" class="mt-5">
       <h2 class="font-bold mb-2">{{ t('cards') }}</h2>
       <ul class="bg-gray-900 text-green-200 rounded p-3 font-mono">
         <li v-for="c in cards" :key="c.id">{{ c.content }}</li>

@@ -21,6 +21,13 @@
       <el-table-column :label="t('products.category')">
         <template #default="{ row }">{{ row.category || t('products.defaultCategory') }}</template>
       </el-table-column>
+      <el-table-column :label="t('products.deliveryType')" width="120">
+        <template #default="{ row }">
+          <el-tag :type="row.delivery_type === 'manual' ? 'warning' : 'success'" size="small">
+            {{ row.delivery_type === 'manual' ? t('products.manualDelivery') : t('products.autoDelivery') }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column :label="t('common.price')">
         <template #default="{ row }">{{ (row.price_cents / 100).toFixed(2) }}</template>
       </el-table-column>

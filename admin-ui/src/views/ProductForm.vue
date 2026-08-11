@@ -18,6 +18,13 @@
       >
         <el-input-number v-model="form.price" :min="0.01" :precision="2" />
       </el-form-item>
+      <el-form-item :label="t('products.deliveryType')">
+        <el-select v-model="form.delivery_type" style="width: 100%">
+          <el-option :label="t('products.autoDelivery')" value="auto" />
+          <el-option :label="t('products.manualDelivery')" value="manual" />
+        </el-select>
+        <p class="text-xs text-gray-400 mt-1">{{ t('products.manualDeliveryHint') }}</p>
+      </el-form-item>
       <el-row :gutter="12">
         <el-col :md="8">
           <el-form-item :label="t('products.minQty')"
@@ -123,6 +130,7 @@ const form = reactive({
   image_url: '',
   category: '',
   sort_order: 0,
+  delivery_type: 'auto',
   faq: [] as { q: string; a: string }[],
   min_qty: 1,
   max_qty: 100,

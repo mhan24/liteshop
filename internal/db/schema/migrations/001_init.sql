@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS products (
     min_qty INTEGER NOT NULL DEFAULT 1,
     max_qty INTEGER NOT NULL DEFAULT 100,
     cost_cents INTEGER NOT NULL DEFAULT 0,
+    delivery_type TEXT NOT NULL DEFAULT 'auto',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -61,6 +62,8 @@ CREATE TABLE IF NOT EXISTS orders (
     trade_id TEXT NOT NULL DEFAULT '',
     payment_url TEXT NOT NULL DEFAULT '',
     block_transaction_id TEXT NOT NULL DEFAULT '',
+    delivery_type TEXT NOT NULL DEFAULT 'auto',
+    delivery_content TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     paid_at INTEGER NOT NULL DEFAULT 0

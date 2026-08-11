@@ -77,6 +77,7 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 		TradeType:          tradeType,
 		BuyerContact:       contact,
 		ViewToken:          models.RandomToken(24),
+		DeliveryType:       normalizeDeliveryType(p.DeliveryType),
 		Status:             models.OrderCreated,
 		CreatedAt:          now,
 		UpdatedAt:          now,
@@ -139,6 +140,17 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 // completeFreeOrder 免费订单（100% 折扣）直接完成并发卡。
 func (s *OrderService) completeFreeOrder(order models.Order, discount, couponID int64) (string, string, int64, int64, error) {
 	now := models.Now()
+	// 人工手动交付：零金额订单直接进入"待发货"，等待管理员人工发货。
+	if order.DeliveryType == models.DeliveryTypeManual {
+		if err := s.repo.CompleteFreeOrderManual(order.ID, now); err != nil {
+			return order.OrderNo, "", 0, 0, err
+		}
+		order.Status = models.OrderPendingDelivery
+		order.PaidAt = now
+		_ = s.repo.AddLog(order.ID, "payment_success", "免费订单（100% 折扣）直接完成，等待人工发货", models.OrderCreated, models.OrderPendingDelivery, 0)
+		s.fireCreatedEvents(order)
+		return order.OrderNo, "", discount, couponID, nil
+	}
 	delivered, err := s.repo.CompleteFreeOrder(order.ID, now)
 	if err != nil {
 		return order.OrderNo, "", 0, 0, err

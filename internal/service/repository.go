@@ -18,7 +18,10 @@ type OrderRepository interface {
 	CreatePendingOrder(order *models.Order) error
 	SetTradeInfo(orderID int64, tradeID, paymentURL string) error
 	MarkPaidAndDeliver(orderID int64, tradeID, blockTx string, paidAt int64) (int64, error)
+	MarkPaidPendingDelivery(orderID int64, tradeID, blockTx string, paidAt int64) error
+	SetManualDelivery(orderID int64, content string) (bool, error)
 	CompleteFreeOrder(orderID int64, paidAt int64) (int64, error)
+	CompleteFreeOrderManual(orderID int64, paidAt int64) error
 	DeliverCards(orderID int64) error
 	ReleaseLockedCards(orderID int64) error
 	CancelOrder(orderID int64) (string, bool, error)

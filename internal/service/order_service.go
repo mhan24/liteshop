@@ -88,3 +88,11 @@ func (s *OrderService) cfg() PaymentConfig {
 
 // Repo 暴露给上层查询。
 func (s *OrderService) Repo() OrderRepository { return s.repo }
+
+// normalizeDeliveryType 收敛交付方式为 auto/manual（订单快照用）。
+func normalizeDeliveryType(t string) string {
+	if t == models.DeliveryTypeManual {
+		return models.DeliveryTypeManual
+	}
+	return models.DeliveryTypeAuto
+}

@@ -3,7 +3,9 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 
+	"shop/internal/events"
 	"shop/internal/models"
 )
 
@@ -15,7 +17,7 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (mod
 		return models.Order{}, nil, false, err
 	}
 	switch o.Status {
-	case models.OrderPaid, models.OrderProcessing, models.OrderDelivered, models.OrderCompleted:
+	case models.OrderPaid, models.OrderProcessing, models.OrderPendingDelivery, models.OrderDelivered, models.OrderCompleted:
 		cards, _ := s.repo.GetOrderCards(o.ID)
 		return o, cards, false, nil
 	case models.OrderWaitingPayment:
@@ -24,6 +26,21 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (mod
 		return o, nil, false, nil
 	}
 	now := models.Now()
+	// 人工手动交付：支付成功只确认支付，进入"待发货"，由管理员手动发货。
+	if o.DeliveryType == models.DeliveryTypeManual {
+		if err := s.repo.MarkPaidPendingDelivery(o.ID, tradeID, blockTx, now); err != nil {
+			if errors.Is(err, models.ErrAlreadyProcessed) {
+				return o, nil, false, nil
+			}
+			return o, nil, false, err
+		}
+		o.Status = models.OrderPendingDelivery
+		o.TradeID = tradeID
+		o.BlockTransactionID = blockTx
+		o.PaidAt = now
+		_ = s.repo.AddLog(o.ID, "payment_success", "支付成功，等待人工发货", models.OrderWaitingPayment, models.OrderPendingDelivery, 0)
+		return o, nil, true, nil
+	}
 	delivered, err := s.repo.MarkPaidAndDeliver(o.ID, tradeID, blockTx, now)
 	if errors.Is(err, models.ErrAlreadyProcessed) {
 		// 幂等：该网关交易已处理过，直接返回 noop。
@@ -50,9 +67,41 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (mod
 	return o, cards, true, nil
 }
 
+// ManualDeliver 管理员人工发货：填写发货内容并置为已发货，通知买家。
+func (s *OrderService) ManualDeliver(orderID int64, content string) error {
+	o, err := s.repo.GetOrderByID(orderID)
+	if err != nil {
+		return err
+	}
+	if o.Status != models.OrderPendingDelivery {
+		return fmt.Errorf("订单状态 %s 不允许人工发货", o.Status)
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return fmt.Errorf("发货内容不能为空")
+	}
+	ok, err := s.repo.SetManualDelivery(orderID, content)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("订单状态已变化，请刷新后重试")
+	}
+	o.Status = models.OrderDelivered
+	o.DeliveryContent = content
+	_ = s.repo.AddLog(orderID, "delivered", "管理员人工发货", models.OrderPendingDelivery, models.OrderDelivered, 0)
+	// 买家通知（邮件 + Telegram）：发送内容为人工填写的发货内容。
+	if s.SendPaid != nil {
+		go s.SendPaid(o, nil)
+	}
+	// 管理员侧发货成功通知（模板事件，不走 outbox：非支付事务）。
+	s.publish(events.OrderDeliveredEvent{Order: o, Cards: nil})
+	return nil
+}
+
 func resendableStatus(status string) bool {
 	switch status {
-	case models.OrderPaid, models.OrderProcessing, models.OrderDelivered, models.OrderCompleted, models.OrderDeliveryFailed:
+	case models.OrderPaid, models.OrderProcessing, models.OrderPendingDelivery, models.OrderDelivered, models.OrderCompleted, models.OrderDeliveryFailed:
 		return true
 	}
 	return false
@@ -65,6 +114,17 @@ func (s *OrderService) Resend(orderID int64) error {
 		return err
 	}
 	if !resendableStatus(o.Status) {
+		return nil
+	}
+	// 人工手动交付：重发人工填写的发货内容。
+	if o.DeliveryType == models.DeliveryTypeManual {
+		if o.DeliveryContent == "" {
+			return nil
+		}
+		if s.SendPaid != nil {
+			go s.SendPaid(o, nil)
+		}
+		_ = s.repo.AddLog(o.ID, "resend", "管理员重新发送人工发货内容", o.Status, o.Status, 0)
 		return nil
 	}
 	cards, _ := s.repo.GetOrderCards(o.ID)
@@ -84,6 +144,17 @@ func (s *OrderService) BatchResend(ids []int64) (int, error) {
 	for _, id := range ids {
 		o, err := s.repo.GetOrderByID(id)
 		if err != nil || !resendableStatus(o.Status) {
+			continue
+		}
+		if o.DeliveryType == models.DeliveryTypeManual {
+			if o.DeliveryContent == "" {
+				continue
+			}
+			if s.SendPaid != nil {
+				go s.SendPaid(o, nil)
+			}
+			_ = s.repo.AddLog(o.ID, "resend", "批量重发人工发货内容", o.Status, o.Status, 0)
+			sent++
 			continue
 		}
 		cards, _ := s.repo.GetOrderCards(o.ID)

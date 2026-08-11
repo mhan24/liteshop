@@ -79,6 +79,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/orders/{id}/resend", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderResend)))
 	mux.Handle("POST /api/v1/admin/orders/batch-resend", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrdersBatchResend)))
 	mux.Handle("POST /api/v1/admin/orders/{id}/redeliver", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderRedeliver)))
+	mux.Handle("POST /api/v1/admin/orders/{id}/deliver", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminOrderDeliver)))
 	mux.Handle("GET /api/v1/admin/settings", s.requireAdminAPI(http.HandlerFunc(s.apiAdminSettings)))
 	mux.Handle("POST /api/v1/admin/settings", s.requireRole(models.RoleAdmin, http.HandlerFunc(s.apiAdminSettingsSave)))
 	mux.Handle("GET /api/v1/admin/notify", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminNotify)))
@@ -131,23 +132,24 @@ func productJSON(p models.Product) map[string]any {
 		wholesale = append(wholesale, map[string]any{"min_qty": t.MinQty, "discount": t.Discount})
 	}
 	return map[string]any{
-		"id":          p.ID,
-		"name":        p.Name,
-		"slug":        models.Slugify(p.Name),
-		"description": p.Description,
-		"image_url":   p.ImageURL,
-		"price_cents": p.PriceCents,
-		"status":      p.Status,
-		"category":    p.Category,
-		"sort_order":  p.SortOrder,
-		"is_pinned":   p.IsPinned,
-		"faq":         faq,
-		"wholesale":   wholesale,
-		"min_qty":     p.MinQty,
-		"max_qty":     p.MaxQty,
-		"cost_cents":  p.CostCents,
-		"created_at":  p.CreatedAt,
-		"updated_at":  p.UpdatedAt,
+		"id":            p.ID,
+		"name":          p.Name,
+		"slug":          models.Slugify(p.Name),
+		"description":   p.Description,
+		"image_url":     p.ImageURL,
+		"price_cents":   p.PriceCents,
+		"status":        p.Status,
+		"category":      p.Category,
+		"sort_order":    p.SortOrder,
+		"is_pinned":     p.IsPinned,
+		"faq":           faq,
+		"wholesale":     wholesale,
+		"min_qty":       p.MinQty,
+		"max_qty":       p.MaxQty,
+		"cost_cents":    p.CostCents,
+		"delivery_type": p.DeliveryType,
+		"created_at":    p.CreatedAt,
+		"updated_at":    p.UpdatedAt,
 	}
 }
 
@@ -174,6 +176,8 @@ func orderJSON(o models.Order) map[string]any {
 		"trade_id":             o.TradeID,
 		"payment_url":          o.PaymentURL,
 		"block_transaction_id": o.BlockTransactionID,
+		"delivery_type":        o.DeliveryType,
+		"delivery_content":     o.DeliveryContent,
 		"created_at":           o.CreatedAt,
 		"updated_at":           o.UpdatedAt,
 		"paid_at":              o.PaidAt,
@@ -549,6 +553,7 @@ func (s *Server) apiOrder(w http.ResponseWriter, r *http.Request) {
 		delete(item, "buyer_contact")
 		delete(item, "payment_url")
 		delete(item, "trade_id")
+		delete(item, "delivery_content")
 	}
 	resp := map[string]any{"order": item}
 	if owned {
@@ -1285,6 +1290,38 @@ func (s *Server) apiAdminOrderRedeliver(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.audit(r, "order_redeliver", "order", fmt.Sprintf("%d", id), before, models.OrderDelivered)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// apiAdminOrderDeliver 管理员人工发货（人工手动交付订单）：填写发货内容并通知买家。
+func (s *Server) apiAdminOrderDeliver(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	var input struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, 400, "bad json")
+		return
+	}
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		writeError(w, 400, "发货内容不能为空")
+		return
+	}
+	before, err := s.orders.GetOrderStatus(id)
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	if err := s.orders.ManualDeliver(id, content); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	s.audit(r, "order_deliver", "order", fmt.Sprintf("%d", id), before, models.OrderDelivered)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

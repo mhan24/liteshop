@@ -29,6 +29,12 @@
           >{{ t('orders.redeliver') }}</el-button
         >
         <el-button
+          v-if="order.delivery_type === 'manual' && order.status === 'pending_delivery'"
+          type="primary"
+          @click="deliverDialog = true"
+          >{{ t('orders.manualDeliver') }}</el-button
+        >
+        <el-button
           v-if="order.status === 'waiting_payment' || order.status === 'created'"
           type="danger"
           plain
@@ -90,15 +96,20 @@
 
     <!-- 卡密信息 -->
     <el-card style="margin-top: 16px">
-      <template #header
-        ><span>{{ t('orders.cards') }} ({{ cards.length }})</span></template
-      >
-      <ul class="card-list">
+      <template #header>
+        <span>{{ order.delivery_type === 'manual' ? t('orders.deliveryInfo') : t('orders.cards') }} ({{
+          order.delivery_type === 'manual' && order.delivery_content ? 1 : cards.length
+        }})</span>
+      </template>
+      <div v-if="order.delivery_type === 'manual' && order.delivery_content" class="delivery-content">
+        {{ order.delivery_content }}
+      </div>
+      <ul v-else class="card-list">
         <li v-for="c in cards" :key="c.id">
           <code>{{ c.content }}</code>
         </li>
       </ul>
-      <div v-if="!cards.length" class="empty-tip">{{ t('orders.noCards') }}</div>
+      <div v-if="order.delivery_type !== 'manual' && !cards.length" class="empty-tip">{{ t('orders.noCards') }}</div>
     </el-card>
 
     <!-- 日志 / 通知记录 -->
@@ -138,6 +149,26 @@
         <el-button type="primary" :loading="savingStatus" @click="changeStatus">{{ t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 人工发货对话框 -->
+    <el-dialog v-model="deliverDialog" :title="t('orders.manualDeliver')" width="480px">
+      <el-form label-position="top">
+        <el-form-item :label="t('orders.manualDeliverContent')">
+          <el-input
+            v-model="deliverContent"
+            type="textarea"
+            :rows="6"
+            :placeholder="t('orders.manualDeliverContentPlaceholder')"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="deliverDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="delivering" @click="manualDeliver">{{
+          t('common.confirm')
+        }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -161,12 +192,16 @@ const logs = ref<any[]>([])
 const statusDialog = ref(false)
 const newStatus = ref('')
 const statusMessage = ref('')
+const deliverDialog = ref(false)
+const deliverContent = ref('')
+const delivering = ref(false)
 
 const statusOptions = computed(() => ({
   created: t('orders.status.created'),
   waiting_payment: t('orders.status.waiting_payment'),
   paid: t('orders.status.paid'),
   processing: t('orders.status.processing'),
+  pending_delivery: t('orders.status.pending_delivery'),
   delivered: t('orders.status.delivered'),
   completed: t('orders.status.completed'),
   payment_failed: t('orders.status.payment_failed'),
@@ -198,6 +233,24 @@ async function redeliver() {
     await load()
   } catch (e: any) {
     ElMessage.error(e.message)
+  }
+}
+async function manualDeliver() {
+  if (!deliverContent.value.trim()) {
+    ElMessage.warning(t('orders.manualDeliverRequired'))
+    return
+  }
+  delivering.value = true
+  try {
+    await api.post('/admin/orders/' + route.params.id + '/deliver', { content: deliverContent.value })
+    ElMessage.success(t('orders.manualDeliverSent'))
+    deliverDialog.value = false
+    deliverContent.value = ''
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    delivering.value = false
   }
 }
 async function cancelOrder() {
@@ -239,6 +292,7 @@ function statusType(status: string): any {
   const m: any = {
     paid: 'success',
     processing: 'success',
+    pending_delivery: 'warning',
     delivered: 'success',
     completed: 'success',
     waiting_payment: 'warning',

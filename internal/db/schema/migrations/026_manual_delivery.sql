@@ -1,0 +1,4 @@
+-- 026_manual_delivery.sql - 人工手动交付
+-- 商品交付方式：auto（卡密自动发货，默认）/ manual（人工手动交付）
+-- 订单快照交付方式 + 人工发货内容
+-- 由 Go 迁移器执行（legacyUpgrades["026_manual_delivery.sql"] -> ensureManualDeliveryColumns）

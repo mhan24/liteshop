@@ -10,7 +10,7 @@ import (
 // enqueuePaidEventsTx 在支付成功事务内写入 OrderPaid + OrderDelivered 到 outbox，
 // 保证"数据库状态"与"事件"永久一致（提交后崩溃也不丢事件）。
 func enqueuePaidEventsTx(tx *sql.Tx, orderID int64) error {
-	o, err := scanOrder(tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, created_at, updated_at, paid_at FROM orders WHERE id = ?`, orderID))
+	o, err := scanOrder(tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE id = ?`, orderID))
 	if err != nil {
 		return err
 	}
@@ -43,6 +43,20 @@ func enqueuePaidEventsTx(tx *sql.Tx, orderID int64) error {
 		return err
 	}
 	return enqueueOutboxTx(tx, events.OrderDeliveredEvent{}.EventName(), deliveredPayload)
+}
+
+// enqueuePaidOnlyEventTx 在支付事务内只写入 OrderPaid（人工手动交付订单无卡密可发，
+// 发货事件由管理员手动发货时另行触发）。
+func enqueuePaidOnlyEventTx(tx *sql.Tx, orderID int64) error {
+	o, err := scanOrder(tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE id = ?`, orderID))
+	if err != nil {
+		return err
+	}
+	paidPayload, err := events.Encode(events.OrderPaidEvent{Order: o, Cards: nil})
+	if err != nil {
+		return err
+	}
+	return enqueueOutboxTx(tx, events.OrderPaidEvent{}.EventName(), paidPayload)
 }
 
 // ErrNoRows 数据不存在或无变更。
@@ -103,6 +117,46 @@ func (r *OrderRepository) MarkPaidAndDeliver(orderID int64, tradeID, blockTx str
 	return delivered, nil
 }
 
+// MarkPaidPendingDelivery 人工手动交付订单的支付确认：waiting_payment → pending_delivery。
+// 不锁卡不发卡，仅写入支付成功事件（OrderPaid）。
+func (r *OrderRepository) MarkPaidPendingDelivery(orderID int64, tradeID, blockTx string, paidAt int64) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// 幂等台账：同一网关交易号只处理一次（与订单状态迁移同一事务）。
+	res, err := tx.Exec(`INSERT OR IGNORE INTO processed_events(event_key, event_type, processed_at)
+		VALUES(?, 'payment', ?)`, "bepusdt:"+tradeID, models.Now())
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return models.ErrAlreadyProcessed
+	}
+	res, err = tx.Exec(`UPDATE orders SET status = 'pending_delivery', payment_status = 'confirmed', trade_id = ?, block_transaction_id = ?, paid_at = ?, updated_at = ? WHERE id = ? AND status = 'waiting_payment'`, tradeID, blockTx, paidAt, paidAt, orderID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ErrNoRows
+	}
+	if err := enqueuePaidOnlyEventTx(tx, orderID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetManualDelivery 人工发货：pending_delivery → delivered，并保存发货内容。
+func (r *OrderRepository) SetManualDelivery(orderID int64, content string) (bool, error) {
+	res, err := r.db.Exec(`UPDATE orders SET status = 'delivered', delivery_content = ?, updated_at = ? WHERE id = ? AND status = 'pending_delivery'`, content, models.Now(), orderID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // CompleteFreeOrder 零金额订单（100% 折扣券）直接完成：created → paid 并发卡（单事务）。
 // 返回实际售出卡密数；订单状态已不是 created 时返回 ErrNoRows。
 func (r *OrderRepository) CompleteFreeOrder(orderID int64, paidAt int64) (int64, error) {
@@ -130,6 +184,26 @@ func (r *OrderRepository) CompleteFreeOrder(orderID int64, paidAt int64) (int64,
 		return 0, err
 	}
 	return delivered, nil
+}
+
+// CompleteFreeOrderManual 人工手动交付订单的零金额完成：created → pending_delivery。
+func (r *OrderRepository) CompleteFreeOrderManual(orderID int64, paidAt int64) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE orders SET status = 'pending_delivery', payment_status = 'confirmed', paid_at = ?, updated_at = ? WHERE id = ? AND status = 'created'`, paidAt, paidAt, orderID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ErrNoRows
+	}
+	if err := enqueuePaidOnlyEventTx(tx, orderID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ReleaseLockedCards 释放订单锁定的卡密（取消/过期）。

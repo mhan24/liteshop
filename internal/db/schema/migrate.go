@@ -25,6 +25,7 @@ var legacyUpgrades = map[string]func(*sql.DB) error{
 	"002_legacy_upgrade.sql":  legacyUpgrade,
 	"004_product_columns.sql": ensureProductColumns,
 	"015_secrets.sql":         ensureSecretsTable,
+	"026_manual_delivery.sql": ensureManualDeliveryColumns,
 }
 
 // Migrate 执行所有未应用的数据库迁移。
@@ -96,7 +97,7 @@ func migrationApplied(db *sql.DB, name string) (bool, error) {
 func isGoOnlyMigration(name string) bool {
 	// 注意：015_secrets.sql 含真实建表 SQL，必须走 runSQLMigration，
 	// 其后 Go 步骤 ensureSecretsTable 只做存量数据加密迁移。
-	return strings.Contains(name, "legacy_upgrade") || strings.Contains(name, "004_product_columns")
+	return strings.Contains(name, "legacy_upgrade") || strings.Contains(name, "004_product_columns") || strings.Contains(name, "026_manual_delivery")
 }
 
 func runSQLMigration(db *sql.DB, name string) error {

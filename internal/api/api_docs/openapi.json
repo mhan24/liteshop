@@ -38,6 +38,7 @@
           "min_qty": { "type": "integer" },
           "max_qty": { "type": "integer" },
           "cost_cents": { "type": "integer", "description": "仅管理端返回" },
+          "delivery_type": { "type": "string", "description": "交付方式：auto（卡密自动发货）/ manual（人工手动交付）" },
           "created_at": { "type": "integer" },
           "updated_at": { "type": "integer" }
         }
@@ -68,6 +69,8 @@
           "trade_id": { "type": "string" },
           "payment_url": { "type": "string" },
           "block_transaction_id": { "type": "string" },
+          "delivery_type": { "type": "string", "description": "交付方式快照：auto / manual" },
+          "delivery_content": { "type": "string", "description": "人工手动交付内容（发货时填写）" },
           "created_at": { "type": "integer" },
           "updated_at": { "type": "integer" },
           "paid_at": { "type": "integer" }
@@ -616,6 +619,23 @@
         "security": [{ "sessionCookie": [] }],
         "summary": "补发卡密（需 operator+，从库存补扣）",
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}/deliver": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "人工发货（需 operator+，人工手动交付订单：待发货 → 已发货并通知买家）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "content": { "type": "string", "description": "发货内容（卡密 / 交付说明）" } } }
+            }
+          }
+        },
         "responses": { "200": { "description": "ok" } }
       }
     },

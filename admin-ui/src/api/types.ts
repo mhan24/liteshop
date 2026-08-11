@@ -2751,6 +2751,8 @@ export interface components {
             max_qty?: number;
             /** @description 仅管理端返回 */
             cost_cents?: number;
+            /** @description 交付方式：auto（卡密自动发货）/ manual（人工手动交付） */
+            delivery_type?: string;
             created_at?: number;
             updated_at?: number;
         };
@@ -2776,6 +2778,10 @@ export interface components {
             trade_id?: string;
             payment_url?: string;
             block_transaction_id?: string;
+            /** @description 交付方式快照：auto / manual */
+            delivery_type?: string;
+            /** @description 人工手动交付内容（发货时填写） */
+            delivery_content?: string;
             created_at?: number;
             updated_at?: number;
             paid_at?: number;

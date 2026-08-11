@@ -140,6 +140,14 @@ func (n *Notifier) sendPaidJob(order models.Order, cards []models.Card) {
 	for _, c := range cards {
 		cardLines = append(cardLines, c.Content)
 	}
+	// 人工手动交付：无卡密，使用管理员人工填写的发货内容。
+	if len(cardLines) == 0 && strings.TrimSpace(order.DeliveryContent) != "" {
+		for _, line := range strings.Split(order.DeliveryContent, "\n") {
+			if strings.TrimSpace(line) != "" {
+				cardLines = append(cardLines, line)
+			}
+		}
+	}
 	paidAt := order.PaidAt
 	if paidAt <= 0 {
 		paidAt = models.Now()

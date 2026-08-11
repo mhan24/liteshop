@@ -183,6 +183,10 @@ func notifyEventConsumer(notifier *notify.Notifier) func(events.Event) {
 func mailEventConsumer(notifier *notify.Notifier) func(events.Event) {
 	return func(e events.Event) {
 		if ev, ok := e.(events.OrderPaidEvent); ok {
+			// 人工手动交付订单：支付成功不随支付发卡邮件，发货内容由管理员发货时发送。
+			if ev.Order.DeliveryType == models.DeliveryTypeManual {
+				return
+			}
 			notifier.SendPaid(ev.Order, ev.Cards)
 		}
 	}

@@ -189,9 +189,36 @@ func ensureProductColumns(db *sql.DB) error {
 		{"min_qty", "ALTER TABLE products ADD COLUMN min_qty INTEGER NOT NULL DEFAULT 1"},
 		{"max_qty", "ALTER TABLE products ADD COLUMN max_qty INTEGER NOT NULL DEFAULT 100"},
 		{"cost_cents", "ALTER TABLE products ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0"},
+		{"delivery_type", "ALTER TABLE products ADD COLUMN delivery_type TEXT NOT NULL DEFAULT 'auto'"},
 	}
 	for _, a := range additions {
 		exists, err := columnExists(db, "products", a.column)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := db.Exec(a.ddl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureManualDeliveryColumns 为存量库补充人工手动交付相关列（幂等）。
+func ensureManualDeliveryColumns(db *sql.DB) error {
+	additions := []struct {
+		table  string
+		column string
+		ddl    string
+	}{
+		{"products", "delivery_type", "ALTER TABLE products ADD COLUMN delivery_type TEXT NOT NULL DEFAULT 'auto'"},
+		{"orders", "delivery_type", "ALTER TABLE orders ADD COLUMN delivery_type TEXT NOT NULL DEFAULT 'auto'"},
+		{"orders", "delivery_content", "ALTER TABLE orders ADD COLUMN delivery_content TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, a := range additions {
+		exists, err := columnExists(db, a.table, a.column)
 		if err != nil {
 			return err
 		}

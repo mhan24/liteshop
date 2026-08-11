@@ -11,12 +11,16 @@ func (r *OrderRepository) CreatePendingOrder(order *models.Order) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, cost_cents, cost_snapshot_source, fiat, trade_type, buyer_contact, view_token, status, payment_status, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', 'created', ?, ?)`, order.OrderNo, order.ProductID, order.ProductName, order.Qty, order.AmountCents, order.CostCents, order.CostSnapshotSource, order.Fiat, order.TradeType, order.BuyerContact, order.ViewToken, order.CreatedAt, order.UpdatedAt)
+	res, err := tx.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, cost_cents, cost_snapshot_source, fiat, trade_type, buyer_contact, view_token, delivery_type, status, payment_status, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', 'created', ?, ?)`, order.OrderNo, order.ProductID, order.ProductName, order.Qty, order.AmountCents, order.CostCents, order.CostSnapshotSource, order.Fiat, order.TradeType, order.BuyerContact, order.ViewToken, order.DeliveryType, order.CreatedAt, order.UpdatedAt)
 	if err != nil {
 		return err
 	}
 	order.ID, _ = res.LastInsertId()
+	// 人工手动交付：不锁定卡密库存，支付成功后等待管理员人工发货。
+	if order.DeliveryType == models.DeliveryTypeManual {
+		return tx.Commit()
+	}
 	// 原子锁卡：单条条件 UPDATE（子查询限量为"扣库存"），以受影响行数判定成功。
 	// 并发下多个事务同时抢最后一张卡时，只有一个事务能锁到足够数量，其余 affected < qty。
 	res, err = tx.Exec(`UPDATE cards SET status = 'locked', reserved_order = ?, updated_at = ?
