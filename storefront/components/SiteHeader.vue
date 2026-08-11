@@ -14,12 +14,8 @@
     </nav>
     <div class="flex-1 sm:hidden"></div>
     <div class="flex items-center gap-1">
-      <Button :variant="locale === 'zh' ? 'secondary' : 'ghost'" size="sm" @click="setLocale('zh')">
-        中文
-      </Button>
-      <Button :variant="locale === 'en' ? 'secondary' : 'ghost'" size="sm" @click="setLocale('en')">
-        EN
-      </Button>
+      <Button :variant="locale === 'zh' ? 'secondary' : 'ghost'" size="sm" @click="setLocale('zh')"> 中文 </Button>
+      <Button :variant="locale === 'en' ? 'secondary' : 'ghost'" size="sm" @click="setLocale('en')"> EN </Button>
     </div>
   </header>
 </template>

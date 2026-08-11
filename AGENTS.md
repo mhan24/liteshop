@@ -69,6 +69,6 @@
 - 订单状态与支付状态必须分离：订单状态描述履约生命周期，支付状态写 `orders.payment_status`（created/pending/confirmed/failed/cancelled）；不得用订单状态表达支付语义；
 - 备份逻辑必须带校验（备份后只读打开 + `PRAGMA integrity_check`，失败删除坏文件）；
 - 后台任务执行必须记录 `job_runs`（由调度器统一写入 status/error），新增任务时确保返回 error 以正确记录失败；
-- 工作流（P0）：**每次代码变更必须提交并推送到 origin/main，并同步部署到服务器**：服务器 `git pull` → 重新构建有改动的前端（`admin-ui npm install && npm run build` / `storefront npm install && npm run build`）→ `go build ./... && go test ./internal/...` 通过 → 替换二进制 / 前台产物并重启 systemd 服务（`cardshop` / `liteshop-storefront`）→ 线上验证。
+- 工作流（P0）：**变更走分支 + PR，禁止直接推送 main 并立即部署**。PR 必须通过 CI 质量门禁（admin/storefront：lint、format:check、typecheck、build；Go：gofmt、vet、staticcheck、govulncheck、build、test；gen:api diff）。发布打 `v*` tag，Release 复用同一套质量门禁，产物（tgz + SHA256）经 `install.sh` 部署；服务器部署：`git fetch` 检出 tag → `npm ci` 构建有改动的前端 → `go build ./... && go test ./internal/...` 通过 → 替换二进制 / 前台产物并重启 systemd 服务（`cardshop` / `liteshop-storefront`）→ 线上验证。
 - Go 工具链必须 ≥1.25.12（govulncheck 基线）；升级 Go 后跑 `govulncheck ./...` 确认无新漏洞。
 - npm audit 基线：admin-ui 的 js-yaml 告警（经 openapi-typescript 的 @redocly/openapi-core）为**构建期依赖**且无补丁回移；codegen 只读仓库内可信 openapi.json，生产运行时不加载，不构成可利用面。升级或移除 openapi-typescript 前保持记录即可。

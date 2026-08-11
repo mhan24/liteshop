@@ -136,15 +136,12 @@ build_app() {
 
   info "构建后台 admin-ui..."
   cd "$SRC_DIR/admin-ui"
-  npm install --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund
+  npm ci --no-audit --no-fund
   npm run build
 
   info "构建前台 storefront..."
   cd "$SRC_DIR/storefront"
-  # 规避 npm optional 平台依赖 bug (oxc/rollup binding): 全新安装
-  rm -f package-lock.json
-  rm -rf node_modules
-  npm install --no-audit --no-fund >/dev/null 2>&1 || true
+  npm ci --no-audit --no-fund
   npm run build
 
   info "构建 Go 二进制..."

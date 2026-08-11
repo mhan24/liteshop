@@ -53,13 +53,7 @@
             </Select>
           </FormField>
           <FormField :label="t('coupons.valueLabel')">
-            <Input
-              v-if="form.type === 'percent'"
-              v-model.number="form.percent"
-              type="number"
-              min="1"
-              max="100"
-            />
+            <Input v-if="form.type === 'percent'" v-model.number="form.percent" type="number" min="1" max="100" />
             <Input v-else v-model.number="form.value" type="number" step="0.01" min="0.01" />
           </FormField>
         </div>

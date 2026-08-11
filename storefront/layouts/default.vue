@@ -51,7 +51,9 @@ const { t } = useI18n()
 const site = ref<any>({})
 try {
   site.value = await useApi().get('/site')
-} catch {}
+} catch {
+  /* 站点信息加载失败时使用默认空配置 */
+}
 loadSiteConfig(site.value)
 
 const maintenance = computed(() => !!site.value?.maintenance?.enabled)
@@ -70,7 +72,6 @@ onMounted(() => {
   showAnnouncement.value = true
   localStorage.setItem(key, '1')
 })
-const hasUnlock = ref(true)
 const unlockPassword = ref('')
 const unlocking = ref(false)
 const unlockError = ref('')
@@ -95,7 +96,7 @@ useHead(() => {
   const ogImage = st.default_product_image || ''
   const mt = t('maintenance')
   return {
-    title: maintenance.value ? mt : (st.title || 'LiteShop'),
+    title: maintenance.value ? mt : st.title || 'LiteShop',
     titleTemplate: (tt?: string) => (tt && tt !== title ? `${tt} - ${title}` : title),
     htmlAttrs: { lang: st.lang || 'zh-CN' },
     meta: [

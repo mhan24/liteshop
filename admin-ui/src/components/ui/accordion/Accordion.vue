@@ -2,10 +2,7 @@
 import type { AccordionRootEmits, AccordionRootProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
-import {
-  AccordionRoot,
-  useForwardPropsEmits,
-} from 'reka-ui'
+import { AccordionRoot, useForwardPropsEmits } from 'reka-ui'
 import { cn } from '@/lib/utils'
 
 const props = defineProps<AccordionRootProps & { class?: HTMLAttributes['class'] }>()

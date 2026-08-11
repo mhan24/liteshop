@@ -82,11 +82,7 @@
             <Badge variant="destructive">{{ stats.low_stock?.length || 0 }}</Badge>
           </CardHeader>
           <CardContent>
-            <DataTable
-              :columns="lowStockColumns"
-              :rows="stats.low_stock || []"
-              :empty-text="t('dashboard.noLowStock')"
-            >
+            <DataTable :columns="lowStockColumns" :rows="stats.low_stock || []" :empty-text="t('dashboard.noLowStock')">
               <template #stock="{ row }">
                 <Badge :class="row.available === 0 ? 'bg-red-500/15 text-red-700' : 'bg-amber-500/15 text-amber-700'">
                   {{ row.available }}
@@ -94,7 +90,12 @@
               </template>
               <template #price="{ row }">{{ fmtMoney(row.price_cents) }}</template>
               <template #action="{ row }">
-                <Button variant="ghost" size="sm" class="h-7 px-2" @click="$router.push('/products/' + row.id + '/cards')">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="h-7 px-2"
+                  @click="$router.push('/products/' + row.id + '/cards')"
+                >
                   {{ t('common.edit') }}
                 </Button>
               </template>
@@ -127,8 +128,12 @@
               <div class="flex items-center justify-between py-2.5">
                 <dt class="text-muted-foreground">{{ t('dashboard.cardStock') }}</dt>
                 <dd class="flex flex-wrap items-center gap-1.5">
-                  <Badge class="bg-emerald-500/15 text-emerald-700">{{ t('cards.status.available') }}: {{ stats.available_cards || 0 }}</Badge>
-                  <Badge class="bg-amber-500/15 text-amber-700">{{ t('cards.status.locked') }}: {{ stats.locked_cards || 0 }}</Badge>
+                  <Badge class="bg-emerald-500/15 text-emerald-700"
+                    >{{ t('cards.status.available') }}: {{ stats.available_cards || 0 }}</Badge
+                  >
+                  <Badge class="bg-amber-500/15 text-amber-700"
+                    >{{ t('cards.status.locked') }}: {{ stats.locked_cards || 0 }}</Badge
+                  >
                   <Badge variant="secondary">{{ t('cards.status.sold') }}: {{ stats.sold_cards || 0 }}</Badge>
                 </dd>
               </div>

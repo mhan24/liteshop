@@ -14,11 +14,7 @@
       <CardContent>
         <form class="flex flex-wrap items-end gap-4" @submit.prevent="search">
           <FormField :label="t('orders.searchPlaceholder')">
-            <Input
-              v-model="filters.q"
-              class="w-56"
-              :placeholder="t('orders.searchPlaceholder')"
-            />
+            <Input v-model="filters.q" class="w-56" :placeholder="t('orders.searchPlaceholder')" />
           </FormField>
           <FormField :label="t('orders.allStatus')">
             <Select v-model="statusFilter">
@@ -51,10 +47,7 @@
       <CardContent class="p-0">
         <DataTable :columns="columns" :rows="pagedOrders" :loading="loading" :empty-text="t('audit.empty')">
           <template #select="{ row }">
-            <Checkbox
-              :checked="selected.includes(row.id)"
-              @update:checked="toggleSelect(row.id)"
-            />
+            <Checkbox :checked="selected.includes(row.id)" @update:checked="toggleSelect(row.id)" />
           </template>
           <template #amount="{ row }">{{ money(row.amount_cents) }} {{ row.fiat }}</template>
           <template #status="{ row }">

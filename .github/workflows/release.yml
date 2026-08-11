@@ -5,8 +5,13 @@ on:
     tags: ['v*']
 
 jobs:
+  quality:
+    name: Quality gates
+    uses: ./.github/workflows/quality.yml
+
   release:
     name: Build release artifact
+    needs: [quality]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

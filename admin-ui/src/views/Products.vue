@@ -17,7 +17,9 @@
           <template #delivery="{ row }">
             <Badge
               variant="secondary"
-              :class="row.delivery_type === 'manual' ? 'bg-amber-500/15 text-amber-700' : 'bg-emerald-500/15 text-emerald-700'"
+              :class="
+                row.delivery_type === 'manual' ? 'bg-amber-500/15 text-amber-700' : 'bg-emerald-500/15 text-emerald-700'
+              "
             >
               {{ row.delivery_type === 'manual' ? t('products.manualDelivery') : t('products.autoDelivery') }}
             </Badge>

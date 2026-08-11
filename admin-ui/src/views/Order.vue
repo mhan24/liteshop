@@ -16,7 +16,9 @@
       <Card v-if="store.canWrite" class="mt-4">
         <CardContent class="flex flex-wrap gap-2">
           <Button
-            v-if="['paid', 'processing', 'delivered', 'completed', 'delivery_failed'].includes(order.status) && cards.length"
+            v-if="
+              ['paid', 'processing', 'delivered', 'completed', 'delivery_failed'].includes(order.status) && cards.length
+            "
             size="sm"
             @click="resend"
           >
@@ -184,11 +186,7 @@
 
       <Modal :open="deliverDialog" :title="t('orders.manualDeliver')" @close="deliverDialog = false">
         <FormField :label="t('orders.manualDeliverContent')">
-          <Textarea
-            v-model="deliverContent"
-            rows="6"
-            :placeholder="t('orders.manualDeliverContentPlaceholder')"
-          />
+          <Textarea v-model="deliverContent" rows="6" :placeholder="t('orders.manualDeliverContentPlaceholder')" />
         </FormField>
         <template #footer>
           <Button variant="outline" @click="deliverDialog = false">{{ t('common.cancel') }}</Button>

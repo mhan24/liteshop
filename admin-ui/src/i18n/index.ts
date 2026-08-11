@@ -246,7 +246,8 @@ const messages = {
       hashpayBaseUrl: 'HashPay 站点地址',
       hashpayMerchantId: '商户 ID',
       hashpayPrivateKey: '商户私钥',
-      hashpayPrivateKeyPlaceholder: '以 -----BEGIN PRIVATE KEY----- 开头（不是公钥）；创建商户时仅显示一次，已配置可留空',
+      hashpayPrivateKeyPlaceholder:
+        '以 -----BEGIN PRIVATE KEY----- 开头（不是公钥）；创建商户时仅显示一次，已配置可留空',
       hashpayCurrency: '请求货币（默认 USD）',
       hashpayNotifyPathPlaceholder: '留空默认 /notify/hashpay（自定义可隐藏回调地址防扫描）',
       hashpayHint: '请把 HashPay 商户后台的 Callback 地址设置为下方的回调地址',
@@ -673,7 +674,8 @@ const messages = {
       hashpayBaseUrl: 'HashPay Base URL',
       hashpayMerchantId: 'Merchant ID',
       hashpayPrivateKey: 'Merchant private key',
-      hashpayPrivateKeyPlaceholder: 'Starts with -----BEGIN PRIVATE KEY----- (not the public key); shown only once, leave blank to keep',
+      hashpayPrivateKeyPlaceholder:
+        'Starts with -----BEGIN PRIVATE KEY----- (not the public key); shown only once, leave blank to keep',
       hashpayCurrency: 'Request currency (default USD)',
       hashpayNotifyPathPlaceholder: 'Blank = /notify/hashpay (customize to hide endpoint)',
       hashpayHint: 'Set the merchant Callback URL in the HashPay admin panel to the notify URL below',
