@@ -993,6 +993,34 @@ paths:
       responses:
         '200':
           description: ok
+  /api/v1/admin/cards/{id}/status:
+    post:
+      tags:
+      - admin
+      security:
+      - sessionCookie: []
+      summary: 手动设置卡密状态（需 operator+，available/locked/sold/disabled）
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  description: available（可用）/ locked（锁定）/ sold（已售出）/ disabled（停用）
+      responses:
+        '200':
+          description: ok
+        '409':
+          description: 卡密不存在或已绑定订单
   /api/v1/admin/orders:
     get:
       tags:

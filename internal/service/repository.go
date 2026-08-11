@@ -65,6 +65,7 @@ type KeyRepository interface {
 	ListByProduct(productID int64) ([]models.Card, error)
 	Add(productID int64, contents []string, dedupe bool) (added, skipped int, err error)
 	DeleteAvailable(cardID int64) error
+	SetManualStatus(cardID int64, status string, soldAt int64) (bool, error)
 	AvailableCount(productID int64) (int, error)
 	SoldCountSince(ts int64) (int, error)
 	StockStats() (products, available, sold, locked int, err error)

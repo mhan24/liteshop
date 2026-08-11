@@ -20,7 +20,9 @@
       <el-table-column prop="id" :label="t('common.id')" width="80" />
       <el-table-column prop="content" :label="t('cards.content')" />
       <el-table-column :label="t('common.status')">
-        <template #default="{ row }">{{ statusText(row.status) }}</template>
+        <template #default="{ row }">
+          <el-tag :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+        </template>
       </el-table-column>
       <el-table-column :label="t('cards.reservedOrder')">
         <template #default="{ row }">{{ row.reserved_order || '-' }}</template>
@@ -34,11 +36,23 @@
       <el-table-column :label="t('cards.soldAt')">
         <template #default="{ row }">{{ date(row.sold_at) }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.actions')" width="100">
+      <el-table-column :label="t('common.actions')" width="130">
         <template #default="{ row }">
-          <el-button v-if="row.status === 'available'" size="small" type="danger" @click="remove(row.id)">{{
-            t('common.delete')
-          }}</el-button>
+          <el-dropdown v-if="canManage(row)" trigger="click" @command="(cmd: string) => onAction(row, cmd)">
+            <el-button size="small" type="primary" plain>
+              {{ t('common.actions') }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-if="row.status !== 'available'" command="available">{{ t('cards.markAvailable') }}</el-dropdown-item>
+                <el-dropdown-item v-if="row.status !== 'locked'" command="locked">{{ t('cards.markLocked') }}</el-dropdown-item>
+                <el-dropdown-item v-if="row.status !== 'sold'" command="sold">{{ t('cards.markSold') }}</el-dropdown-item>
+                <el-dropdown-item v-if="row.status !== 'disabled'" command="disabled">{{ t('cards.markDisabled') }}</el-dropdown-item>
+                <el-dropdown-item v-if="row.status === 'available'" divided command="delete">{{ t('common.delete') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <span v-else class="text-gray-400 text-sm">{{ t('cards.orderBound') }}</span>
         </template>
       </el-table-column>
     </el-table>
@@ -50,6 +64,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown } from '@element-plus/icons-vue'
 import { api } from '@/api'
 
 const route = useRoute()
@@ -95,8 +110,38 @@ async function remove(id: number) {
   await api.post('/admin/cards/' + id + '/delete', {})
   await load()
 }
+async function onAction(row: any, cmd: string) {
+  if (cmd === 'delete') {
+    await remove(row.id)
+    return
+  }
+  await ElMessageBox.confirm(t('cards.statusConfirm').replace('{status}', statusText(cmd)), t('common.prompt'), { type: 'warning' })
+  try {
+    await api.post('/admin/cards/' + row.id + '/status', { status: cmd })
+    ElMessage.success(t('cards.statusSaved'))
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e.message || t('cards.statusFail'))
+  }
+}
+function canManage(row: any) {
+  return !row.reserved_order && !row.sold_order
+}
 function statusText(status: string) {
   return (t(`cards.status.${status}`) as string) || status
+}
+function statusType(status: string) {
+  switch (status) {
+    case 'available':
+      return 'success'
+    case 'locked':
+      return 'warning'
+    case 'sold':
+      return 'info'
+    case 'disabled':
+      return 'danger'
+  }
+  return 'info'
 }
 function date(ts: number) {
   if (!ts) return '-'

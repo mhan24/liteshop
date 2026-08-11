@@ -479,4 +479,5 @@ var (
 	ErrAlreadyProcessed    = errors.New("event already processed")
 	ErrUsernameTaken       = errors.New("username already taken")
 	ErrCouponExists        = errors.New("coupon code already exists")
+	ErrCardBusy            = errors.New("卡密不存在或已绑定订单，无法手动修改")
 )

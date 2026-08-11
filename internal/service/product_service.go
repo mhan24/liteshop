@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"strings"
 
 	"shop/internal/models"
@@ -154,6 +155,28 @@ func (s *ProductService) ImportCards(productID int64, contents []string, dedupe 
 
 func (s *ProductService) DeleteCard(cardID int64) error {
 	return s.keys.DeleteAvailable(cardID)
+}
+
+// SetCardStatus 手动设置卡密状态（可用/锁定/已售出/停用）。
+// 标记为已售出时记录售出时间；卡密已绑定订单时返回 ErrCardBusy。
+func (s *ProductService) SetCardStatus(cardID int64, status string) error {
+	status = strings.TrimSpace(status)
+	var soldAt int64
+	switch status {
+	case models.CardAvailable, models.CardLocked, models.CardDisabled:
+	case models.CardSold:
+		soldAt = models.Now()
+	default:
+		return errors.New("invalid card status: " + status)
+	}
+	ok, err := s.keys.SetManualStatus(cardID, status, soldAt)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return models.ErrCardBusy
+	}
+	return nil
 }
 
 func (s *ProductService) AvailableCount(productID int64) (int, error) {

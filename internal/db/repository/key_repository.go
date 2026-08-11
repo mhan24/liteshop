@@ -77,6 +77,22 @@ func (r *KeyRepository) DeleteAvailable(cardID int64) error {
 	return err
 }
 
+// SetManualStatus 手动设置卡密状态（available/locked/sold/disabled）。
+// 仅允许未被订单锁定（reserved_order=0）且未通过订单售出（sold_order=0）的卡密，
+// 避免人工操作破坏订单/库存一致性。soldAt 传 0 清除售出时间。
+// 返回是否更新成功（false 表示卡密不存在或已绑定订单）。
+func (r *KeyRepository) SetManualStatus(cardID int64, status string, soldAt int64) (bool, error) {
+	res, err := r.db.Exec(
+		`UPDATE cards SET status = ?, sold_at = ?, updated_at = ? WHERE id = ? AND reserved_order = 0 AND sold_order = 0`,
+		status, soldAt, models.Now(), cardID,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // AvailableCount 返回商品可用卡密数。
 func (r *KeyRepository) AvailableCount(productID int64) (int, error) {
 	var n int

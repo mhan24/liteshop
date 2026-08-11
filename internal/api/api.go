@@ -69,6 +69,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/admin/products/{id}/cards/export", s.requireAdminAPI(http.HandlerFunc(s.apiAdminCardsExport)))
 	mux.Handle("POST /api/v1/admin/products/{id}/cards", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCardsImport)))
 	mux.Handle("POST /api/v1/admin/cards/{id}/delete", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCardDelete)))
+	mux.Handle("POST /api/v1/admin/cards/{id}/status", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCardStatus)))
 	mux.Handle("GET /api/v1/admin/orders/export", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrdersExport)))
 	mux.Handle("GET /api/v1/admin/orders", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrders)))
 	mux.Handle("GET /api/v1/admin/orders/{id}", s.requireAdminAPI(http.HandlerFunc(s.apiAdminOrder)))
@@ -1027,6 +1028,30 @@ func (s *Server) apiAdminCardDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.products.DeleteCard(id)
 	s.audit(r, "card_delete", "card", fmt.Sprintf("%d", id), "", "deleted")
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// apiAdminCardStatus 手动设置卡密状态（available/locked/sold/disabled）。
+func (s *Server) apiAdminCardStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	var input struct {
+		Status string `json:"status"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
+	status := strings.TrimSpace(input.Status)
+	if err := s.products.SetCardStatus(id, status); err != nil {
+		if errors.Is(err, models.ErrCardBusy) {
+			writeError(w, 409, err.Error())
+			return
+		}
+		writeError(w, 400, err.Error())
+		return
+	}
+	s.audit(r, "card_status", "card", fmt.Sprintf("%d", id), "", "status="+status)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
