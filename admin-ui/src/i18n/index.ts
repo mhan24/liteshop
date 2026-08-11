@@ -2,6 +2,9 @@ import { createI18n } from 'vue-i18n'
 
 const messages = {
   zh: {
+    app: {
+      title: 'LiteShop 后台',
+    },
     common: {
       save: '保存',
       back: '返回',
@@ -21,6 +24,9 @@ const messages = {
       no: '否',
       prompt: '提示',
     },
+    pagination: {
+      total: '共 {total} 条',
+    },
     login: {
       title: '后台登录',
       username: '用户名',
@@ -33,6 +39,7 @@ const messages = {
       verify: '验证',
     },
     nav: {
+      manage: '系统管理',
       home: '后台首页',
       products: '商品管理',
       orders: '订单管理',
@@ -140,6 +147,7 @@ const messages = {
       contact: '联系方式',
       createdAt: '创建时间',
       tradeId: '交易 ID',
+      tradeType: '交易类型',
       checkout: '收银台',
       markExpired: '标记过期',
       resend: '重发通知',
@@ -421,6 +429,9 @@ const messages = {
     },
   },
   en: {
+    app: {
+      title: 'LiteShop Admin',
+    },
     common: {
       save: 'Save',
       back: 'Back',
@@ -440,6 +451,9 @@ const messages = {
       no: 'No',
       prompt: 'Notice',
     },
+    pagination: {
+      total: '{total} items',
+    },
     login: {
       title: 'Admin Login',
       username: 'Username',
@@ -452,6 +466,7 @@ const messages = {
       verify: 'Verify',
     },
     nav: {
+      manage: 'Manage',
       home: 'Dashboard',
       products: 'Products',
       orders: 'Orders',
@@ -559,6 +574,7 @@ const messages = {
       contact: 'Contact',
       createdAt: 'Created at',
       tradeId: 'Trade ID',
+      tradeType: 'Trade type',
       checkout: 'Checkout',
       markExpired: 'Mark expired',
       resend: 'Resend',

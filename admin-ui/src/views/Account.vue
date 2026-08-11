@@ -1,87 +1,81 @@
 <template>
-  <el-card v-loading="loading">
-    <template #header
-      ><h2>{{ t('account.title') }}</h2></template
-    >
-    <el-form ref="formRef" :model="form" label-position="top" style="max-width: 480px">
-      <el-form-item
-        :label="t('account.username')"
-        prop="username"
-        :rules="[{ required: true, message: t('account.username') }]"
-      >
-        <el-input v-model="form.username" />
-      </el-form-item>
-      <el-form-item
-        :label="t('account.currentPassword')"
-        prop="current_password"
-        :rules="[{ required: true, message: t('account.currentPasswordRequired') }]"
-      >
-        <el-input v-model="form.current_password" type="password" show-password />
-      </el-form-item>
-      <el-form-item :label="t('account.newPassword')"
-        ><el-input v-model="form.new_password" type="password" show-password
-      /></el-form-item>
-      <el-form-item :label="t('account.confirmPassword')"
-        ><el-input v-model="form.confirm_password" type="password" show-password
-      /></el-form-item>
-      <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
-    </el-form>
-  </el-card>
+  <div class="space-y-4">
+    <PageCard :title="t('account.title')" :loading="loading">
+      <div class="max-w-md space-y-4">
+        <FormField :label="t('account.username')" required>
+          <input v-model="form.username" class="input input-bordered w-full" />
+        </FormField>
+        <FormField :label="t('account.currentPassword')" required>
+          <input v-model="form.current_password" type="password" class="input input-bordered w-full" />
+        </FormField>
+        <FormField :label="t('account.newPassword')">
+          <input v-model="form.new_password" type="password" class="input input-bordered w-full" />
+        </FormField>
+        <FormField :label="t('account.confirmPassword')">
+          <input v-model="form.confirm_password" type="password" class="input input-bordered w-full" />
+        </FormField>
+        <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="save">
+          <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+          {{ t('common.save') }}
+        </button>
+      </div>
+    </PageCard>
 
-  <!-- TOTP 双因素 -->
-  <el-card v-loading="totpLoading" style="margin-top: 16px">
-    <template #header
-      ><h2>{{ t('account.totp') }}</h2></template
-    >
+    <PageCard :title="t('account.totp')" :loading="totpLoading">
+      <div v-if="!totp.enabled" class="max-w-md space-y-4">
+        <p class="text-sm opacity-70">{{ t('account.totpHint') }}</p>
+        <button class="btn btn-primary btn-sm" @click="generateTotp">{{ t('account.totpGenerate') }}</button>
 
-    <template v-if="!totp.enabled">
-      <p class="muted">{{ t('account.totpHint') }}</p>
-      <el-button type="primary" @click="generateTotp">{{ t('account.totpGenerate') }}</el-button>
-
-      <div v-if="totp.secret" style="margin-top: 16px">
-        <el-alert :title="t('account.totpScanHint')" type="info" :closable="false" />
-        <img
-          v-if="qrDataUrl"
-          :src="qrDataUrl"
-          alt="TOTP QR"
-          style="width: 200px; height: 200px; margin-top: 12px; border: 1px solid #eee; border-radius: 8px"
-        />
-        <p class="muted" style="margin-top: 8px">
-          {{ t('account.totpSecret') }}: <code class="mono">{{ totp.secret }}</code>
-        </p>
-        <p class="muted">
-          <code class="mono">{{ otpauth }}</code>
-        </p>
-        <div style="margin-top: 12px; display: flex; gap: 8px">
-          <el-input v-model="totpCode" :placeholder="t('account.totpCodePlaceholder')" style="width: 220px" />
-          <el-button type="primary" :loading="totpSaving" @click="enableTotp">{{ t('account.totpConfirm') }}</el-button>
+        <div v-if="totp.secret" class="rounded-xl bg-base-200/70 p-4">
+          <div class="alert alert-info text-sm">
+            <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="16" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12.01" y2="8" />
+            </svg>
+            {{ t('account.totpScanHint') }}
+          </div>
+          <img v-if="qrDataUrl" :src="qrDataUrl" alt="TOTP QR" class="mt-3 h-48 w-48 rounded-lg border border-base-300 bg-white p-1" />
+          <p class="mt-2 text-sm opacity-70">
+            {{ t('account.totpSecret') }}: <code class="mono font-semibold">{{ totp.secret }}</code>
+          </p>
+          <p class="mono mt-1 text-xs opacity-60">{{ otpauth }}</p>
+          <div class="mt-3 flex items-center gap-2">
+            <input v-model="totpCode" class="input input-bordered input-sm w-40" :placeholder="t('account.totpCodePlaceholder')" />
+            <button class="btn btn-primary btn-sm" :class="{ 'btn-disabled': totpSaving }" @click="enableTotp">
+              <span v-if="totpSaving" class="loading loading-spinner loading-xs"></span>
+              {{ t('account.totpConfirm') }}
+            </button>
+          </div>
         </div>
       </div>
-    </template>
 
-    <template v-else>
-      <el-tag type="success">{{ t('account.totpEnabled') }}</el-tag>
-      <div style="margin-top: 12px; display: flex; gap: 8px">
-        <el-input v-model="disableCode" :placeholder="t('account.totpCodePlaceholder')" style="width: 220px" />
-        <el-button type="danger" plain :loading="totpSaving" @click="disableTotp">{{
-          t('account.totpDisable')
-        }}</el-button>
+      <div v-else class="max-w-md space-y-4">
+        <span class="badge badge-success">{{ t('account.totpEnabled') }}</span>
+        <div class="flex items-center gap-2">
+          <input v-model="disableCode" class="input input-bordered input-sm w-40" :placeholder="t('account.totpCodePlaceholder')" />
+          <button class="btn btn-error btn-outline btn-sm" :class="{ 'btn-disabled': totpSaving }" @click="disableTotp">
+            <span v-if="totpSaving" class="loading loading-spinner loading-xs"></span>
+            {{ t('account.totpDisable') }}
+          </button>
+        </div>
       </div>
-    </template>
-  </el-card>
+    </PageCard>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, FormInstance } from 'element-plus'
 import QRCode from 'qrcode'
 import { api } from '@/api'
+import PageCard from '@/components/PageCard.vue'
+import FormField from '@/components/ui/FormField.vue'
+import { toastError, toastSuccess, toastWarning } from '@/components/ui/toast'
 
 const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
-const formRef = ref<FormInstance>()
 const form = reactive({ username: '', current_password: '', new_password: '', confirm_password: '' })
 
 const totpLoading = ref(false)
@@ -137,7 +131,7 @@ async function generateTotp() {
     totp.value.secret = data.secret
     totp.value.issuer = data.issuer || 'LiteShop'
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   } finally {
     totpLoading.value = false
   }
@@ -146,10 +140,10 @@ async function enableTotp() {
   totpSaving.value = true
   try {
     await api.post('/admin/totp/enable', { secret: totp.value.secret, otp: totpCode.value })
-    ElMessage.success(t('account.totpDone'))
+    toastSuccess(t('account.totpDone'))
     await loadTotp()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   } finally {
     totpSaving.value = false
   }
@@ -158,41 +152,35 @@ async function disableTotp() {
   totpSaving.value = true
   try {
     await api.post('/admin/totp/disable', { otp: disableCode.value })
-    ElMessage.success(t('account.totpDisabled'))
+    toastSuccess(t('account.totpDisabled'))
     await loadTotp()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   } finally {
     totpSaving.value = false
   }
 }
 
 async function save() {
-  if (!formRef.value) return
-  await formRef.value.validate(async (ok) => {
-    if (!ok) return
-    saving.value = true
-    try {
-      await api.post('/admin/account', form)
-      ElMessage.success(t('account.saved'))
-      form.current_password = ''
-      form.new_password = ''
-      form.confirm_password = ''
-    } catch (e: any) {
-      ElMessage.error(e.message)
-    } finally {
-      saving.value = false
-    }
-  })
+  if (!form.username.trim()) {
+    toastWarning(t('account.username'))
+    return
+  }
+  if (!form.current_password) {
+    toastWarning(t('account.currentPasswordRequired'))
+    return
+  }
+  saving.value = true
+  try {
+    await api.post('/admin/account', form)
+    toastSuccess(t('account.saved'))
+    form.current_password = ''
+    form.new_password = ''
+    form.confirm_password = ''
+  } catch (e: any) {
+    toastError(e.message)
+  } finally {
+    saving.value = false
+  }
 }
 </script>
-
-<style scoped>
-.muted {
-  color: #999;
-  font-size: 13px;
-}
-.mono {
-  font-family: ui-monospace, monospace;
-}
-</style>

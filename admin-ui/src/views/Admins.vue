@@ -1,77 +1,86 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-      <h2>{{ t('admins.title') }}</h2>
-      <el-button type="primary" @click="dialog = true">{{ t('admins.add') }}</el-button>
+    <div class="mb-4 flex items-center justify-between gap-3">
+      <h2 class="text-xl font-bold">{{ t('admins.title') }}</h2>
+      <button class="btn btn-primary btn-sm" @click="dialog = true">{{ t('admins.add') }}</button>
     </div>
-    <el-table v-loading="loading" :data="admins" size="large">
-      <el-table-column prop="id" :label="t('common.id')" width="80" />
-      <el-table-column prop="username" :label="t('admins.username')" />
-      <el-table-column :label="t('admins.role')" width="140">
-        <template #default="{ row }">
-          <el-tag :type="roleType(row.role)">{{ roleText(row.role) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('admins.createdAt')" width="170">
-        <template #default="{ row }">{{ fmtDate(row.created_at) }}</template>
-      </el-table-column>
-      <el-table-column :label="t('common.actions')" width="200">
-        <template #default="{ row }">
-          <el-select
-            :model-value="row.role"
-            size="small"
-            style="width: 110px"
-            :disabled="row.id === store.username ? false : false"
-            @change="(v: string) => setRole(row, v)"
-          >
-            <el-option v-for="(label, key) in roleOptions" :key="key" :label="label" :value="key" />
-          </el-select>
-          <el-button size="small" type="danger" text :disabled="row.id === currentId" @click="remove(row)">{{
-            t('admins.delete')
-          }}</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
 
-    <el-dialog v-model="dialog" :title="t('admins.add')" width="400px">
-      <el-form label-position="top">
-        <el-form-item :label="t('admins.username')"><el-input v-model="form.username" /></el-form-item>
-        <el-form-item :label="t('admins.password')"
-          ><el-input v-model="form.password" type="password" show-password
-        /></el-form-item>
-        <el-form-item :label="t('admins.role')">
-          <el-select v-model="form.role" style="width: 100%">
-            <el-option v-for="(label, key) in roleOptions" :key="key" :label="label" :value="key" />
-          </el-select>
-        </el-form-item>
-      </el-form>
+    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
+      <div class="card-body !p-0">
+        <DataTable :columns="columns" :rows="admins" :loading="loading" :empty-text="t('audit.empty')">
+          <template #role="{ row }">
+            <span class="badge badge-sm" :class="roleBadgeClass(row.role)">{{ roleText(row.role) }}</span>
+          </template>
+          <template #createdAt="{ row }">{{ fmtDate(row.created_at) }}</template>
+          <template #actions="{ row }">
+            <div class="flex items-center gap-2">
+              <select
+                :model-value="row.role"
+                class="select select-bordered select-xs w-28"
+                @change="(e: any) => setRole(row, e.target.value)"
+              >
+                <option v-for="(label, key) in roleOptions" :key="key" :value="key">{{ label }}</option>
+              </select>
+              <button class="btn btn-ghost btn-error btn-xs" :disabled="row.id === currentId" @click="remove(row)">
+                {{ t('admins.delete') }}
+              </button>
+            </div>
+          </template>
+        </DataTable>
+      </div>
+    </div>
+
+    <Modal :open="dialog" :title="t('admins.add')" @close="dialog = false">
+      <div class="space-y-4">
+        <FormField :label="t('admins.username')">
+          <input v-model="form.username" class="input input-bordered w-full" />
+        </FormField>
+        <FormField :label="t('admins.password')">
+          <input v-model="form.password" type="password" class="input input-bordered w-full" />
+        </FormField>
+        <FormField :label="t('admins.role')">
+          <select v-model="form.role" class="select select-bordered w-full">
+            <option v-for="(label, key) in roleOptions" :key="key" :value="key">{{ label }}</option>
+          </select>
+        </FormField>
+      </div>
       <template #footer>
-        <el-button @click="dialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="create">{{ t('common.confirm') }}</el-button>
+        <button class="btn btn-ghost" @click="dialog = false">{{ t('common.cancel') }}</button>
+        <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="create">
+          <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+          {{ t('common.confirm') }}
+        </button>
       </template>
-    </el-dialog>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
 import { fmtDate } from '@/utils/format'
-import { useSessionStore } from '@/stores/session'
+import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
+import Modal from '@/components/ui/Modal.vue'
+import FormField from '@/components/ui/FormField.vue'
+import { confirm } from '@/components/ui/confirm'
+import { toastError, toastSuccess } from '@/components/ui/toast'
 
 const { t } = useI18n()
-const store = useSessionStore()
 const loading = ref(false)
 const saving = ref(false)
 const dialog = ref(false)
 const admins = ref<any[]>([])
 const form = reactive({ username: '', password: '', role: 'operator' })
-const currentId = computed(() => {
-  // 当前登录 id 无法直接拿, 用 username 匹配
-  return 0
-})
+const currentId = computed(() => 0)
+
+const columns = computed<DataColumn[]>(() => [
+  { key: 'id', label: t('common.id'), width: '80px' },
+  { key: 'username', label: t('admins.username') },
+  { slot: 'role', label: t('admins.role'), width: '140px' },
+  { slot: 'createdAt', label: t('admins.createdAt'), width: '170px' },
+  { slot: 'actions', label: t('common.actions'), width: '200px' },
+])
 
 const roleOptions = computed(() => ({
   admin: t('admins.roleAdmin'),
@@ -82,8 +91,8 @@ function roleText(role: string) {
   const m: any = { admin: t('admins.roleAdmin'), operator: t('admins.roleOperator'), viewer: t('admins.roleViewer') }
   return m[role] || role
 }
-function roleType(role: string): any {
-  return { admin: 'danger', operator: 'warning', viewer: 'info' }[role] || 'info'
+function roleBadgeClass(role: string) {
+  return { admin: 'badge-error', operator: 'badge-warning', viewer: 'badge-ghost' }[role] || 'badge-ghost'
 }
 async function load() {
   loading.value = true
@@ -97,14 +106,14 @@ async function create() {
   saving.value = true
   try {
     await api.post('/admin/admins', form)
-    ElMessage.success(t('admins.added'))
+    toastSuccess(t('admins.added'))
     dialog.value = false
     form.username = ''
     form.password = ''
     form.role = 'operator'
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   } finally {
     saving.value = false
   }
@@ -113,21 +122,22 @@ async function setRole(row: any, role: string) {
   if (role === row.role) return
   try {
     await api.post('/admin/admins/' + row.id + '/role', { role })
-    ElMessage.success(t('admins.roleChanged'))
+    toastSuccess(t('admins.roleChanged'))
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
     await load()
   }
 }
 async function remove(row: any) {
+  const ok = await confirm({ title: t('common.prompt'), message: t('admins.deleteConfirm'), danger: true })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(t('admins.deleteConfirm'), t('common.prompt'), { type: 'warning' })
     await api.post('/admin/admins/' + row.id + '/delete', {})
-    ElMessage.success(t('admins.deleted'))
+    toastSuccess(t('admins.deleted'))
     await load()
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '')
+    toastError(e.message || '')
   }
 }
 onMounted(load)

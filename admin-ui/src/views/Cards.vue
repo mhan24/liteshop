@@ -1,71 +1,88 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-      <h2>{{ t('cards.title') }}</h2>
-      <div>
-        <el-button @click="exportCsv">{{ t('cards.export') }}</el-button>
-        <el-button @click="$router.push('/products')">{{ t('cards.back') }}</el-button>
+    <div class="mb-4 flex items-center justify-between gap-3">
+      <h2 class="text-xl font-bold">{{ t('cards.title') }}</h2>
+      <div class="flex items-center gap-2">
+        <button class="btn btn-outline btn-sm" @click="exportCsv">{{ t('cards.export') }}</button>
+        <button class="btn btn-ghost btn-sm" @click="$router.push('/products')">{{ t('cards.back') }}</button>
       </div>
     </div>
-    <el-card :header="t('cards.import')">
-      <el-input v-model="cardsText" type="textarea" :rows="6" placeholder="CARD-001&#10;CARD-002" />
-      <div style="margin-top: 12px">
-        <el-checkbox v-model="dedupe">{{ t('cards.dedupe') }}</el-checkbox>
+
+    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
+      <div class="card-body">
+        <h3 class="font-semibold">{{ t('cards.import') }}</h3>
+        <textarea
+          v-model="cardsText"
+          class="textarea textarea-bordered w-full font-mono"
+          rows="6"
+          placeholder="CARD-001&#10;CARD-002"
+        ></textarea>
+        <label class="flex cursor-pointer items-center gap-2">
+          <input v-model="dedupe" type="checkbox" class="checkbox checkbox-primary checkbox-sm" />
+          <span class="text-sm">{{ t('cards.dedupe') }}</span>
+        </label>
+        <div>
+          <button class="btn btn-primary btn-sm" :class="{ 'btn-disabled': importing }" @click="importCards">
+            <span v-if="importing" class="loading loading-spinner loading-xs"></span>
+            {{ t('cards.importBtn') }}
+          </button>
+        </div>
       </div>
-      <el-button type="primary" style="margin-top: 12px" :loading="importing" @click="importCards">{{
-        t('cards.importBtn')
-      }}</el-button>
-    </el-card>
-    <el-table v-loading="loading" :data="cards" style="margin-top: 16px" size="large">
-      <el-table-column prop="id" :label="t('common.id')" width="80" />
-      <el-table-column prop="content" :label="t('cards.content')" />
-      <el-table-column :label="t('common.status')">
-        <template #default="{ row }">
-          <el-tag :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('cards.reservedOrder')">
-        <template #default="{ row }">{{ row.reserved_order || '-' }}</template>
-      </el-table-column>
-      <el-table-column :label="t('cards.soldOrder')">
-        <template #default="{ row }">{{ row.sold_order || '-' }}</template>
-      </el-table-column>
-      <el-table-column :label="t('cards.createdAt')">
-        <template #default="{ row }">{{ date(row.created_at) }}</template>
-      </el-table-column>
-      <el-table-column :label="t('cards.soldAt')">
-        <template #default="{ row }">{{ date(row.sold_at) }}</template>
-      </el-table-column>
-      <el-table-column :label="t('common.actions')" width="130">
-        <template #default="{ row }">
-          <el-dropdown v-if="canManage(row)" trigger="click" @command="(cmd: string) => onAction(row, cmd)">
-            <el-button size="small" type="primary" plain>
-              {{ t('common.actions') }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item v-if="row.status !== 'available'" command="available">{{ t('cards.markAvailable') }}</el-dropdown-item>
-                <el-dropdown-item v-if="row.status !== 'locked'" command="locked">{{ t('cards.markLocked') }}</el-dropdown-item>
-                <el-dropdown-item v-if="row.status !== 'sold'" command="sold">{{ t('cards.markSold') }}</el-dropdown-item>
-                <el-dropdown-item v-if="row.status !== 'disabled'" command="disabled">{{ t('cards.markDisabled') }}</el-dropdown-item>
-                <el-dropdown-item v-if="row.status === 'available'" divided command="delete">{{ t('common.delete') }}</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <span v-else class="text-gray-400 text-sm">{{ t('cards.orderBound') }}</span>
-        </template>
-      </el-table-column>
-    </el-table>
+    </div>
+
+    <div class="card mt-4 bg-base-100 shadow-sm ring-1 ring-base-300">
+      <div class="card-body !p-0">
+        <DataTable :columns="columns" :rows="cards" :loading="loading" :empty-text="t('audit.empty')">
+          <template #status="{ row }">
+            <span class="badge badge-sm" :class="statusBadgeClass(row.status)">{{ statusText(row.status) }}</span>
+          </template>
+          <template #reservedOrder="{ row }">{{ row.reserved_order || '-' }}</template>
+          <template #soldOrder="{ row }">{{ row.sold_order || '-' }}</template>
+          <template #createdAt="{ row }">{{ date(row.created_at) }}</template>
+          <template #soldAt="{ row }">{{ date(row.sold_at) }}</template>
+          <template #actions="{ row }">
+            <div v-if="canManage(row)" class="dropdown dropdown-end">
+              <div tabindex="0" role="button" class="btn btn-outline btn-primary btn-xs">
+                {{ t('common.actions') }}
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+              <ul tabindex="0" class="menu dropdown-content z-50 mt-1 w-44 rounded-box bg-base-100 p-2 shadow-lg ring-1 ring-base-300">
+                <li v-if="row.status !== 'available'">
+                  <a @click="onAction(row, 'available')">{{ t('cards.markAvailable') }}</a>
+                </li>
+                <li v-if="row.status !== 'locked'">
+                  <a @click="onAction(row, 'locked')">{{ t('cards.markLocked') }}</a>
+                </li>
+                <li v-if="row.status !== 'sold'">
+                  <a @click="onAction(row, 'sold')">{{ t('cards.markSold') }}</a>
+                </li>
+                <li v-if="row.status !== 'disabled'">
+                  <a @click="onAction(row, 'disabled')">{{ t('cards.markDisabled') }}</a>
+                </li>
+                <li v-if="row.status === 'available'" class="mt-1 border-t border-base-300 pt-1">
+                  <a class="text-error" @click="onAction(row, 'delete')">{{ t('common.delete') }}</a>
+                </li>
+              </ul>
+            </div>
+            <span v-else class="text-sm opacity-50">{{ t('cards.orderBound') }}</span>
+          </template>
+        </DataTable>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
 import { api } from '@/api'
+import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
+import { statusBadgeClass } from '@/utils/status'
+import { confirm } from '@/components/ui/confirm'
+import { toastError, toastSuccess } from '@/components/ui/toast'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -74,6 +91,17 @@ const importing = ref(false)
 const cards = ref<any[]>([])
 const cardsText = ref('')
 const dedupe = ref(false)
+
+const columns = computed<DataColumn[]>(() => [
+  { key: 'id', label: t('common.id'), width: '80px' },
+  { key: 'content', label: t('cards.content') },
+  { slot: 'status', label: t('common.status'), width: '100px' },
+  { slot: 'reservedOrder', label: t('cards.reservedOrder'), width: '120px' },
+  { slot: 'soldOrder', label: t('cards.soldOrder'), width: '120px' },
+  { slot: 'createdAt', label: t('cards.createdAt'), width: '170px' },
+  { slot: 'soldAt', label: t('cards.soldAt'), width: '170px' },
+  { slot: 'actions', label: t('common.actions'), width: '130px' },
+])
 
 async function load() {
   loading.value = true
@@ -93,11 +121,11 @@ async function importCards() {
     const msg = dedupe.value
       ? `${t('cards.added')}: ${res.added}, ${t('cards.skipped')}: ${res.skipped}`
       : `${t('cards.imported')}: ${res.added}`
-    ElMessage.success(msg)
+    toastSuccess(msg)
     cardsText.value = ''
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   } finally {
     importing.value = false
   }
@@ -106,7 +134,8 @@ function exportCsv() {
   window.location.href = '/api/v1/admin/products/' + route.params.id + '/cards/export'
 }
 async function remove(id: number) {
-  await ElMessageBox.confirm(t('cards.deleteConfirm'), t('common.prompt'), { type: 'warning' })
+  const ok = await confirm({ title: t('common.prompt'), message: t('cards.deleteConfirm'), danger: true })
+  if (!ok) return
   await api.post('/admin/cards/' + id + '/delete', {})
   await load()
 }
@@ -115,13 +144,18 @@ async function onAction(row: any, cmd: string) {
     await remove(row.id)
     return
   }
-  await ElMessageBox.confirm(t('cards.statusConfirm').replace('{status}', statusText(cmd)), t('common.prompt'), { type: 'warning' })
+  const ok = await confirm({
+    title: t('common.prompt'),
+    message: t('cards.statusConfirm').replace('{status}', statusText(cmd)),
+    danger: true,
+  })
+  if (!ok) return
   try {
     await api.post('/admin/cards/' + row.id + '/status', { status: cmd })
-    ElMessage.success(t('cards.statusSaved'))
+    toastSuccess(t('cards.statusSaved'))
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message || t('cards.statusFail'))
+    toastError(e.message || t('cards.statusFail'))
   }
 }
 function canManage(row: any) {
@@ -129,19 +163,6 @@ function canManage(row: any) {
 }
 function statusText(status: string) {
   return (t(`cards.status.${status}`) as string) || status
-}
-function statusType(status: string) {
-  switch (status) {
-    case 'available':
-      return 'success'
-    case 'locked':
-      return 'warning'
-    case 'sold':
-      return 'info'
-    case 'disabled':
-      return 'danger'
-  }
-  return 'info'
 }
 function date(ts: number) {
   if (!ts) return '-'

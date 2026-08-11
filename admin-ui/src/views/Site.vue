@@ -1,169 +1,140 @@
 <template>
-  <el-card v-loading="loading">
-    <template #header
-      ><h2>{{ t('site.title') }}</h2></template
-    >
-    <el-form label-position="top" :model="form" style="max-width: 680px">
-      <el-form-item :label="t('site.siteTitle')"><el-input v-model="form.site_title" /></el-form-item>
-      <el-form-item :label="t('site.publicBaseUrl')"
-        ><el-input v-model="form.shop_public_base_url" :placeholder="t('site.publicBaseUrlPlaceholder')"
-      /></el-form-item>
-      <el-form-item :label="t('site.announcement')">
-        <MdEditor
-          v-model="form.site_announcement"
-          :language="editorLang"
-          :preview="false"
-          style="height: 300px; width: 100%"
-        />
-      </el-form-item>
-      <el-form-item :label="t('site.logo')">
-        <el-input v-model="form.site_logo" :placeholder="t('site.logoPlaceholder')" />
-        <el-image
-          v-if="form.site_logo"
-          :src="form.site_logo"
-          fit="contain"
-          style="width: 160px; height: 64px; margin-top: 8px; border: 1px solid #eee; border-radius: 8px"
-        >
-          <template #error>.</template>
-        </el-image>
-      </el-form-item>
-      <el-form-item :label="t('site.favicon')">
-        <el-input v-model="form.site_favicon" :placeholder="t('site.faviconPlaceholder')" />
-        <el-image
-          v-if="form.site_favicon"
-          :src="form.site_favicon"
-          fit="contain"
-          style="width: 48px; height: 48px; margin-top: 8px; border: 1px solid #eee; border-radius: 8px"
-        >
-          <template #error>.</template>
-        </el-image>
-      </el-form-item>
-      <el-form-item :label="t('site.defaultProductImage')">
-        <el-input v-model="form.default_product_image" :placeholder="t('site.defaultProductImagePlaceholder')" />
-        <el-image
-          :src="form.default_product_image"
-          fit="contain"
-          style="width: 120px; height: 120px; margin-top: 8px; border: 1px solid #eee; border-radius: 8px"
-        >
-          <template #error>.</template>
-        </el-image>
-      </el-form-item>
-      <el-form-item :label="t('site.subtitleNote')">
-        <el-input v-model="form.site_subtitle" type="textarea" :rows="3" />
-      </el-form-item>
-      <el-row :gutter="12">
-        <el-col :md="8">
-          <el-form-item :label="t('site.locale')">
-            <el-select v-model="form.site_locale" style="width: 100%">
-              <el-option value="zh-CN">简体中文</el-option>
-              <el-option value="en-US">English</el-option>
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :md="8">
-          <el-form-item :label="t('site.currency')">
-            <el-select v-model="form.site_currency" style="width: 100%">
-              <el-option value="CNY">CNY ¥</el-option>
-              <el-option value="USD">USD $</el-option>
-              <el-option value="EUR">EUR €</el-option>
-              <el-option value="GBP">GBP £</el-option>
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :md="8">
-          <el-form-item :label="t('site.timezone')">
-            <el-input v-model="form.site_timezone" placeholder="Asia/Shanghai" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-form-item :label="t('site.stockDisplay')">
-        <el-select v-model="form.stock_display_mode" style="width: 200px">
-          <el-option :label="t('site.stockExact')" value="exact" />
-          <el-option :label="t('site.stockFuzzy')" value="fuzzy" />
-        </el-select>
-      </el-form-item>
-      <el-form-item :label="t('site.homeViewMode')">
-        <el-radio-group v-model="form.home_view_mode">
-          <el-radio label="grid">{{ t('site.viewGrid') }}</el-radio>
-          <el-radio label="list">{{ t('site.viewList') }}</el-radio>
-        </el-radio-group>
-      </el-form-item>
-
-      <el-divider content-position="left">{{ t('site.linksTitle') }}</el-divider>
-      <el-form-item :label="t('site.links')">
-        <div class="link-list">
-          <div v-for="(link, idx) in form.site_links" :key="idx" class="link-row">
-            <el-input v-model="link.name" :placeholder="t('site.linkName')" />
-            <el-input v-model="link.url" :placeholder="t('site.linkUrl')" />
-            <el-select v-model="link.category" style="width: 130px">
-              <el-option :label="t('site.linkContact')" value="contact" />
-              <el-option :label="t('site.linkFriend')" value="link" />
-            </el-select>
-            <el-button type="danger" text @click="removeLink(idx)">{{ t('site.delete') }}</el-button>
-          </div>
-          <el-button type="primary" plain @click="addLink">{{ t('site.addLink') }}</el-button>
+  <PageCard :title="t('site.title')" :loading="loading">
+    <div class="max-w-3xl space-y-4">
+      <FormField :label="t('site.siteTitle')">
+        <input v-model="form.site_title" class="input input-bordered w-full" />
+      </FormField>
+      <FormField :label="t('site.publicBaseUrl')" :hint="t('site.publicBaseUrlPlaceholder')">
+        <input v-model="form.shop_public_base_url" class="input input-bordered w-full" />
+      </FormField>
+      <FormField :label="t('site.announcement')">
+        <MdEditor v-model="form.site_announcement" :language="editorLang" :preview="false" class="w-full" style="height: 300px" />
+      </FormField>
+      <FormField :label="t('site.logo')" :hint="t('site.logoPlaceholder')">
+        <input v-model="form.site_logo" class="input input-bordered w-full" />
+        <div v-if="form.site_logo" class="mt-2 h-16 w-40 border border-base-300 bg-base-200 p-1">
+          <img :src="form.site_logo" class="h-full w-full object-contain" alt="logo" @error="(e: any) => (e.target.style.display = 'none')" />
         </div>
-      </el-form-item>
+      </FormField>
+      <FormField :label="t('site.favicon')" :hint="t('site.faviconPlaceholder')">
+        <input v-model="form.site_favicon" class="input input-bordered w-full" />
+        <div v-if="form.site_favicon" class="mt-2 h-12 w-12 border border-base-300 bg-base-200 p-0.5">
+          <img :src="form.site_favicon" class="h-full w-full object-contain" alt="favicon" @error="(e: any) => (e.target.style.display = 'none')" />
+        </div>
+      </FormField>
+      <FormField :label="t('site.defaultProductImage')" :hint="t('site.defaultProductImagePlaceholder')">
+        <input v-model="form.default_product_image" class="input input-bordered w-full" />
+        <div class="mt-2 h-32 w-32 border border-base-300 bg-base-200 p-1">
+          <ProductImage :src="form.default_product_image" :fallback="DEFAULT_IMAGE" />
+        </div>
+      </FormField>
+      <FormField :label="t('site.subtitleNote')">
+        <textarea v-model="form.site_subtitle" class="textarea textarea-bordered w-full" rows="3"></textarea>
+      </FormField>
 
-      <el-form-item :label="t('site.copyright')"><el-input v-model="form.site_copyright" /></el-form-item>
-      <el-form-item :label="t('site.privacy')">
-        <MdEditor
-          v-model="form.privacy_policy"
-          :language="editorLang"
-          :preview="false"
-          style="height: 300px; width: 100%"
-        />
-      </el-form-item>
-      <el-form-item :label="t('site.terms')">
-        <MdEditor
-          v-model="form.terms_of_service"
-          :language="editorLang"
-          :preview="false"
-          style="height: 300px; width: 100%"
-        />
-      </el-form-item>
-      <el-form-item :label="t('site.turnstileSiteKey')"><el-input v-model="form.turnstile_site_key" /></el-form-item>
-      <el-form-item :label="t('site.turnstileSecret')"
-        ><el-input
-          v-model="form.turnstile_secret"
-          type="password"
-          :placeholder="t('site.turnstileSecretPlaceholder')"
-          show-password
-      /></el-form-item>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <FormField :label="t('site.locale')">
+          <select v-model="form.site_locale" class="select select-bordered w-full">
+            <option value="zh-CN">简体中文</option>
+            <option value="en-US">English</option>
+          </select>
+        </FormField>
+        <FormField :label="t('site.currency')">
+          <select v-model="form.site_currency" class="select select-bordered w-full">
+            <option value="CNY">CNY ¥</option>
+            <option value="USD">USD $</option>
+            <option value="EUR">EUR €</option>
+            <option value="GBP">GBP £</option>
+          </select>
+        </FormField>
+        <FormField :label="t('site.timezone')">
+          <input v-model="form.site_timezone" class="input input-bordered w-full" placeholder="Asia/Shanghai" />
+        </FormField>
+      </div>
 
-      <el-divider content-position="left">{{ t('site.maintenance') }}</el-divider>
-      <el-form-item :label="t('site.maintenanceEnabled')">
-        <el-switch v-model="maintenanceEnabled" />
-      </el-form-item>
-      <el-form-item :label="t('site.maintenanceMessage')">
-        <el-input
-          v-model="form.maintenance_message"
-          type="textarea"
-          :rows="3"
-          :placeholder="t('site.maintenanceMessagePlaceholder')"
-        />
-      </el-form-item>
-      <el-form-item :label="t('site.maintenancePassword')">
-        <el-input
-          v-model="form.maintenance_password"
-          type="password"
-          :placeholder="t('site.maintenancePasswordPlaceholder')"
-          show-password
-        />
-      </el-form-item>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FormField :label="t('site.stockDisplay')">
+          <select v-model="form.stock_display_mode" class="select select-bordered w-full">
+            <option value="exact">{{ t('site.stockExact') }}</option>
+            <option value="fuzzy">{{ t('site.stockFuzzy') }}</option>
+          </select>
+        </FormField>
+        <FormField :label="t('site.homeViewMode')">
+          <div class="flex items-center gap-6 pt-2">
+            <label class="flex cursor-pointer items-center gap-2">
+              <input v-model="form.home_view_mode" type="radio" name="home_view" value="grid" class="radio radio-primary radio-sm" />
+              <span class="text-sm">{{ t('site.viewGrid') }}</span>
+            </label>
+            <label class="flex cursor-pointer items-center gap-2">
+              <input v-model="form.home_view_mode" type="radio" name="home_view" value="list" class="radio radio-primary radio-sm" />
+              <span class="text-sm">{{ t('site.viewList') }}</span>
+            </label>
+          </div>
+        </FormField>
+      </div>
 
-      <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
-    </el-form>
-  </el-card>
+      <div class="divider">{{ t('site.linksTitle') }}</div>
+      <FormField :label="t('site.links')">
+        <div class="w-full space-y-2">
+          <div v-for="(link, idx) in form.site_links" :key="idx" class="flex flex-wrap items-center gap-2">
+            <input v-model="link.name" class="input input-bordered input-sm w-40" :placeholder="t('site.linkName')" />
+            <input v-model="link.url" class="input input-bordered input-sm min-w-40 flex-1" :placeholder="t('site.linkUrl')" />
+            <select v-model="link.category" class="select select-bordered select-sm w-32">
+              <option value="contact">{{ t('site.linkContact') }}</option>
+              <option value="link">{{ t('site.linkFriend') }}</option>
+            </select>
+            <button class="btn btn-ghost btn-error btn-sm" @click="removeLink(idx)">{{ t('site.delete') }}</button>
+          </div>
+          <button class="btn btn-outline btn-primary btn-sm" @click="addLink">{{ t('site.addLink') }}</button>
+        </div>
+      </FormField>
+
+      <FormField :label="t('site.copyright')">
+        <input v-model="form.site_copyright" class="input input-bordered w-full" />
+      </FormField>
+      <FormField :label="t('site.privacy')">
+        <MdEditor v-model="form.privacy_policy" :language="editorLang" :preview="false" class="w-full" style="height: 300px" />
+      </FormField>
+      <FormField :label="t('site.terms')">
+        <MdEditor v-model="form.terms_of_service" :language="editorLang" :preview="false" class="w-full" style="height: 300px" />
+      </FormField>
+
+      <FormField :label="t('site.turnstileSiteKey')">
+        <input v-model="form.turnstile_site_key" class="input input-bordered w-full" />
+      </FormField>
+      <FormField :label="t('site.turnstileSecret')" :hint="t('site.turnstileSecretPlaceholder')">
+        <input v-model="form.turnstile_secret" type="password" class="input input-bordered w-full" />
+      </FormField>
+
+      <div class="divider">{{ t('site.maintenance') }}</div>
+      <FormField :label="t('site.maintenanceEnabled')">
+        <input v-model="maintenanceEnabled" type="checkbox" class="toggle toggle-primary" />
+      </FormField>
+      <FormField :label="t('site.maintenanceMessage')" :hint="t('site.maintenanceMessagePlaceholder')">
+        <textarea v-model="form.maintenance_message" class="textarea textarea-bordered w-full" rows="3"></textarea>
+      </FormField>
+      <FormField :label="t('site.maintenancePassword')" :hint="t('site.maintenancePasswordPlaceholder')">
+        <input v-model="form.maintenance_password" type="password" class="input input-bordered w-full" />
+      </FormField>
+
+      <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="save">
+        <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+        {{ t('common.save') }}
+      </button>
+    </div>
+  </PageCard>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { api } from '@/api'
+import PageCard from '@/components/PageCard.vue'
+import FormField from '@/components/ui/FormField.vue'
+import ProductImage from '@/components/ui/ProductImage.vue'
+import { toastError, toastSuccess } from '@/components/ui/toast'
 
 const { t, locale } = useI18n()
 const editorLang = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'))
@@ -171,6 +142,7 @@ const loading = ref(false)
 const saving = ref(false)
 const form = ref<any>({})
 const maintenanceEnabled = ref(false)
+const DEFAULT_IMAGE = ref('/default-product.svg')
 
 onMounted(async () => {
   loading.value = true
@@ -194,40 +166,11 @@ async function save() {
   saving.value = true
   try {
     await api.post('/admin/site', { ...form.value, maintenance_enabled: maintenanceEnabled.value ? '1' : '' })
-    ElMessage.success(t('site.saved'))
+    toastSuccess(t('site.saved'))
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   } finally {
     saving.value = false
   }
 }
 </script>
-
-<style scoped>
-.link-list {
-  width: 100%;
-}
-.link-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 8px;
-  width: 100%;
-}
-.link-row .el-input,
-.link-row .el-select {
-  flex: 1;
-}
-.link-row .el-select {
-  flex: 0 0 130px;
-}
-@media (max-width: 640px) {
-  .link-row {
-    flex-wrap: wrap;
-  }
-  .link-row .el-input,
-  .link-row .el-select {
-    flex: 1 1 100%;
-  }
-}
-</style>

@@ -1,105 +1,110 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-      <h2>{{ t('coupons.title') }}</h2>
-      <el-button type="primary" @click="openCreate">{{ t('coupons.add') }}</el-button>
+    <div class="mb-4 flex items-center justify-between gap-3">
+      <h2 class="text-xl font-bold">{{ t('coupons.title') }}</h2>
+      <button class="btn btn-primary btn-sm" @click="openCreate">{{ t('coupons.add') }}</button>
     </div>
-    <el-table v-loading="loading" :data="coupons" size="large">
-      <el-table-column prop="code" :label="t('coupons.code')" width="140" />
-      <el-table-column :label="t('coupons.type')" width="90">
-        <template #default="{ row }">{{ row.type === 'percent' ? '%' : t('coupons.fixed') }}</template>
-      </el-table-column>
-      <el-table-column :label="t('coupons.value')" width="120">
-        <template #default="{ row }">
-          <span v-if="row.type === 'percent'">{{ row.percent }}%</span>
-          <span v-else>{{ fmtMoney(row.value_cents) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('coupons.minAmount')" width="120">
-        <template #default="{ row }">{{ row.min_amount_cents ? fmtMoney(row.min_amount_cents) : '-' }}</template>
-      </el-table-column>
-      <el-table-column :label="t('coupons.usage')" width="100">
-        <template #default="{ row }">{{ row.used_count }}/{{ row.max_uses || '∞' }}</template>
-      </el-table-column>
-      <el-table-column :label="t('common.status')" width="90">
-        <template #default="{ row }">
-          <el-tag :type="row.active ? 'success' : 'info'" size="small">{{
-            row.active ? t('common.yes') : t('common.no')
-          }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('coupons.expires')" width="160">
-        <template #default="{ row }">{{ row.expires_at ? fmtDate(row.expires_at) : '∞' }}</template>
-      </el-table-column>
-      <el-table-column :label="t('common.actions')" width="150">
-        <template #default="{ row }">
-          <el-button size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" type="danger" text @click="remove(row)">{{ t('common.delete') }}</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
 
-    <el-dialog v-model="dialog" :title="editing ? t('coupons.edit') : t('coupons.add')" width="480px">
-      <el-form label-position="top">
-        <el-form-item :label="t('coupons.code')"><el-input v-model="form.code" :disabled="!!editing" /></el-form-item>
-        <el-row :gutter="12">
-          <el-col :md="12">
-            <el-form-item :label="t('coupons.type')">
-              <el-select v-model="form.type" style="width: 100%">
-                <el-option :label="t('coupons.fixed')" value="fixed" />
-                <el-option label="%" value="percent" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :md="12">
-            <el-form-item :label="t('coupons.valueLabel')">
-              <el-input-number
-                v-if="form.type === 'percent'"
-                v-model="form.percent"
-                :min="1"
-                :max="100"
-                style="width: 100%"
-              />
-              <el-input-number v-else v-model="form.value" :min="0.01" :precision="2" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="12">
-          <el-col :md="12">
-            <el-form-item :label="t('coupons.minAmountLabel')">
-              <el-input-number v-model="form.min_amount" :min="0" :precision="2" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :md="12">
-            <el-form-item :label="t('coupons.maxUses')">
-              <el-input-number v-model="form.max_uses" :min="0" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item :label="t('coupons.productFilter')">
-          <el-select v-model="form.product_id" clearable style="width: 100%">
-            <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('coupons.expiresLabel')">
-          <el-date-picker v-model="form.expires_at" type="datetime" value-format="timestamp" style="width: 100%" />
-        </el-form-item>
-        <el-checkbox v-model="form.active">{{ t('coupons.active') }}</el-checkbox>
-      </el-form>
+    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
+      <div class="card-body !p-0">
+        <DataTable :columns="columns" :rows="coupons" :loading="loading" :empty-text="t('audit.empty')">
+          <template #type="{ row }">{{ row.type === 'percent' ? '%' : t('coupons.fixed') }}</template>
+          <template #value="{ row }">
+            <span v-if="row.type === 'percent'">{{ row.percent }}%</span>
+            <span v-else>{{ fmtMoney(row.value_cents) }}</span>
+          </template>
+          <template #minAmount="{ row }">{{ row.min_amount_cents ? fmtMoney(row.min_amount_cents) : '-' }}</template>
+          <template #usage="{ row }">{{ row.used_count }}/{{ row.max_uses || '∞' }}</template>
+          <template #status="{ row }">
+            <span class="badge badge-sm" :class="row.active ? 'badge-success' : 'badge-ghost'">
+              {{ row.active ? t('common.yes') : t('common.no') }}
+            </span>
+          </template>
+          <template #expires="{ row }">{{ row.expires_at ? fmtDate(row.expires_at) : '∞' }}</template>
+          <template #actions="{ row }">
+            <div class="flex items-center gap-1">
+              <button class="btn btn-ghost btn-xs" @click="openEdit(row)">{{ t('common.edit') }}</button>
+              <button class="btn btn-ghost btn-error btn-xs" @click="remove(row)">{{ t('common.delete') }}</button>
+            </div>
+          </template>
+        </DataTable>
+      </div>
+    </div>
+
+    <Modal :open="dialog" :title="editing ? t('coupons.edit') : t('coupons.add')" @close="dialog = false">
+      <div class="space-y-4">
+        <FormField :label="t('coupons.code')">
+          <input v-model="form.code" class="input input-bordered w-full" :disabled="!!editing" />
+        </FormField>
+        <div class="grid grid-cols-2 gap-4">
+          <FormField :label="t('coupons.type')">
+            <select v-model="form.type" class="select select-bordered w-full">
+              <option value="fixed">{{ t('coupons.fixed') }}</option>
+              <option value="percent">%</option>
+            </select>
+          </FormField>
+          <FormField :label="t('coupons.valueLabel')">
+            <input
+              v-if="form.type === 'percent'"
+              v-model.number="form.percent"
+              type="number"
+              min="1"
+              max="100"
+              class="input input-bordered w-full"
+            />
+            <input
+              v-else
+              v-model.number="form.value"
+              type="number"
+              step="0.01"
+              min="0.01"
+              class="input input-bordered w-full"
+            />
+          </FormField>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <FormField :label="t('coupons.minAmountLabel')">
+            <input v-model.number="form.min_amount" type="number" step="0.01" min="0" class="input input-bordered w-full" />
+          </FormField>
+          <FormField :label="t('coupons.maxUses')">
+            <input v-model.number="form.max_uses" type="number" min="0" class="input input-bordered w-full" />
+          </FormField>
+        </div>
+        <FormField :label="t('coupons.productFilter')">
+          <select v-model="form.product_id" class="select select-bordered w-full">
+            <option :value="undefined"></option>
+            <option v-for="p in products" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+        </FormField>
+        <FormField :label="t('coupons.expiresLabel')">
+          <input v-model="expiresLocal" type="datetime-local" class="input input-bordered w-full" />
+        </FormField>
+        <label class="flex cursor-pointer items-center gap-2">
+          <input v-model="form.active" type="checkbox" class="checkbox checkbox-primary checkbox-sm" />
+          <span class="text-sm">{{ t('coupons.active') }}</span>
+        </label>
+      </div>
       <template #footer>
-        <el-button @click="dialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
+        <button class="btn btn-ghost" @click="dialog = false">{{ t('common.cancel') }}</button>
+        <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="save">
+          <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+          {{ t('common.save') }}
+        </button>
       </template>
-    </el-dialog>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
 import { fmtMoney, fmtDate } from '@/utils/format'
+import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
+import Modal from '@/components/ui/Modal.vue'
+import FormField from '@/components/ui/FormField.vue'
+import { confirm } from '@/components/ui/confirm'
+import { toastError, toastSuccess } from '@/components/ui/toast'
 
 const { t } = useI18n()
 const loading = ref(false)
@@ -108,6 +113,7 @@ const dialog = ref(false)
 const editing = ref<number | null>(null)
 const coupons = ref<any[]>([])
 const products = ref<any[]>([])
+const expiresLocal = ref('')
 const form = reactive({
   code: '',
   type: 'fixed',
@@ -119,6 +125,29 @@ const form = reactive({
   expires_at: undefined as number | undefined,
   active: true,
 })
+
+const columns = computed<DataColumn[]>(() => [
+  { key: 'code', label: t('coupons.code'), width: '140px' },
+  { slot: 'type', label: t('coupons.type'), width: '90px' },
+  { slot: 'value', label: t('coupons.value'), width: '120px' },
+  { slot: 'minAmount', label: t('coupons.minAmount'), width: '120px' },
+  { slot: 'usage', label: t('coupons.usage'), width: '100px' },
+  { slot: 'status', label: t('common.status'), width: '90px' },
+  { slot: 'expires', label: t('coupons.expires'), width: '160px' },
+  { slot: 'actions', label: t('common.actions'), width: '150px' },
+])
+
+function toLocal(sec: number | undefined): string {
+  if (!sec) return ''
+  const d = new Date(sec * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function fromLocal(v: string): number {
+  if (!v) return 0
+  const ms = new Date(v).getTime()
+  return isNaN(ms) ? 0 : Math.floor(ms / 1000)
+}
 
 async function load() {
   loading.value = true
@@ -142,6 +171,7 @@ function openCreate() {
     expires_at: undefined,
     active: true,
   })
+  expiresLocal.value = ''
   dialog.value = true
 }
 function openEdit(row: any) {
@@ -157,6 +187,7 @@ function openEdit(row: any) {
     expires_at: row.expires_at || undefined,
     active: row.active,
   })
+  expiresLocal.value = toLocal(row.expires_at)
   dialog.value = true
 }
 async function save() {
@@ -170,27 +201,28 @@ async function save() {
       min_amount_cents: Math.round(form.min_amount * 100),
       max_uses: form.max_uses,
       product_id: form.product_id || 0,
-      expires_at: form.expires_at || 0,
+      expires_at: fromLocal(expiresLocal.value),
       active: form.active,
     }
     if (editing.value) await api.post('/admin/coupons/' + editing.value + '/edit', payload)
     else await api.post('/admin/coupons', payload)
-    ElMessage.success(t('common.save'))
+    toastSuccess(t('common.save'))
     dialog.value = false
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   } finally {
     saving.value = false
   }
 }
 async function remove(row: any) {
+  const ok = await confirm({ title: t('common.prompt'), message: t('coupons.deleteConfirm'), danger: true })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(t('coupons.deleteConfirm'), t('common.prompt'), { type: 'warning' })
     await api.post('/admin/coupons/' + row.id + '/delete', {})
     await load()
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '')
+    toastError(e.message || '')
   }
 }
 onMounted(load)

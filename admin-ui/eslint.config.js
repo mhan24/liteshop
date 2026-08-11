@@ -6,7 +6,7 @@ import globals from 'globals'
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'auto-imports.d.ts', 'components.d.ts', 'src/shims-vue.d.ts'],
+    ignores: ['dist/**', 'node_modules/**', 'src/shims-vue.d.ts'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

@@ -2,7 +2,7 @@
 
 中文版：[README.md](README.md) ｜ Changelog: [CHANGELOG.md](CHANGELOG.md)
 
-**LiteShop v0.2.0 (codename: Moon)** — an automated digital-goods delivery (card / activation-code) shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) and [HashPay](https://github.com/TGDash/HashPay) crypto payment gateways (**both can run at once; buyers choose**). The buyer storefront uses Nuxt 3 SSR + Tailwind; the admin panel uses Vue 3 + TypeScript + Element Plus + Pinia; Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
+**LiteShop v0.2.0 (codename: Moon)** — an automated digital-goods delivery (card / activation-code) shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) and [HashPay](https://github.com/TGDash/HashPay) crypto payment gateways (**both can run at once; buyers choose**). The buyer storefront uses Nuxt 3 SSR + Tailwind; the admin panel uses Vue 3 + TypeScript + Tailwind CSS + daisyUI + Pinia; Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
 
 > Version history: v0.1.0 codename **Earth**; v0.2.0 codename **Moon** — layering, abstractions, observability, and stability upgrades, see [CHANGELOG](CHANGELOG.md).
 >
@@ -76,7 +76,7 @@ Caddy (reverse proxy :443)
 | --- | --- | --- |
 | Go API | Go 1.25.12+ + SQLite (modernc) | 8080 |
 | Storefront SSR | Nuxt 3 + Tailwind | 3001 |
-| Admin SPA | Vue 3 + TS + Element Plus + Pinia | embedded in Go |
+| Admin SPA | Vue 3 + TS + Tailwind CSS + daisyUI + Pinia | embedded in Go |
 
 ### Layering
 
@@ -133,7 +133,7 @@ Order (buyer picks gateway) → lock cards (atomic) → create transaction (paym
 | Layer | Stack |
 | --- | --- |
 | Storefront | Nuxt 3 SSR + Tailwind CSS |
-| Admin | Vue 3 + Vite + TypeScript + Element Plus + Pinia + VueUse + unplugin-auto-import |
+| Admin | Vue 3 + Vite + TypeScript + Tailwind CSS + daisyUI + Pinia + VueUse + @lucide/vue |
 | Admin quality | ESLint (flat config + typescript-eslint + eslint-plugin-vue) + Prettier |
 | API types | OpenAPI → TS auto-generated (`admin-ui npm run gen:api` → `src/api/types.ts`) |
 | Backend | Go 1.25.12+ (govulncheck clean) |
@@ -168,7 +168,7 @@ internal/version/       build version info (-ldflags injected)
 internal/config/        configuration defaults
 internal/testutil/      integration test facilities (temp SQLite + MockGateway + NotifyRecorder)
 internal/integration/   order integration tests (callback / duplicate / cancel / expiry / concurrency)
-admin-ui/               Element Plus admin (src/api|views|stores|hooks|utils|components)
+admin-ui/               Tailwind CSS + daisyUI admin (src/api|views|stores|hooks|utils|components)
 storefront/             Nuxt 3 SSR storefront
 logs/                   runtime logs (app.log / payment.log / security.log)
 CHANGELOG.md            changelog (v0.1 Earth / v0.2 Moon)

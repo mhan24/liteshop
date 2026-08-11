@@ -1,174 +1,207 @@
 <template>
-  <div v-loading="loading">
-    <div class="page-head">
-      <h2>{{ t('orders.detail') }} · {{ order.order_no }}</h2>
-      <div>
-        <el-tag :type="statusType(order.status)" size="large">{{ statusText(order.status) }}</el-tag>
-        <el-button style="margin-left: 8px" @click="$router.push('/orders')">{{ t('orders.back') }}</el-button>
-      </div>
+  <div>
+    <div v-if="loading" class="flex justify-center py-24">
+      <span class="loading loading-spinner loading-lg text-primary"></span>
     </div>
 
-    <!-- 操作按钮 -->
-    <el-card style="margin-top: 12px">
-      <template #header
-        ><span>{{ t('orders.actions') }}</span></template
-      >
-      <el-space v-if="store.canWrite" wrap>
-        <el-button
-          v-if="
-            ['paid', 'processing', 'delivered', 'completed', 'delivery_failed'].includes(order.status) && cards.length
-          "
-          type="primary"
-          @click="resend"
-          >{{ t('orders.resend') }}</el-button
-        >
-        <el-button
-          v-if="order.status === 'delivery_failed' || order.status === 'payment_failed'"
-          type="warning"
-          @click="redeliver"
-          >{{ t('orders.redeliver') }}</el-button
-        >
-        <el-button
-          v-if="order.delivery_type === 'manual' && order.status === 'pending_delivery'"
-          type="primary"
-          @click="deliverDialog = true"
-          >{{ t('orders.manualDeliver') }}</el-button
-        >
-        <el-button
-          v-if="order.status === 'waiting_payment' || order.status === 'created'"
-          type="danger"
-          plain
-          @click="cancelOrder"
-          >{{ t('orders.cancel') }}</el-button
-        >
-        <el-button @click="statusDialog = true">{{ t('orders.changeStatus') }}</el-button>
-      </el-space>
-    </el-card>
-
-    <el-row :gutter="16" style="margin-top: 16px">
-      <!-- 订单信息 -->
-      <el-col :md="12">
-        <el-card>
-          <template #header
-            ><span>{{ t('orders.orderInfo') }}</span></template
-          >
-          <el-descriptions :column="1" size="small" border>
-            <el-descriptions-item :label="t('orders.orderNo')">{{ order.order_no }}</el-descriptions-item>
-            <el-descriptions-item :label="t('orders.product')"
-              >{{ order.product_name }} x{{ order.qty }}</el-descriptions-item
-            >
-            <el-descriptions-item :label="t('orders.amount')"
-              >{{ money(order.amount_cents) }} {{ order.fiat }}</el-descriptions-item
-            >
-            <el-descriptions-item :label="t('orders.contact')">{{ order.buyer_contact }}</el-descriptions-item>
-            <el-descriptions-item :label="t('orders.createdAt')">{{ date(order.created_at) }}</el-descriptions-item>
-            <el-descriptions-item v-if="order.paid_at" :label="t('orders.paidAt')">{{
-              date(order.paid_at)
-            }}</el-descriptions-item>
-          </el-descriptions>
-        </el-card>
-      </el-col>
-
-      <!-- 支付信息 -->
-      <el-col :md="12">
-        <el-card>
-          <template #header
-            ><span>{{ t('orders.paymentInfo') }}</span></template
-          >
-          <el-descriptions :column="1" size="small" border>
-            <el-descriptions-item :label="t('orders.tradeId')">
-              <code class="mono">{{ order.trade_id || '-' }}</code>
-            </el-descriptions-item>
-            <el-descriptions-item :label="t('orders.blockTx')">
-              <code class="mono">{{ order.block_transaction_id || '-' }}</code>
-            </el-descriptions-item>
-            <el-descriptions-item :label="t('orders.tradeType')">{{ order.trade_type || '-' }}</el-descriptions-item>
-            <el-descriptions-item :label="t('orders.checkout')">
-              <a v-if="order.payment_url" :href="order.payment_url" target="_blank" rel="noopener" class="link">{{
-                order.payment_url
-              }}</a>
-              <span v-else>-</span>
-            </el-descriptions-item>
-          </el-descriptions>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 卡密信息 -->
-    <el-card style="margin-top: 16px">
-      <template #header>
-        <span>{{ order.delivery_type === 'manual' ? t('orders.deliveryInfo') : t('orders.cards') }} ({{
-          order.delivery_type === 'manual' && order.delivery_content ? 1 : cards.length
-        }})</span>
-      </template>
-      <div v-if="order.delivery_type === 'manual' && order.delivery_content" class="delivery-content">
-        {{ order.delivery_content }}
+    <template v-else>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <h2 class="text-xl font-bold">{{ t('orders.detail') }} · {{ order.order_no }}</h2>
+          <span class="badge" :class="statusBadgeClass(order.status)">{{ statusText(order.status) }}</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" @click="$router.push('/orders')">{{ t('orders.back') }}</button>
       </div>
-      <ul v-else class="card-list">
-        <li v-for="c in cards" :key="c.id">
-          <code>{{ c.content }}</code>
-        </li>
-      </ul>
-      <div v-if="order.delivery_type !== 'manual' && !cards.length" class="empty-tip">{{ t('orders.noCards') }}</div>
-    </el-card>
 
-    <!-- 日志 / 通知记录 -->
-    <el-card style="margin-top: 16px">
-      <template #header
-        ><span>{{ t('orders.logs') }}</span></template
-      >
-      <el-timeline v-if="logs.length">
-        <el-timeline-item
-          v-for="log in logs"
-          :key="log.id"
-          :timestamp="date(log.created_at)"
-          placement="top"
-          :type="logType(log)"
-        >
-          <b>{{ eventText(log) }}</b>
-          <div class="log-message">{{ log.message }}</div>
-        </el-timeline-item>
-      </el-timeline>
-      <p v-else class="muted">{{ t('orders.noLogs') }}</p>
-    </el-card>
+      <!-- 操作按钮 -->
+      <div v-if="store.canWrite" class="card mt-4 bg-base-100 shadow-sm ring-1 ring-base-300">
+        <div class="card-body flex flex-wrap gap-2 !py-4">
+          <button
+            v-if="['paid', 'processing', 'delivered', 'completed', 'delivery_failed'].includes(order.status) && cards.length"
+            class="btn btn-primary btn-sm"
+            @click="resend"
+          >
+            {{ t('orders.resend') }}
+          </button>
+          <button
+            v-if="order.status === 'delivery_failed' || order.status === 'payment_failed'"
+            class="btn btn-warning btn-sm"
+            @click="redeliver"
+          >
+            {{ t('orders.redeliver') }}
+          </button>
+          <button
+            v-if="order.delivery_type === 'manual' && order.status === 'pending_delivery'"
+            class="btn btn-primary btn-sm"
+            @click="deliverDialog = true"
+          >
+            {{ t('orders.manualDeliver') }}
+          </button>
+          <button
+            v-if="order.status === 'waiting_payment' || order.status === 'created'"
+            class="btn btn-error btn-outline btn-sm"
+            @click="cancelOrder"
+          >
+            {{ t('orders.cancel') }}
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="statusDialog = true">{{ t('orders.changeStatus') }}</button>
+        </div>
+      </div>
 
-    <!-- 修改状态对话框 -->
-    <el-dialog v-model="statusDialog" :title="t('orders.changeStatus')" width="420px">
-      <el-form label-position="top">
-        <el-form-item :label="t('common.status')">
-          <el-select v-model="newStatus" style="width: 100%">
-            <el-option v-for="(label, key) in statusOptions" :key="key" :label="label" :value="key" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('orders.statusMessage')">
-          <el-input v-model="statusMessage" type="textarea" :rows="2" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="statusDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="savingStatus" @click="changeStatus">{{ t('common.confirm') }}</el-button>
-      </template>
-    </el-dialog>
+      <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <!-- 订单信息 -->
+        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
+          <div class="card-body !pb-2">
+            <h3 class="font-semibold">{{ t('orders.orderInfo') }}</h3>
+          </div>
+          <div class="card-body !pt-2">
+            <dl class="divide-y divide-base-200 text-sm">
+              <div class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.orderNo') }}</dt>
+                <dd class="font-mono font-medium">{{ order.order_no }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.product') }}</dt>
+                <dd class="font-medium">{{ order.product_name }} x{{ order.qty }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.amount') }}</dt>
+                <dd class="font-medium">{{ money(order.amount_cents) }} {{ order.fiat }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.contact') }}</dt>
+                <dd class="font-medium break-all text-right">{{ order.buyer_contact }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.createdAt') }}</dt>
+                <dd class="font-medium">{{ date(order.created_at) }}</dd>
+              </div>
+              <div v-if="order.paid_at" class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.paidAt') }}</dt>
+                <dd class="font-medium">{{ date(order.paid_at) }}</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
 
-    <!-- 人工发货对话框 -->
-    <el-dialog v-model="deliverDialog" :title="t('orders.manualDeliver')" width="480px">
-      <el-form label-position="top">
-        <el-form-item :label="t('orders.manualDeliverContent')">
-          <el-input
+        <!-- 支付信息 -->
+        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
+          <div class="card-body !pb-2">
+            <h3 class="font-semibold">{{ t('orders.paymentInfo') }}</h3>
+          </div>
+          <div class="card-body !pt-2">
+            <dl class="divide-y divide-base-200 text-sm">
+              <div class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.tradeId') }}</dt>
+                <dd class="mono font-medium text-right">{{ order.trade_id || '-' }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.blockTx') }}</dt>
+                <dd class="mono font-medium text-right">{{ order.block_transaction_id || '-' }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.tradeType') }}</dt>
+                <dd class="font-medium">{{ order.trade_type || '-' }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-4 py-2.5">
+                <dt class="shrink-0 opacity-60">{{ t('orders.checkout') }}</dt>
+                <dd class="mono max-w-[60%] text-right text-primary">
+                  <a v-if="order.payment_url" :href="order.payment_url" target="_blank" rel="noopener">
+                    {{ order.payment_url }}
+                  </a>
+                  <span v-else class="opacity-60">-</span>
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      </div>
+
+      <!-- 卡密信息 -->
+      <div class="card mt-4 bg-base-100 shadow-sm ring-1 ring-base-300">
+        <div class="card-body !pb-2">
+          <h3 class="font-semibold">
+            {{ order.delivery_type === 'manual' ? t('orders.deliveryInfo') : t('orders.cards') }} ({{
+              order.delivery_type === 'manual' && order.delivery_content ? 1 : cards.length
+            }})
+          </h3>
+        </div>
+        <div class="card-body !pt-2">
+          <div v-if="order.delivery_type === 'manual' && order.delivery_content" class="rounded-xl bg-base-200 p-4">
+            {{ order.delivery_content }}
+          </div>
+          <div v-else-if="cards.length" class="card-code-block">
+            <div v-for="c in cards" :key="c.id" class="py-0.5">{{ c.content }}</div>
+          </div>
+          <p v-else class="text-sm opacity-60">{{ t('orders.noCards') }}</p>
+        </div>
+      </div>
+
+      <!-- 日志 -->
+      <div class="card mt-4 bg-base-100 shadow-sm ring-1 ring-base-300">
+        <div class="card-body !pb-2">
+          <h3 class="font-semibold">{{ t('orders.logs') }}</h3>
+        </div>
+        <div class="card-body !pt-2">
+          <ul v-if="logs.length" class="timeline timeline-vertical">
+            <li v-for="(log, i) in logs" :key="log.id">
+              <template v-if="i !== 0">
+                <hr class="bg-base-300" />
+              </template>
+              <div class="timeline-middle">
+                <span class="badge badge-sm badge-ghost" :class="logBadgeClass(log)"></span>
+              </div>
+              <div class="timeline-end pb-6">
+                <div class="text-xs opacity-60">{{ date(log.created_at) }}</div>
+                <div class="mt-0.5 font-medium">{{ eventText(log) }}</div>
+                <div v-if="log.message" class="mt-0.5 text-sm opacity-70">{{ log.message }}</div>
+              </div>
+            </li>
+          </ul>
+          <p v-else class="text-sm opacity-60">{{ t('orders.noLogs') }}</p>
+        </div>
+      </div>
+
+      <!-- 修改状态对话框 -->
+      <Modal :open="statusDialog" :title="t('orders.changeStatus')" @close="statusDialog = false">
+        <div class="space-y-4">
+          <FormField :label="t('common.status')">
+            <select v-model="newStatus" class="select select-bordered w-full">
+              <option v-for="(label, key) in statusOptions" :key="key" :value="key">{{ label }}</option>
+            </select>
+          </FormField>
+          <FormField :label="t('orders.statusMessage')">
+            <textarea v-model="statusMessage" class="textarea textarea-bordered w-full" rows="2"></textarea>
+          </FormField>
+        </div>
+        <template #footer>
+          <button class="btn btn-ghost" @click="statusDialog = false">{{ t('common.cancel') }}</button>
+          <button class="btn btn-primary" :class="{ 'btn-disabled': savingStatus }" @click="changeStatus">
+            <span v-if="savingStatus" class="loading loading-spinner loading-xs"></span>
+            {{ t('common.confirm') }}
+          </button>
+        </template>
+      </Modal>
+
+      <!-- 人工发货对话框 -->
+      <Modal :open="deliverDialog" :title="t('orders.manualDeliver')" @close="deliverDialog = false">
+        <FormField :label="t('orders.manualDeliverContent')">
+          <textarea
             v-model="deliverContent"
-            type="textarea"
-            :rows="6"
+            class="textarea textarea-bordered w-full"
+            rows="6"
             :placeholder="t('orders.manualDeliverContentPlaceholder')"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="deliverDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="delivering" @click="manualDeliver">{{
-          t('common.confirm')
-        }}</el-button>
-      </template>
-    </el-dialog>
+          ></textarea>
+        </FormField>
+        <template #footer>
+          <button class="btn btn-ghost" @click="deliverDialog = false">{{ t('common.cancel') }}</button>
+          <button class="btn btn-primary" :class="{ 'btn-disabled': delivering }" @click="manualDeliver">
+            <span v-if="delivering" class="loading loading-spinner loading-xs"></span>
+            {{ t('common.confirm') }}
+          </button>
+        </template>
+      </Modal>
+    </template>
   </div>
 </template>
 
@@ -176,15 +209,19 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
 import { fmtDate } from '@/utils/format'
+import { statusBadgeClass } from '@/utils/status'
 import { useSessionStore } from '@/stores/session'
+import Modal from '@/components/ui/Modal.vue'
+import FormField from '@/components/ui/FormField.vue'
+import { confirm } from '@/components/ui/confirm'
+import { toastError, toastSuccess, toastWarning } from '@/components/ui/toast'
 
 const route = useRoute()
 const { t } = useI18n()
 const store = useSessionStore()
-const loading = ref(false)
+const loading = ref(true)
 const savingStatus = ref(false)
 const order = ref<any>({})
 const cards = ref<any[]>([])
@@ -223,49 +260,50 @@ async function load() {
 }
 async function resend() {
   await api.post('/admin/orders/' + route.params.id + '/resend', {})
-  ElMessage.success(t('orders.resendSent'))
+  toastSuccess(t('orders.resendSent'))
   await load()
 }
 async function redeliver() {
   try {
     await api.post('/admin/orders/' + route.params.id + '/redeliver', {})
-    ElMessage.success(t('orders.redeliverSent'))
+    toastSuccess(t('orders.redeliverSent'))
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   }
 }
 async function manualDeliver() {
   if (!deliverContent.value.trim()) {
-    ElMessage.warning(t('orders.manualDeliverRequired'))
+    toastWarning(t('orders.manualDeliverRequired'))
     return
   }
   delivering.value = true
   try {
     await api.post('/admin/orders/' + route.params.id + '/deliver', { content: deliverContent.value })
-    ElMessage.success(t('orders.manualDeliverSent'))
+    toastSuccess(t('orders.manualDeliverSent'))
     deliverDialog.value = false
     deliverContent.value = ''
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   } finally {
     delivering.value = false
   }
 }
 async function cancelOrder() {
+  const ok = await confirm({ title: t('common.prompt'), message: t('orders.cancelConfirm'), danger: true })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(t('orders.cancelConfirm'), t('common.prompt'), { type: 'warning' })
     await api.post('/admin/orders/' + route.params.id + '/cancel', {})
-    ElMessage.success(t('orders.cancelledMsg'))
+    toastSuccess(t('orders.cancelledMsg'))
     await load()
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '')
+    toastError(e.message || '')
   }
 }
 async function changeStatus() {
   if (!newStatus.value) {
-    ElMessage.warning(t('orders.statusRequired'))
+    toastWarning(t('orders.statusRequired'))
     return
   }
   savingStatus.value = true
@@ -274,13 +312,13 @@ async function changeStatus() {
       status: newStatus.value,
       message: statusMessage.value,
     })
-    ElMessage.success(t('orders.statusChanged'))
+    toastSuccess(t('orders.statusChanged'))
     statusDialog.value = false
     newStatus.value = ''
     statusMessage.value = ''
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    toastError(e.message)
   } finally {
     savingStatus.value = false
   }
@@ -288,30 +326,13 @@ async function changeStatus() {
 function statusText(status: string) {
   return (t(`orders.status.${status}`) as string) || status
 }
-function statusType(status: string): any {
-  const m: any = {
-    paid: 'success',
-    processing: 'success',
-    pending_delivery: 'warning',
-    delivered: 'success',
-    completed: 'success',
-    waiting_payment: 'warning',
-    created: 'info',
-    expired: 'danger',
-    payment_failed: 'danger',
-    delivery_failed: 'danger',
-    cancelled: 'info',
-  }
-  return m[status] || 'info'
-}
 function eventText(log: any) {
   return (t(`orders.events.${log.event}`) as string) || log.event
 }
-function logType(log: any): any {
-  if (log.event === 'payment_success' || log.event === 'delivered') return 'success'
-  if (log.event === 'notify_sent') return 'primary'
-  if (log.event.includes('failed')) return 'danger'
-  return 'primary'
+function logBadgeClass(log: any) {
+  if (log.event === 'payment_success' || log.event === 'delivered') return 'badge-success'
+  if (log.event.includes('failed')) return 'badge-error'
+  return 'badge-primary'
 }
 function money(c: number) {
   return ((c || 0) / 100).toFixed(2)
@@ -321,49 +342,3 @@ function date(ts: number) {
 }
 onMounted(load)
 </script>
-
-<style scoped>
-.page-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.page-head h2 {
-  margin: 0;
-}
-.mono {
-  font-family: ui-monospace, monospace;
-  word-break: break-all;
-}
-.link {
-  color: #409eff;
-  word-break: break-all;
-}
-.card-list {
-  list-style: none;
-  margin: 0;
-  padding: 12px;
-  background: #1f2329;
-  border-radius: 8px;
-  color: #d8f7ee;
-  font-family: ui-monospace, monospace;
-}
-.card-list li {
-  padding: 2px 0;
-}
-.log-message {
-  color: #666;
-  font-size: 13px;
-  margin-top: 2px;
-}
-.muted {
-  color: #999;
-  font-size: 13px;
-}
-.empty-tip {
-  color: #c0c4cc;
-  font-size: 13px;
-  text-align: center;
-  padding: 12px 0;
-}
-</style>

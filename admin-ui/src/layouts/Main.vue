@@ -1,177 +1,230 @@
 <template>
-  <el-container class="admin-layout">
-    <el-aside :width="collapsed ? '64px' : '220px'" class="side">
-      <div class="logo">
-        <router-link to="/">LiteShop 后台</router-link>
+  <div class="min-h-screen bg-base-200">
+    <!-- 移动端遮罩 -->
+    <div
+      v-if="mobileOpen"
+      class="fixed inset-0 z-30 bg-black/50 md:hidden"
+      @click="mobileOpen = false"
+    ></div>
+
+    <!-- 侧边栏 -->
+    <aside
+      class="fixed inset-y-0 left-0 z-40 flex w-60 flex-col bg-neutral text-neutral-content transition-transform duration-200 md:sticky md:top-0 md:h-screen md:translate-x-0 md:transition-[width]"
+      :class="[!isMobile && collapsed ? 'md:w-[68px]' : 'md:w-60', isMobile && !mobileOpen ? '-translate-x-full' : 'translate-x-0']"
+    >
+      <div class="flex h-16 shrink-0 items-center gap-2 border-b border-white/10 px-4">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-content">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+        </div>
+        <span v-show="!collapsed || isMobile" class="truncate text-base font-bold">{{ t('app.title') }}</span>
       </div>
-      <el-menu
-        :collapse="collapsed"
-        :default-active="activeMenu"
-        background-color="#1f2329"
-        text-color="#cfd3dc"
-        active-text-color="#ffffff"
+
+      <nav class="flex-1 space-y-1 overflow-y-auto p-3">
+        <router-link
+          v-for="item in navItems"
+          :key="item.to"
+          :to="item.to"
+          class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors"
+          :class="activeMenu === item.to ? 'bg-primary font-medium text-primary-content' : 'hover:bg-white/10'"
+        >
+          <component :is="item.icon" class="h-5 w-5 shrink-0" />
+          <span v-show="!collapsed || isMobile" class="truncate">{{ t(item.label) }}</span>
+        </router-link>
+
+        <div v-show="!collapsed || isMobile" class="!mt-4 px-3 pt-3 text-xs uppercase tracking-wider opacity-50">
+          {{ t('nav.manage') }}
+        </div>
+
+        <router-link
+          v-for="item in manageItems"
+          :key="item.to"
+          :to="item.to"
+          class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors"
+          :class="activeMenu === item.to ? 'bg-primary font-medium text-primary-content' : 'hover:bg-white/10'"
+        >
+          <component :is="item.icon" class="h-5 w-5 shrink-0" />
+          <span v-show="!collapsed || isMobile" class="truncate">{{ t(item.label) }}</span>
+        </router-link>
+      </nav>
+
+      <div class="shrink-0 space-y-1 border-t border-white/10 p-3">
+        <a
+          href="/"
+          target="_blank"
+          rel="noopener"
+          class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-white/10"
+        >
+          <LinkIcon class="h-5 w-5 shrink-0" />
+          <span v-show="!collapsed || isMobile" class="truncate">{{ t('nav.front') }}</span>
+        </a>
+        <button
+          class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-white/10"
+          @click="onLogout"
+        >
+          <LogOut class="h-5 w-5 shrink-0" />
+          <span v-show="!collapsed || isMobile" class="truncate">{{ t('nav.logout') }}</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- 主区域 -->
+    <div class="flex min-h-screen flex-col md:pl-0">
+      <header
+        class="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-base-300 bg-base-100/95 px-4 backdrop-blur"
       >
-        <el-menu-item index="/" @click="router.push('/')">
-          <el-icon><HomeFilled /></el-icon><template #title>{{ t('nav.home') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/products" @click="router.push('/products')">
-          <el-icon><Goods /></el-icon><template #title>{{ t('nav.products') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/orders" @click="router.push('/orders')">
-          <el-icon><List /></el-icon><template #title>{{ t('nav.orders') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/coupons" @click="router.push('/coupons')">
-          <el-icon><Ticket /></el-icon><template #title>{{ t('nav.coupons') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/settings" @click="router.push('/settings')">
-          <el-icon><Wallet /></el-icon><template #title>{{ t('nav.payment') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/notify" @click="router.push('/notify')">
-          <el-icon><Bell /></el-icon><template #title>{{ t('nav.notify') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/site" @click="router.push('/site')">
-          <el-icon><Setting /></el-icon><template #title>{{ t('nav.site') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/account" @click="router.push('/account')">
-          <el-icon><User /></el-icon><template #title>{{ t('nav.account') }}</template>
-        </el-menu-item>
-        <el-menu-item v-if="isAdmin" index="/admins" @click="router.push('/admins')">
-          <el-icon><Avatar /></el-icon><template #title>{{ t('nav.admins') }}</template>
-        </el-menu-item>
-        <el-menu-item v-if="isAdmin" index="/audit" @click="router.push('/audit')">
-          <el-icon><Document /></el-icon><template #title>{{ t('nav.audit') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/system" @click="router.push('/system')">
-          <el-icon><Tools /></el-icon><template #title>{{ t('nav.system') }}</template>
-        </el-menu-item>
-        <el-menu-item index="site-link">
-          <el-icon><Link /></el-icon
-          ><template #title
-            ><a href="/" target="_blank" class="site-link">{{ t('nav.front') }}</a></template
+        <button class="btn btn-ghost btn-circle btn-sm" @click="toggleSidebar">
+          <ChevronsRight v-if="sidebarHidden" class="h-5 w-5" />
+          <ChevronsLeft v-else class="h-5 w-5" />
+        </button>
+
+        <div class="hidden text-sm opacity-60 md:block">{{ currentTitle }}</div>
+        <div class="flex-1"></div>
+
+        <div class="join join-sm">
+          <button
+            class="join-item btn btn-sm"
+            :class="locale === 'zh' ? 'btn-primary' : 'btn-ghost'"
+            @click="locale = 'zh'"
           >
-        </el-menu-item>
-        <el-menu-item index="logout" @click="logout">
-          <el-icon><SwitchButton /></el-icon><template #title>{{ t('nav.logout') }}</template>
-        </el-menu-item>
-      </el-menu>
-    </el-aside>
-    <el-container>
-      <el-header class="topbar">
-        <el-button text @click="collapsed = !collapsed">
-          <el-icon><Expand v-if="collapsed" /><Fold v-else /></el-icon>
-        </el-button>
-        <div style="flex: 1"></div>
-        <el-radio-group v-model="locale" size="small">
-          <el-radio-button label="zh">中文</el-radio-button>
-          <el-radio-button label="en">EN</el-radio-button>
-        </el-radio-group>
-      </el-header>
-      <el-main class="content">
+            中文
+          </button>
+          <button
+            class="join-item btn btn-sm"
+            :class="locale === 'en' ? 'btn-primary' : 'btn-ghost'"
+            @click="locale = 'en'"
+          >
+            EN
+          </button>
+        </div>
+
+        <div class="dropdown dropdown-end">
+          <div tabindex="0" role="button" class="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-base-200">
+            <div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-content">
+              {{ (username || 'A').slice(0, 1).toUpperCase() }}
+            </div>
+            <div class="hidden text-left sm:block">
+              <div class="text-sm font-medium leading-tight">{{ username }}</div>
+              <div class="text-xs opacity-60">{{ roleLabel }}</div>
+            </div>
+          </div>
+          <ul tabindex="0" class="menu dropdown-content z-50 mt-2 w-44 rounded-box bg-base-100 p-2 shadow-lg ring-1 ring-base-300">
+            <li><router-link to="/account">{{ t('nav.account') }}</router-link></li>
+            <li><a @click="onLogout">{{ t('nav.logout') }}</a></li>
+          </ul>
+        </div>
+      </header>
+
+      <main class="flex-1 p-4 md:p-6">
         <router-view v-slot="{ Component }">
-          <transition name="el-fade-in-linear" mode="out-in">
+          <transition name="page-fade" mode="out-in">
             <component :is="Component" />
           </transition>
         </router-view>
-      </el-main>
-    </el-container>
-  </el-container>
+      </main>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessageBox } from 'element-plus'
 import { useLocalStorage, useMediaQuery } from '@vueuse/core'
 import {
-  HomeFilled,
-  Goods,
-  List,
+  Home,
+  Package,
+  ListOrdered,
   Wallet,
   Bell,
-  Setting,
+  Settings,
   User,
-  Tools,
-  Link,
-  SwitchButton,
-  Expand,
-  Fold,
-  Avatar,
-  Document,
+  Wrench,
+  ExternalLink as LinkIcon,
+  LogOut,
+  ChevronsRight,
+  ChevronsLeft,
+  Users,
+  ScrollText,
   Ticket,
-} from '@element-plus/icons-vue'
+} from '@lucide/vue'
 import { useSession } from '@/hooks/useSession'
+import { confirm } from '@/components/ui/confirm'
 
 const route = useRoute()
 const router = useRouter()
-const { isAdmin, logout: doLogout } = useSession()
+const { isAdmin, username, logout: doLogout } = useSession()
 const { t, locale } = useI18n()
+
 const collapsed = useLocalStorage('liteshop_admin_sidebar', false)
+const mobileOpen = ref(false)
 const isMobile = useMediaQuery('(max-width: 767px)')
+
 watch(
   isMobile,
   (mobile) => {
     if (mobile) collapsed.value = true
+    else mobileOpen.value = false
   },
   { immediate: true },
 )
+
+const sidebarHidden = computed(() => (isMobile.value ? !mobileOpen.value : collapsed.value))
+
+function toggleSidebar() {
+  if (isMobile.value) mobileOpen.value = !mobileOpen.value
+  else collapsed.value = !collapsed.value
+}
+
+const navItems = computed(() => [
+  { to: '/', label: 'nav.home', icon: Home },
+  { to: '/products', label: 'nav.products', icon: Package },
+  { to: '/orders', label: 'nav.orders', icon: ListOrdered },
+  { to: '/coupons', label: 'nav.coupons', icon: Ticket },
+  { to: '/settings', label: 'nav.payment', icon: Wallet },
+])
+
+const manageItems = computed(() => {
+  const items = [
+    { to: '/notify', label: 'nav.notify', icon: Bell },
+    { to: '/site', label: 'nav.site', icon: Settings },
+    { to: '/account', label: 'nav.account', icon: User },
+    { to: '/system', label: 'nav.system', icon: Wrench },
+  ]
+  if (isAdmin.value) {
+    items.splice(3, 0, { to: '/admins', label: 'nav.admins', icon: Users })
+    items.splice(4, 0, { to: '/audit', label: 'nav.audit', icon: ScrollText })
+  }
+  return items
+})
+
 const activeMenu = computed(() => {
   if (route.path.startsWith('/products')) return '/products'
   if (route.path.startsWith('/orders')) return '/orders'
   return route.path
 })
 
-async function logout() {
-  await ElMessageBox.confirm(t('nav.logoutConfirm'), t('common.prompt'), { type: 'warning' })
+const currentTitle = computed(() => {
+  const all = [...navItems.value, ...manageItems.value]
+  const item = all.find((i) => i.to === activeMenu.value)
+  return item ? t(item.label) : ''
+})
+
+const roleLabel = computed(() => {
+  const { role } = useSession()
+  return t(`admins.role${role.value === 'admin' ? 'Admin' : role.value === 'operator' ? 'Operator' : 'Viewer'}`)
+})
+
+async function onLogout() {
+  const ok = await confirm({
+    title: t('nav.logout'),
+    message: t('nav.logoutConfirm'),
+    danger: false,
+  })
+  if (!ok) return
   await doLogout()
   router.push('/login')
 }
 </script>
-
-<style scoped>
-.admin-layout {
-  min-height: 100vh;
-}
-.side {
-  background: #1f2329;
-  transition: width 0.2s;
-  overflow: hidden;
-}
-.logo {
-  color: #fff;
-  font-weight: 800;
-  padding: 18px 16px;
-  white-space: nowrap;
-}
-.logo a {
-  color: #fff;
-  text-decoration: none;
-}
-.side :deep(.el-menu) {
-  border-right: none;
-}
-.site-link {
-  color: inherit;
-  text-decoration: none;
-  display: block;
-  width: 100%;
-}
-.site-link:hover {
-  color: #fff;
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  background: #fff;
-  border-bottom: 1px solid #f0f0f0;
-}
-.content {
-  background: #f5f7fa;
-  padding: 16px;
-}
-@media (max-width: 768px) {
-  .content {
-    padding: 10px;
-  }
-}
-</style>

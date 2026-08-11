@@ -1,50 +1,45 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-      <h2>{{ t('audit.title') }}</h2>
-      <el-button @click="load">{{ t('common.refresh') }}</el-button>
+    <div class="mb-4 flex items-center justify-between gap-3">
+      <h2 class="text-xl font-bold">{{ t('audit.title') }}</h2>
+      <button class="btn btn-outline btn-sm" @click="load">{{ t('common.refresh') }}</button>
     </div>
-    <el-card>
-      <el-table v-loading="loading" :data="logs" size="small">
-        <el-table-column :label="t('audit.time')" width="170">
-          <template #default="{ row }">{{ fmtDate(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column :label="t('audit.who')" width="140">
-          <template #default="{ row }">{{ row.username }}</template>
-        </el-table-column>
-        <el-table-column :label="t('audit.action')" width="150">
-          <template #default="{ row }">
-            <el-tag size="small">{{ actionText(row.action) }}</el-tag>
+
+    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
+      <div class="card-body !p-0">
+        <DataTable :columns="columns" :rows="logs" :loading="loading" :empty-text="t('audit.empty')">
+          <template #time="{ row }">{{ fmtDate(row.created_at) }}</template>
+          <template #action="{ row }">
+            <span class="badge badge-sm badge-ghost">{{ actionText(row.action) }}</span>
           </template>
-        </el-table-column>
-        <el-table-column :label="t('audit.target')" width="180">
-          <template #default="{ row }">{{ row.target_type }} {{ row.target_id }}</template>
-        </el-table-column>
-        <el-table-column :label="t('audit.before')" min-width="140">
-          <template #default="{ row }"
-            ><span class="mono">{{ row.before || '-' }}</span></template
-          >
-        </el-table-column>
-        <el-table-column :label="t('audit.after')" min-width="140">
-          <template #default="{ row }"
-            ><span class="mono">{{ row.after || '-' }}</span></template
-          >
-        </el-table-column>
-      </el-table>
-      <div v-if="!logs.length && !loading" class="empty-tip">{{ t('audit.empty') }}</div>
-    </el-card>
+          <template #target="{ row }">{{ row.target_type }} {{ row.target_id }}</template>
+          <template #before="{ row }"><span class="mono text-xs">{{ row.before || '-' }}</span></template>
+          <template #after="{ row }"><span class="mono text-xs">{{ row.after || '-' }}</span></template>
+        </DataTable>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 import { fmtDate } from '@/utils/format'
+import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
 
 const { t } = useI18n()
 const loading = ref(false)
 const logs = ref<any[]>([])
+
+const columns = computed<DataColumn[]>(() => [
+  { slot: 'time', label: t('audit.time'), width: '170px' },
+  { key: 'username', label: t('audit.who'), width: '140px' },
+  { slot: 'action', label: t('audit.action'), width: '150px' },
+  { slot: 'target', label: t('audit.target'), width: '180px' },
+  { slot: 'before', label: t('audit.before') },
+  { slot: 'after', label: t('audit.after') },
+])
 
 function actionText(action: string) {
   return (t(`audit.actions.${action}`) as string) || action
@@ -59,17 +54,3 @@ async function load() {
 }
 onMounted(load)
 </script>
-
-<style scoped>
-.mono {
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  word-break: break-all;
-}
-.empty-tip {
-  color: #c0c4cc;
-  font-size: 13px;
-  text-align: center;
-  padding: 16px 0;
-}
-</style>

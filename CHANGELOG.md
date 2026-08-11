@@ -1,5 +1,25 @@
 # 更新日志
 
+## v0.2.2（2026-08-11）— 后台界面迁移 Tailwind CSS + daisyUI
+
+### 后台 UI
+
+- 管理后台从 Element Plus 整体迁移到 **Tailwind CSS 4 + daisyUI 5**（移除 element-plus、unplugin-auto-import / unplugin-vue-components 与 Element 图标依赖）
+- 自研轻量 UI 基础件替代 Element Plus：`toast`（右上角消息提示）、`confirm`（确认弹窗）、`Modal`（通用弹窗，不依赖原生 `<dialog>`）、`DataTable`（通用数据表格）、`PaginationBar`、`FormField`、`ProductImage`（占位图兜底）
+- 布局重设计：深色可折叠侧边栏（移动端抽屉）、顶栏（语言切换 / 用户菜单 / 退出登录）、页面切换动画；品牌色主题 `liteshop`（emerald 基底，主色贴近商店绿 #0f6b53）
+- 全部 15 个后台页面重写：登录、驾驶舱、商品（列表 / 表单 / 卡密）、订单（列表 / 详情）、优惠券、支付、通知、站点、账号（TOTP）、管理员、审计日志、系统
+- 原生表单控件（input / select / checkbox / toggle / datetime-local）替代 Element 表单；订单筛选与优惠券有效期改用原生时间选择并统一换算 Unix 秒
+- 通知设置页事件模板改为可折叠面板；修复模板数据未加载时的空引用崩溃，补齐 `orders.tradeType` 缺失翻译键
+- 驾驶舱图表在数据加载完成后延迟初始化（nextTick），修复首次进入图表不渲染的问题
+- README（中英双份）技术栈与目录说明同步更新
+
+### 配色与清理（v0.2.2 增补）
+
+- 主题迁移到 **Wise DESIGN.md**（getdesign.md/wise）配色：暖白画布（#faf9f6）+ 近黑文字（#0e0f0c）+ 酸橙绿主操作（#9fe870，深绿 #163300 文字）+ 薄荷绿/警示黄/危险红语义色；按钮统一胶囊形（9999px 圆角），悬停 scale(1.04) / 按下 scale(0.96)，卡片使用环形阴影
+- 字体栈改为 Inter 优先 + 全局 `font-feature-settings: 'calt'`（Wise 排版特征）
+- 图标库从 `@element-plus/icons-vue` 换成官方新包 **`@lucide/vue`**（原 lucide-vue-next 已弃用），彻底移除 Element 相关依赖
+- 清理 eslint 配置中对已删除自动生成文件的 ignore 条目；代码中不再残留任何 Element Plus 引用（`npm audit` 仍为 AGENTS.md 记录的 js-yaml 构建期基线告警）
+
 ## v0.2.1（2026-08-11）— 新增 HashPay 支付网关
 
 ### 支付
