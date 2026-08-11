@@ -348,6 +348,7 @@ func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
 		"product":               productJSONPublic(v.Product),
 		"available":             v.Available,
 		"trade_types":           s.settings.TradeTypes(),
+		"payment_gateway":       s.settings.GatewayName(),
 		"turnstile_site_key":    s.settings.TurnstileSiteKey(),
 		"default_product_image": s.settings.DefaultProductImage(),
 		"site_title":            s.settings.SiteSettings().Title,

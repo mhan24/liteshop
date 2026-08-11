@@ -266,9 +266,30 @@
       "get": {
         "tags": ["public"],
         "summary": "商品详情",
-        "description": "按 id 或 slug 查找上架商品，含库存/收款类型/Turnstile 站点密钥。",
+        "description": "按 id 或 slug 查找上架商品，含库存/收款类型/当前支付网关/Turnstile 站点密钥。",
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "OK" }, "404": { "description": "not found" } }
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "product": { "type": "object" },
+                    "available": { "type": "integer" },
+                    "trade_types": { "type": "array", "items": { "type": "string" } },
+                    "payment_gateway": { "type": "string", "enum": ["bepusdt", "hashpay"] },
+                    "turnstile_site_key": { "type": "string" },
+                    "default_product_image": { "type": "string" },
+                    "site_title": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "not found" }
+        }
       }
     },
     "/api/v1/orders": {

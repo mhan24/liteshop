@@ -171,7 +171,7 @@ export interface paths {
         };
         /**
          * 商品详情
-         * @description 按 id 或 slug 查找上架商品，含库存/收款类型/Turnstile 站点密钥。
+         * @description 按 id 或 slug 查找上架商品，含库存/收款类型/当前支付网关/Turnstile 站点密钥。
          */
         get: {
             parameters: {
@@ -189,7 +189,18 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            product?: Record<string, never>;
+                            available?: number;
+                            trade_types?: string[];
+                            /** @enum {string} */
+                            payment_gateway?: "bepusdt" | "hashpay";
+                            turnstile_site_key?: string;
+                            default_product_image?: string;
+                            site_title?: string;
+                        };
+                    };
                 };
                 /** @description not found */
                 404: {
