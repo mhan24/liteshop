@@ -1,24 +1,25 @@
 <template>
-  <header class="bg-white border-b sticky top-0 z-10">
-    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center gap-6">
-      <NuxtLink to="/" class="flex items-center gap-2 text-lg font-extrabold text-gray-900">
+  <header class="navbar bg-base-100/90 backdrop-blur border-b border-base-300 sticky top-0 z-20 shadow-sm min-h-16">
+    <div class="navbar-start">
+      <NuxtLink to="/" class="flex items-center gap-2 text-lg font-extrabold text-base-content">
         <img v-if="site?.logo_url" :src="site.logo_url" alt="logo" class="h-8 w-auto" />
         <span v-else>{{ site?.title || 'LiteShop' }}</span>
       </NuxtLink>
-      <nav class="flex gap-4 text-sm font-semibold text-gray-600">
-        <NuxtLink to="/" class="hover:text-brand">{{ t('products') }}</NuxtLink>
-        <NuxtLink to="/order" class="hover:text-brand">{{ t('orderQuery') }}</NuxtLink>
-      </nav>
-      <div style="flex:1"></div>
-      <div class="flex items-center border rounded-full p-0.5 text-sm">
+    </div>
+    <nav class="navbar-center hidden sm:flex gap-1 text-sm font-semibold">
+      <NuxtLink to="/" class="btn btn-ghost btn-sm normal-case">{{ t('products') }}</NuxtLink>
+      <NuxtLink to="/order" class="btn btn-ghost btn-sm normal-case">{{ t('orderQuery') }}</NuxtLink>
+    </nav>
+    <div class="navbar-end">
+      <div class="join rounded-full border border-base-300 bg-base-100 text-sm">
         <button
-          class="px-3 py-1 rounded-full font-semibold transition"
-          :class="locale === 'zh' ? 'bg-brand text-white' : 'text-gray-600 hover:text-brand'"
+          class="join-item px-3 py-1 rounded-full font-semibold transition"
+          :class="locale === 'zh' ? 'bg-primary text-primary-content' : 'text-base-content/60 hover:text-primary'"
           @click="setLocale('zh')"
         >中文</button>
         <button
-          class="px-3 py-1 rounded-full font-semibold transition"
-          :class="locale === 'en' ? 'bg-brand text-white' : 'text-gray-600 hover:text-brand'"
+          class="join-item px-3 py-1 rounded-full font-semibold transition"
+          :class="locale === 'en' ? 'bg-primary text-primary-content' : 'text-base-content/60 hover:text-primary'"
           @click="setLocale('en')"
         >EN</button>
       </div>

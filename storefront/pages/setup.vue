@@ -1,46 +1,48 @@
 <template>
   <div class="min-h-screen flex items-start justify-center py-12 px-4">
-    <div class="w-full max-w-lg bg-white rounded-xl border shadow-sm p-6">
-      <h1 class="text-xl font-bold mb-2">{{ t('setupTitle') }}</h1>
-      <p class="text-gray-500 text-sm mb-4">{{ t('setupIntro') }}</p>
-      <div v-if="error" class="bg-red-50 text-red-600 border border-red-100 rounded p-3 mb-3 text-sm">{{ error }}</div>
+    <div class="w-full max-w-lg card bg-base-100 shadow-sm">
+      <div class="card-body">
+      <h1 class="text-xl font-bold text-base-content mb-2">{{ t('setupTitle') }}</h1>
+      <p class="text-base-content/60 text-sm mb-4">{{ t('setupIntro') }}</p>
+      <div v-if="error" class="alert alert-error text-sm mb-3">{{ error }}</div>
       <form class="grid gap-3" @submit.prevent="submit">
         <div>
-          <label class="text-sm font-semibold">{{ t('siteTitle') }}</label>
-          <input v-model="form.site_title" class="w-full border rounded px-3 py-2" />
+          <label class="text-sm font-semibold text-base-content">{{ t('siteTitle') }}</label>
+          <input v-model="form.site_title" class="input input-bordered w-full mt-1" />
         </div>
         <div>
-          <label class="text-sm font-semibold">{{ t('adminUsername') }}</label>
-          <input v-model="form.username" class="w-full border rounded px-3 py-2" />
+          <label class="text-sm font-semibold text-base-content">{{ t('adminUsername') }}</label>
+          <input v-model="form.username" class="input input-bordered w-full mt-1" />
         </div>
         <div>
-          <label class="text-sm font-semibold">{{ t('adminPassword') }}</label>
-          <input type="password" v-model="form.password" class="w-full border rounded px-3 py-2" />
+          <label class="text-sm font-semibold text-base-content">{{ t('adminPassword') }}</label>
+          <input type="password" v-model="form.password" class="input input-bordered w-full mt-1" />
         </div>
         <div>
-          <label class="text-sm font-semibold">{{ t('confirmPassword') }}</label>
-          <input type="password" v-model="form.confirm" class="w-full border rounded px-3 py-2" />
+          <label class="text-sm font-semibold text-base-content">{{ t('confirmPassword') }}</label>
+          <input type="password" v-model="form.confirm" class="input input-bordered w-full mt-1" />
         </div>
         <div>
-          <label class="text-sm font-semibold">{{ t('publicBaseUrl') }}</label>
-          <input v-model="form.public_base_url" class="w-full border rounded px-3 py-2" />
+          <label class="text-sm font-semibold text-base-content">{{ t('publicBaseUrl') }}</label>
+          <input v-model="form.public_base_url" class="input input-bordered w-full mt-1" />
         </div>
         <div>
-          <label class="text-sm font-semibold">{{ t('bepusdtBaseUrl') }}</label>
-          <input v-model="form.bepusdt_base_url" class="w-full border rounded px-3 py-2" />
+          <label class="text-sm font-semibold text-base-content">{{ t('bepusdtBaseUrl') }}</label>
+          <input v-model="form.bepusdt_base_url" class="input input-bordered w-full mt-1" />
         </div>
         <div>
-          <label class="text-sm font-semibold">{{ t('bepusdtToken') }}</label>
-          <input v-model="form.bepusdt_api_token" class="w-full border rounded px-3 py-2" />
+          <label class="text-sm font-semibold text-base-content">{{ t('bepusdtToken') }}</label>
+          <input v-model="form.bepusdt_api_token" class="input input-bordered w-full mt-1" />
         </div>
         <div>
-          <label class="text-sm font-semibold">{{ t('tradeTypes') }}</label>
-          <input v-model="form.trade_types" class="w-full border rounded px-3 py-2" />
+          <label class="text-sm font-semibold text-base-content">{{ t('tradeTypes') }}</label>
+          <input v-model="form.trade_types" class="input input-bordered w-full mt-1" />
         </div>
-        <button type="submit" :disabled="loading" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 font-semibold disabled:opacity-60">
+        <button type="submit" :disabled="loading" class="btn btn-primary normal-case disabled:opacity-60">
           {{ loading ? t('processing') : t('completeSetup') }}
         </button>
       </form>
+      </div>
     </div>
   </div>
 </template>

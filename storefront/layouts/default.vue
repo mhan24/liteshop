@@ -1,15 +1,17 @@
 <template>
   <div v-if="maintenance" class="min-h-screen flex items-center justify-center px-4">
-    <div class="max-w-md w-full text-center py-16">
-      <h1 class="text-2xl font-bold text-gray-900">{{ t('maintenance') }}</h1>
-      <p class="text-gray-600 mt-3">{{ maintenanceMessage || t('maintenanceMsg') }}</p>
-      <form class="mt-6 flex gap-2" @submit.prevent="unlock">
-        <input v-model="unlockPassword" type="password" :placeholder="t('unlockPassword')" class="flex-1 border rounded px-3 py-2" />
-        <button type="submit" :disabled="unlocking" class="bg-brand hover:bg-brand-dark text-white rounded px-4 py-2 font-semibold disabled:opacity-60">
-          {{ unlocking ? t('unlocking') : t('unlock') }}
-        </button>
-      </form>
-      <p v-if="unlockError" class="text-red-600 text-sm mt-2">{{ unlockError }}</p>
+    <div class="card w-full max-w-md bg-base-100 shadow-xl text-center">
+      <div class="card-body py-12">
+        <h1 class="text-2xl font-bold text-base-content">{{ t('maintenance') }}</h1>
+        <p class="text-base-content/60 mt-3">{{ maintenanceMessage || t('maintenanceMsg') }}</p>
+        <form class="mt-6 flex gap-2" @submit.prevent="unlock">
+          <input v-model="unlockPassword" type="password" :placeholder="t('unlockPassword')" class="input input-bordered flex-1" />
+          <button type="submit" :disabled="unlocking" class="btn btn-primary disabled:opacity-60">
+            {{ unlocking ? t('unlocking') : t('unlock') }}
+          </button>
+        </form>
+        <p v-if="unlockError" class="text-error text-sm mt-2">{{ unlockError }}</p>
+      </div>
     </div>
   </div>
   <div v-else class="min-h-screen flex flex-col">
@@ -20,11 +22,11 @@
     <SiteFooter :site="site" />
 
     <div v-if="showAnnouncement" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+      <div class="modal-box max-w-md">
         <h2 class="text-lg font-bold">{{ site?.title || 'LiteShop' }}</h2>
-        <div class="md-body text-gray-600 mt-2 text-sm" v-html="renderMarkdown(site?.announcement)"></div>
-        <div class="mt-4 text-right">
-          <button type="button" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 text-sm" @click="dismissAnnouncement">{{ t('close') }}</button>
+        <div class="md-body text-base-content/70 mt-2 text-sm" v-html="renderMarkdown(site?.announcement)"></div>
+        <div class="modal-action">
+          <button type="button" class="btn btn-primary btn-sm" @click="dismissAnnouncement">{{ t('close') }}</button>
         </div>
       </div>
     </div>

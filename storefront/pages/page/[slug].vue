@@ -1,7 +1,9 @@
 <template>
-  <div class="max-w-2xl bg-white rounded-xl border p-6 shadow-sm">
-    <h1 class="text-xl font-bold mb-2">{{ title }}</h1>
-    <div class="md-body text-gray-700" v-html="html"></div>
+  <div class="max-w-2xl card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h1 class="text-xl font-bold text-base-content mb-2">{{ title }}</h1>
+      <div class="md-body text-base-content/80" v-html="html"></div>
+    </div>
   </div>
 </template>
 

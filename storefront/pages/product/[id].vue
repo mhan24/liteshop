@@ -1,136 +1,148 @@
 <template>
   <div class="flex flex-col lg:flex-row lg:items-start lg:gap-8">
-    <div class="max-w-xl bg-white rounded-xl border p-6 shadow-sm">
-      <NuxtLink to="/" class="text-sm text-gray-500">{{ t('backProducts') }}</NuxtLink>
-      <div v-if="pending" class="py-10 text-gray-400">{{ t('loading') }}</div>
-      <div v-else-if="product">
-      <div class="aspect-square w-full overflow-hidden rounded-xl bg-gray-100 flex items-center justify-center">
-        <img :src="imgSrc(product.image_url)" :alt="product.name" class="max-w-full max-h-full w-auto h-auto" />
+    <div class="max-w-xl w-full">
+      <NuxtLink to="/" class="link link-hover link-neutral text-sm">{{ t('backProducts') }}</NuxtLink>
+      <div v-if="pending" class="py-10 flex justify-center">
+        <span class="loading loading-spinner loading-lg text-primary"></span>
       </div>
-        <h1 class="text-2xl font-bold mt-3">{{ product.name }}</h1>
-        <div class="md-body text-gray-600 mt-2" v-html="renderMarkdown(product.description)"></div>
-        <p class="text-2xl font-bold mt-4">{{ siteMoney(product.price_cents) }}</p>
-        <p class="text-gray-500 text-sm">{{ t('currentStock') }} {{ stockLabel(available) }}</p>
+      <div v-else-if="product">
+      <div class="card bg-base-100 shadow-xl">
+        <figure class="aspect-square w-full overflow-hidden bg-base-200 flex items-center justify-center rounded-t-2xl">
+          <img :src="imgSrc(product.image_url)" :alt="product.name" class="max-w-full max-h-full w-auto h-auto" />
+        </figure>
+        <div class="card-body">
+          <h1 class="text-2xl font-bold text-base-content">{{ product.name }}</h1>
+          <div class="md-body text-base-content/70 mt-2" v-html="renderMarkdown(product.description)"></div>
+          <p class="text-3xl font-extrabold text-primary mt-3">{{ siteMoney(product.price_cents) }}</p>
+          <p class="text-base-content/60 text-sm">{{ t('currentStock') }} {{ stockLabel(available) }}</p>
 
-        <div v-if="wholesale.length" class="mt-3 border rounded-lg overflow-hidden">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="bg-gray-50">
-                <th class="text-left px-3 py-2">{{ t('wholesaleQty') }}</th>
-                <th class="text-left px-3 py-2">{{ t('wholesalePrice') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="t in wholesale" :key="t.min_qty" class="border-t">
-                <td class="px-3 py-2">{{ t('wholesaleFrom') }} {{ t.min_qty }}</td>
-                <td class="px-3 py-2">{{ siteMoney(wholesalePrice(t.min_qty)) }}<span v-if="t.discount < 100" class="text-red-500 text-xs ml-1">{{ t.discount }}%</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+          <div v-if="wholesale.length" class="mt-2 overflow-x-auto">
+            <table class="table table-sm table-zebra w-full text-sm">
+              <thead>
+                <tr>
+                  <th>{{ t('wholesaleQty') }}</th>
+                  <th>{{ t('wholesalePrice') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="t in wholesale" :key="t.min_qty">
+                  <td>{{ t('wholesaleFrom') }} {{ t.min_qty }}</td>
+                  <td>{{ siteMoney(wholesalePrice(t.min_qty)) }}<span v-if="t.discount < 100" class="badge badge-error badge-xs ml-1">{{ t.discount }}%</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-        <form class="mt-4 grid gap-3" @submit.prevent="submit">
+          <form class="mt-4 grid gap-3" @submit.prevent="submit">
           <div v-if="paymentGateways.length > 1">
-            <label class="text-sm font-semibold">{{ t('paymentMethod') }}</label>
+            <label class="text-sm font-semibold text-base-content">{{ t('paymentMethod') }}</label>
             <div class="grid grid-cols-2 gap-2 mt-1">
               <button
                 v-if="paymentGateways.includes('bepusdt')"
                 type="button"
                 :class="[
-                  'border rounded-lg px-3 py-2.5 text-left transition',
+                  'card border-2 px-3 py-2.5 text-left transition cursor-pointer',
                   form.gateway === 'bepusdt'
-                    ? 'border-brand bg-brand/5 ring-1 ring-brand'
-                    : 'border-gray-200 hover:border-gray-400',
+                    ? 'border-primary bg-primary/10'
+                    : 'border-base-300 hover:border-primary/50',
                 ]"
                 @click="form.gateway = 'bepusdt'"
               >
                 <span class="block font-semibold text-sm">{{ gatewayTitle('bepusdt') }}</span>
-                <span class="block text-xs text-gray-500 mt-0.5">{{ gatewayDesc('bepusdt') }}</span>
+                <span class="block text-xs text-base-content/60 mt-0.5">{{ gatewayDesc('bepusdt') }}</span>
               </button>
               <button
                 v-if="paymentGateways.includes('hashpay')"
                 type="button"
                 :class="[
-                  'border rounded-lg px-3 py-2.5 text-left transition',
+                  'card border-2 px-3 py-2.5 text-left transition cursor-pointer',
                   form.gateway === 'hashpay'
-                    ? 'border-brand bg-brand/5 ring-1 ring-brand'
-                    : 'border-gray-200 hover:border-gray-400',
+                    ? 'border-primary bg-primary/10'
+                    : 'border-base-300 hover:border-primary/50',
                 ]"
                 @click="form.gateway = 'hashpay'"
               >
                 <span class="block font-semibold text-sm">{{ gatewayTitle('hashpay') }}</span>
-                <span class="block text-xs text-gray-500 mt-0.5">{{ gatewayDesc('hashpay') }}</span>
+                <span class="block text-xs text-base-content/60 mt-0.5">{{ gatewayDesc('hashpay') }}</span>
               </button>
             </div>
           </div>
           <div v-if="form.gateway === 'bepusdt' && tradeTypes.length > 1">
-            <label class="text-sm font-semibold">{{ t('network') }}</label>
+            <label class="text-sm font-semibold text-base-content">{{ t('network') }}</label>
             <div class="grid grid-cols-2 gap-2 mt-1">
               <button
                 type="button"
                 v-for="t in tradeTypes"
                 :key="t"
                 :class="[
-                  'border rounded-lg px-3 py-2.5 text-left transition',
+                  'card border-2 px-3 py-2.5 text-left transition cursor-pointer',
                   form.trade_type === t
-                    ? 'border-brand bg-brand/5 ring-1 ring-brand'
-                    : 'border-gray-200 hover:border-gray-400',
+                    ? 'border-primary bg-primary/10'
+                    : 'border-base-300 hover:border-primary/50',
                 ]"
                 @click="form.trade_type = t"
               >
                 <span class="block font-semibold text-sm">{{ networkName(t) }}</span>
-                <span class="block text-xs text-gray-500 mt-0.5">{{ networkCoin(t) }}</span>
+                <span class="block text-xs text-base-content/60 mt-0.5">{{ networkCoin(t) }}</span>
               </button>
             </div>
           </div>
           <div>
-            <label class="text-sm font-semibold">{{ t('quantity') }} ({{ minQty }}-{{ maxQty }})</label>
-            <input type="number" v-model.number="form.qty" :min="minQty" :max="maxQty" class="w-full border rounded px-3 py-2" />
+            <label class="text-sm font-semibold text-base-content">{{ t('quantity') }} ({{ minQty }}-{{ maxQty }})</label>
+            <input type="number" v-model.number="form.qty" :min="minQty" :max="maxQty" class="input input-bordered w-full mt-1" />
           </div>
           <div>
-            <label class="text-sm font-semibold">{{ t('couponCode') }}</label>
-            <input v-model="form.coupon_code" :placeholder="t('couponPlaceholder')" class="w-full border rounded px-3 py-2" />
+            <label class="text-sm font-semibold text-base-content">{{ t('couponCode') }}</label>
+            <input v-model="form.coupon_code" :placeholder="t('couponPlaceholder')" class="input input-bordered w-full mt-1" />
           </div>
           <div>
-            <label class="text-sm font-semibold">{{ t('email') }}</label>
-            <input type="email" v-model="form.contact" required class="w-full border rounded px-3 py-2" />
+            <label class="text-sm font-semibold text-base-content">{{ t('email') }}</label>
+            <input type="email" v-model="form.contact" required class="input input-bordered w-full mt-1" />
           </div>
-          <button type="submit" :disabled="loading" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 font-semibold disabled:opacity-60">
+          <button type="submit" :disabled="loading" class="btn btn-primary btn-block mt-1 normal-case">
             {{ loading ? t('processing') : t('payNow') }}
           </button>
-        </form>
+          </form>
 
-        <div v-if="faqItems.length" class="mt-8">
-          <h2 class="text-lg font-bold mb-3">{{ t('faqTitle') }}</h2>
-          <div class="divide-y border rounded-lg">
-            <details v-for="(item, idx) in faqItems" :key="idx" class="px-4 py-3">
-              <summary class="font-semibold cursor-pointer select-none">{{ item.q }}</summary>
-              <div class="md-body text-gray-600 mt-2 text-sm" v-html="renderMarkdown(item.a)"></div>
-            </details>
+          <div v-if="faqItems.length" class="mt-4">
+            <h2 class="text-lg font-bold text-base-content mb-2">{{ t('faqTitle') }}</h2>
+            <div class="space-y-2">
+              <details v-for="(item, idx) in faqItems" :key="idx" class="collapse collapse-arrow bg-base-200">
+                <summary class="collapse-title font-semibold">{{ item.q }}</summary>
+                <div class="collapse-content">
+                  <div class="md-body text-base-content/70 text-sm" v-html="renderMarkdown(item.a)"></div>
+                </div>
+              </details>
+            </div>
           </div>
         </div>
       </div>
-      <div v-else class="py-10 text-gray-500">{{ t('productNotFound') }}</div>
+      </div>
+      <div v-else class="card bg-base-100 shadow-sm">
+        <div class="card-body text-center text-base-content/60">{{ t('productNotFound') }}</div>
+      </div>
 
       <div v-if="turnstileOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm text-center">
+        <div class="modal-box text-center">
           <h2 class="text-lg font-bold">{{ t('verifyTitle') }}</h2>
-          <p class="text-sm text-gray-500 mt-1">{{ t('verifyHint') }}</p>
+          <p class="text-sm text-base-content/60 mt-1">{{ t('verifyHint') }}</p>
           <!-- 注意：不要加 cf-turnstile 类（会触发 api.js 自动渲染，与下方显式 render 冲突） -->
           <div ref="turnstileContainer" class="mt-4 flex justify-center"></div>
-          <p v-if="turnstileError" class="text-red-600 text-sm mt-2">{{ t('verifyRetry') }}</p>
-          <button type="button" class="mt-4 text-sm text-gray-500 hover:text-gray-800" @click="closeTurnstile">{{ t('verifyCancel') }}</button>
+          <p v-if="turnstileError" class="text-error text-sm mt-2">{{ t('verifyRetry') }}</p>
+          <button type="button" class="mt-4 text-sm link link-neutral" @click="closeTurnstile">{{ t('verifyCancel') }}</button>
         </div>
       </div>
     </div>
 
     <aside v-if="showQr" class="shrink-0 mt-6 lg:mt-0 lg:sticky lg:top-6">
-      <div class="bg-white rounded-xl border p-5 shadow-sm text-center w-60">
-        <p class="text-sm font-semibold text-gray-800">{{ t('scanTitle') }}</p>
-        <div class="mt-3 bg-white border rounded-lg p-2">
+      <div class="card bg-base-100 shadow-sm text-center w-60">
+        <div class="card-body p-5">
+        <p class="text-sm font-semibold text-base-content">{{ t('scanTitle') }}</p>
+        <div class="mt-3 bg-base-200 rounded-lg p-2">
           <img v-if="qrDataUrl" :src="qrDataUrl" alt="QR" class="w-full h-auto block" />
         </div>
-        <p class="text-xs text-gray-500 mt-2">{{ t('scanHint') }}</p>
+        <p class="text-xs text-base-content/60 mt-2">{{ t('scanHint') }}</p>
+        </div>
       </div>
     </aside>
   </div>

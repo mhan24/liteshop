@@ -1,38 +1,34 @@
 <template>
-  <footer class="bg-white border-t mt-10">
-    <div class="max-w-6xl mx-auto px-4 py-8 grid grid-cols-1 md:grid-cols-4 gap-6 text-sm text-gray-600">
-      <div>
-        <h4 class="text-gray-900 font-semibold mb-2">{{ t('contact') }}</h4>
-        <template v-if="contactLinks.length">
-          <p v-for="l in contactLinks" :key="l.name + l.url">
-            <a v-if="l.url" :href="href(l.url)" target="_blank" rel="noopener" class="hover:text-brand">{{ l.name }}</a>
-            <span v-else>{{ l.name }}</span>
-          </p>
-        </template>
-      </div>
-      <div>
-        <h4 class="text-gray-900 font-semibold mb-2">{{ t('friendLinks') }}</h4>
-        <ul>
-          <li v-for="l in friendLinks" :key="l.name + l.url">
-            <a v-if="l.url" :href="href(l.url)" target="_blank" rel="noopener" class="hover:text-brand">{{ l.name }}</a>
-            <span v-else>{{ l.name }}</span>
-          </li>
-        </ul>
-      </div>
-      <div>
-        <h4 class="text-gray-900 font-semibold mb-2">{{ t('legal') }}</h4>
-        <p><NuxtLink to="/page/privacy" class="hover:text-brand">{{ t('privacy') }}</NuxtLink></p>
-        <p><NuxtLink to="/page/terms" class="hover:text-brand">{{ t('terms') }}</NuxtLink></p>
-      </div>
-      <div>
-        <h4 class="text-gray-900 font-semibold mb-2">{{ t('project') }}</h4>
-        <a href="https://github.com/mhan24/liteshop" target="_blank" rel="noopener" class="hover:text-brand">GitHub</a>
-      </div>
-    </div>
-    <div class="max-w-6xl mx-auto px-4 pb-6 text-xs text-gray-500">
+  <footer class="footer bg-base-100 border-t border-base-300 text-base-content/70 p-10 mt-10">
+    <nav v-if="contactLinks.length">
+      <h6 class="footer-title text-base-content">{{ t('contact') }}</h6>
+      <p v-for="l in contactLinks" :key="l.name + l.url">
+        <a v-if="l.url" :href="href(l.url)" target="_blank" rel="noopener" class="link link-hover link-primary">{{ l.name }}</a>
+        <span v-else>{{ l.name }}</span>
+      </p>
+    </nav>
+    <nav v-if="friendLinks.length">
+      <h6 class="footer-title text-base-content">{{ t('friendLinks') }}</h6>
+      <ul>
+        <li v-for="l in friendLinks" :key="l.name + l.url">
+          <a v-if="l.url" :href="href(l.url)" target="_blank" rel="noopener" class="link link-hover link-primary">{{ l.name }}</a>
+          <span v-else>{{ l.name }}</span>
+        </li>
+      </ul>
+    </nav>
+    <nav>
+      <h6 class="footer-title text-base-content">{{ t('legal') }}</h6>
+      <NuxtLink to="/page/privacy" class="link link-hover link-primary">{{ t('privacy') }}</NuxtLink>
+      <NuxtLink to="/page/terms" class="link link-hover link-primary">{{ t('terms') }}</NuxtLink>
+    </nav>
+    <nav>
+      <h6 class="footer-title text-base-content">{{ t('project') }}</h6>
+      <a href="https://github.com/mhan24/liteshop" target="_blank" rel="noopener" class="link link-hover link-primary">GitHub</a>
+    </nav>
+    <aside class="footer-aside w-full flex flex-col gap-1 text-xs text-base-content/50">
       <div>{{ site?.copyright }}</div>
-      <div class="mt-1">Powered by LiteShop</div>
-    </div>
+      <div>Powered by LiteShop</div>
+    </aside>
   </footer>
 </template>
 

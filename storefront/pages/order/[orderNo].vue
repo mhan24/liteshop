@@ -1,42 +1,44 @@
 <template>
-  <div class="max-w-xl bg-white rounded-xl border p-6 shadow-sm">
-    <h1 class="text-xl font-bold mb-3">{{ t('orderDetail') }}</h1>
+  <div class="max-w-xl card bg-base-100 shadow-sm">
+    <div class="card-body">
+    <h1 class="text-xl font-bold text-base-content mb-3">{{ t('orderDetail') }}</h1>
     <dl class="grid grid-cols-3 gap-2 text-sm">
-      <dt class="text-gray-500">{{ t('orderNo') }}</dt><dd class="col-span-2 font-mono">{{ order.order_no }}</dd>
-      <dt class="text-gray-500">{{ t('product') }}</dt><dd class="col-span-2">{{ order.product_name }} x{{ order.qty }}</dd>
-      <dt class="text-gray-500">{{ t('amount') }}</dt><dd class="col-span-2">{{ money(order.amount_cents) }} {{ order.fiat }}</dd>
-      <dt class="text-gray-500">{{ t('tradeType') }}</dt><dd class="col-span-2">{{ order.trade_type }}</dd>
-      <dt class="text-gray-500">{{ t('paymentGateway') }}</dt><dd class="col-span-2">{{ gatewayLabel(order) }}</dd>
-      <dt class="text-gray-500">{{ t('status') }}</dt><dd class="col-span-2">
+      <dt class="text-base-content/60">{{ t('orderNo') }}</dt><dd class="col-span-2 font-mono">{{ order.order_no }}</dd>
+      <dt class="text-base-content/60">{{ t('product') }}</dt><dd class="col-span-2">{{ order.product_name }} x{{ order.qty }}</dd>
+      <dt class="text-base-content/60">{{ t('amount') }}</dt><dd class="col-span-2 font-semibold">{{ money(order.amount_cents) }} {{ order.fiat }}</dd>
+      <dt class="text-base-content/60">{{ t('tradeType') }}</dt><dd class="col-span-2">{{ order.trade_type }}</dd>
+      <dt class="text-base-content/60">{{ t('paymentGateway') }}</dt><dd class="col-span-2">{{ gatewayLabel(order) }}</dd>
+      <dt class="text-base-content/60">{{ t('status') }}</dt><dd class="col-span-2">
         <span class="inline-flex items-center gap-1">
           {{ statusText(order.status) }}
-          <span v-if="order.status === 'waiting_payment'" class="text-xs text-gray-400">{{ t('autoRefresh') }}</span>
+          <span v-if="order.status === 'waiting_payment'" class="text-xs text-base-content/40">{{ t('autoRefresh') }}</span>
         </span>
       </dd>
-      <dt class="text-gray-500">{{ t('createdAt') }}</dt><dd class="col-span-2">{{ date(order.created_at) }}</dd>
+      <dt class="text-base-content/60">{{ t('createdAt') }}</dt><dd class="col-span-2">{{ date(order.created_at) }}</dd>
       <template v-if="order.paid_at">
-        <dt class="text-gray-500">{{ t('paidAt') }}</dt><dd class="col-span-2">{{ date(order.paid_at) }}</dd>
+        <dt class="text-base-content/60">{{ t('paidAt') }}</dt><dd class="col-span-2">{{ date(order.paid_at) }}</dd>
       </template>
     </dl>
-    <p v-if="order.status === 'pending_delivery'" class="mt-3 bg-blue-50 text-blue-700 border border-blue-100 rounded p-3 text-sm">
+    <p v-if="order.status === 'pending_delivery'" class="mt-3 alert alert-info text-sm">
       {{ t('pendingDeliveryHint') }}
     </p>
     <div v-if="order.status === 'waiting_payment' && order.payment_url" class="mt-4 flex gap-2">
-      <a :href="order.payment_url" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 font-semibold">{{ t('continuePay') }}</a>
-      <button @click="cancel" class="border border-red-500 text-red-500 rounded-full px-4 py-2 font-semibold hover:bg-red-50">
+      <a :href="order.payment_url" class="btn btn-primary normal-case">{{ t('continuePay') }}</a>
+      <button @click="cancel" class="btn btn-outline btn-error normal-case">
         {{ t('cancelOrder') }}
       </button>
     </div>
     <div v-if="order.delivery_type === 'manual' && order.delivery_content" class="mt-5">
-      <h2 class="font-bold mb-2">{{ t('deliveryInfo') }}</h2>
-      <div class="bg-gray-900 text-green-200 rounded p-3 font-mono whitespace-pre-wrap">{{ order.delivery_content }}</div>
+      <h2 class="font-bold text-base-content mb-2">{{ t('deliveryInfo') }}</h2>
+      <div class="bg-neutral text-success-content rounded-xl p-4 font-mono whitespace-pre-wrap">{{ order.delivery_content }}</div>
     </div>
     <div v-else-if="cards.length" class="mt-5">
-      <h2 class="font-bold mb-2">{{ t('cards') }}</h2>
-      <ul class="bg-gray-900 text-green-200 rounded p-3 font-mono">
+      <h2 class="font-bold text-base-content mb-2">{{ t('cards') }}</h2>
+      <ul class="bg-neutral text-success-content rounded-xl p-4 font-mono">
         <li v-for="c in cards" :key="c.id">{{ c.content }}</li>
       </ul>
-      <p class="text-xs text-gray-500 mt-2">{{ t('cardsSaved') }}</p>
+      <p class="text-xs text-base-content/60 mt-2">{{ t('cardsSaved') }}</p>
+    </div>
     </div>
   </div>
 </template>

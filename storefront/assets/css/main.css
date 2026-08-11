@@ -2,8 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-html { background: #f6f7f9; }
-body { @apply text-gray-800; }
+html { background: #f3f5f7; }
+body { @apply bg-base-200 text-base-content; }
 
 .md-body {
   line-height: 1.7;

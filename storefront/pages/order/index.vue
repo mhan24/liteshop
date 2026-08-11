@@ -1,41 +1,43 @@
 <template>
-  <div class="max-w-xl bg-white rounded-xl border p-6 shadow-sm">
-    <h1 class="text-xl font-bold">{{ t('orderQuery') }}</h1>
-    <p class="text-gray-500 text-sm mt-1">{{ t('forgotOrderNo') }}</p>
+  <div class="max-w-xl card bg-base-100 shadow-sm">
+    <div class="card-body">
+    <h1 class="text-xl font-bold text-base-content">{{ t('orderQuery') }}</h1>
+    <p class="text-base-content/60 text-sm mt-1">{{ t('forgotOrderNo') }}</p>
     <form class="mt-4 grid gap-3" @submit.prevent="submit">
       <div>
-        <label class="text-sm font-semibold">{{ t('email') }}</label>
-        <input type="email" v-model="form.contact" required class="w-full border rounded px-3 py-2" />
+        <label class="text-sm font-semibold text-base-content">{{ t('email') }}</label>
+        <input type="email" v-model="form.contact" required class="input input-bordered w-full mt-1" />
       </div>
       <div>
-        <label class="text-sm font-semibold">{{ t('orderNoOptional') }}</label>
-        <input v-model="form.order_no" :placeholder="t('orderNoOptionalHint')" class="w-full border rounded px-3 py-2" />
+        <label class="text-sm font-semibold text-base-content">{{ t('orderNoOptional') }}</label>
+        <input v-model="form.order_no" :placeholder="t('orderNoOptionalHint')" class="input input-bordered w-full mt-1" />
       </div>
-      <button type="submit" :disabled="loading" class="bg-brand hover:bg-brand-dark text-white rounded-full px-4 py-2 font-semibold disabled:opacity-60">
+      <button type="submit" :disabled="loading" class="btn btn-primary normal-case disabled:opacity-60">
         {{ form.order_no ? t('queryOrder') : t('recoverByEmail') }}
       </button>
     </form>
-    <p class="text-xs text-gray-400 mt-2">{{ t('orderLinkHint') }}</p>
+    <p class="text-xs text-base-content/40 mt-2">{{ t('orderLinkHint') }}</p>
 
-    <div v-if="orders.length" class="mt-5 divide-y">
+    <div v-if="orders.length" class="mt-5 divide-y divide-base-200">
       <div v-for="(item, idx) in orders" :key="idx" class="py-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div class="font-semibold">{{ item.product_name }} x{{ item.qty }}</div>
-          <div class="text-sm text-gray-500">
+          <div class="text-sm text-base-content/60">
             <span>{{ orderSub(item) }} · {{ date(item.paid_at || item.created_at) }}</span>
           </div>
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="badgeClass(item.status)">{{ statusText(item.status) }}</span>
+          <span class="badge badge-sm" :class="badgeClass(item.status)">{{ statusText(item.status) }}</span>
         </div>
         <div class="flex gap-2">
-          <a v-if="item.payment_url" :href="item.payment_url" class="text-brand font-semibold">{{ t('continuePay') }}</a>
+          <a v-if="item.payment_url" :href="item.payment_url" class="link link-primary font-semibold">{{ t('continuePay') }}</a>
         </div>
       </div>
     </div>
     <div v-if="searched" class="mt-4">
-      <button class="text-sm text-brand font-semibold" @click="sendAllLinks">{{ t('sendAllLinks') }}</button>
+      <button class="btn btn-link btn-sm link-primary px-0" @click="sendAllLinks">{{ t('sendAllLinks') }}</button>
     </div>
     <div ref="turnstileContainer" v-if="turnstilePending" class="mt-3"></div>
-    <div v-else-if="searched && !loading" class="text-gray-500 mt-5">{{ t('noOrders') }}</div>
+    <div v-else-if="searched && !loading" class="text-base-content/60 mt-5">{{ t('noOrders') }}</div>
+    </div>
   </div>
 </template>
 
@@ -155,13 +157,13 @@ function statusText(status: string) {
 }
 function badgeClass(status: string) {
   const m: any = {
-    paid: 'bg-green-100 text-green-700', processing: 'bg-green-100 text-green-700',
-    delivered: 'bg-green-100 text-green-700', completed: 'bg-green-100 text-green-700',
-    waiting_payment: 'bg-yellow-100 text-yellow-700', created: 'bg-gray-100 text-gray-600',
-    expired: 'bg-red-100 text-red-700', payment_failed: 'bg-red-100 text-red-700',
-    delivery_failed: 'bg-red-100 text-red-700', cancelled: 'bg-gray-100 text-gray-600',
+    paid: 'badge-success', processing: 'badge-success',
+    delivered: 'badge-success', completed: 'badge-success',
+    waiting_payment: 'badge-warning', created: 'badge-neutral',
+    expired: 'badge-error', payment_failed: 'badge-error',
+    delivery_failed: 'badge-error', cancelled: 'badge-neutral',
   }
-  return m[status] || 'bg-gray-100 text-gray-600'
+  return m[status] || 'badge-neutral'
 }
 useHead({ title: t('orderQuery'), meta: [{ name: 'description', content: t('orderQueryDesc') }, { name: 'robots', content: 'noindex,nofollow' }] })
 </script>
