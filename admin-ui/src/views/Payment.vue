@@ -78,9 +78,14 @@ onMounted(async () => {
   loading.value = true
   try {
     const data = await api.get('/admin/settings')
-    form.value = { ...data, payment_gateway: data.payment_gateway || 'bepusdt' }
-    enabled.bepusdt = (form.value.payment_gateway || '').split(',').includes('bepusdt')
-    enabled.hashpay = (form.value.payment_gateway || '').split(',').includes('hashpay')
+    // 启用列表以 payment_gateways 数组为准（payment_gateway 仅为主网关，双网关并存时会漏）。
+    const gateways: string[] =
+      Array.isArray(data.payment_gateways) && data.payment_gateways.length
+        ? data.payment_gateways
+        : (data.payment_gateway || 'bepusdt').split(',').filter(Boolean)
+    form.value = { ...data, payment_gateway: gateways.join(',') }
+    enabled.bepusdt = gateways.includes('bepusdt')
+    enabled.hashpay = gateways.includes('hashpay')
     form.value.bepusdt_api_token = ''
     form.value.hashpay_private_key = ''
   } finally {
