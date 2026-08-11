@@ -9,12 +9,16 @@ import (
 	"shop/internal/payment"
 )
 
-// CreateOrder 创建订单并生成支付交易。
+// CreateOrder 创建订单并生成支付交易（gateway 指定用户选择的支付网关）。
 // 支持批发价（阶梯折扣）与优惠券（couponCode 可空）。
 // 返回订单号、支付地址、优惠券抵扣金额（分）、优惠券 ID（0=未用）、错误。
-func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType, couponCode string) (string, string, int64, int64, error) {
+func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType, gateway, couponCode string) (string, string, int64, int64, error) {
 	if qty <= 0 {
 		qty = 1
+	}
+	gateway = strings.ToLower(strings.TrimSpace(gateway))
+	if gateway != "bepusdt" && gateway != "hashpay" {
+		return "", "", 0, 0, newBusinessErrorf("请选择有效的支付方式")
 	}
 	// 批发价：按数量匹配最高档折扣
 	baseCents := p.PriceCents
@@ -65,6 +69,19 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 		}
 	}
 	now := models.Now()
+	cfg := s.cfg()
+	fiat := cfg.Fiat
+	if gateway == "hashpay" && cfg.HashPayCurrency != "" {
+		fiat = cfg.HashPayCurrency
+	}
+	// HashPay 收银台由买家自选网络/资产，trade_type 记录请求货币便于对账。
+	if gateway == "hashpay" && strings.TrimSpace(tradeType) == "" {
+		tradeType = fiat
+	}
+	notifyURL := cfg.BepusdtNotifyURL
+	if gateway == "hashpay" {
+		notifyURL = cfg.HashPayNotifyURL
+	}
 	order := models.Order{
 		OrderNo:            models.NewOrderNo(),
 		ProductID:          p.ID,
@@ -73,8 +90,9 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 		AmountCents:        amountCents,
 		CostCents:          p.CostCents,
 		CostSnapshotSource: "order_time",
-		Fiat:               s.cfg().Fiat,
+		Fiat:               fiat,
 		TradeType:          tradeType,
+		PaymentGateway:     gateway,
 		BuyerContact:       contact,
 		ViewToken:          models.RandomToken(24),
 		DeliveryType:       normalizeDeliveryType(p.DeliveryType),
@@ -103,16 +121,15 @@ func (s *OrderService) CreateOrder(p models.Product, qty int, contact, tradeType
 	if order.AmountCents == 0 {
 		return s.completeFreeOrder(order, discount, couponID)
 	}
-	cfg := s.cfg()
 	// 订单页凭查看令牌访问（不再把买家邮箱放进跳转 URL）。
 	redirectURL := cfg.PublicBaseURL + "/order/" + order.OrderNo + "?token=" + order.ViewToken
-	paymentURL, tradeID, err := s.payFn().CreateTransaction(payment.CreateInput{
+	paymentURL, tradeID, err := s.payFn(gateway).CreateTransaction(payment.CreateInput{
 		OrderID:     order.OrderNo,
 		Amount:      float64(order.AmountCents) / 100,
-		Fiat:        cfg.Fiat,
+		Fiat:        fiat,
 		TradeType:   tradeType,
 		Name:        p.Name,
-		NotifyURL:   cfg.NotifyURL,
+		NotifyURL:   notifyURL,
 		RedirectURL: redirectURL,
 		TimeoutSec:  cfg.TimeoutSec,
 	})

@@ -2,14 +2,12 @@
   <PageCard :title="t('payment.title')" :loading="loading">
     <el-form label-position="top" :model="form" style="max-width: 640px">
       <el-form-item :label="t('payment.gateway')">
-        <el-radio-group v-model="form.payment_gateway">
-          <el-radio value="bepusdt">BEpusdt</el-radio>
-          <el-radio value="hashpay">HashPay</el-radio>
-        </el-radio-group>
+        <el-checkbox v-model="enabled.bepusdt" @change="syncGateway">{{ t('payment.bepusdtEnabled') }}</el-checkbox>
+        <el-checkbox v-model="enabled.hashpay" @change="syncGateway">{{ t('payment.hashpayEnabled') }}</el-checkbox>
       </el-form-item>
 
       <el-divider>{{ t('payment.bepusdtSection') }}</el-divider>
-      <template v-if="form.payment_gateway === 'bepusdt'">
+      <template v-if="enabled.bepusdt">
         <el-form-item :label="t('payment.baseUrl')"><el-input v-model="form.bepusdt_base_url" /></el-form-item>
         <el-form-item :label="t('payment.apiToken')"
           ><el-input
@@ -32,7 +30,7 @@
       </template>
 
       <el-divider>{{ t('payment.hashpaySection') }}</el-divider>
-      <template v-if="form.payment_gateway === 'hashpay'">
+      <template v-if="enabled.hashpay">
         <el-form-item :label="t('payment.hashpayBaseUrl')"><el-input v-model="form.hashpay_base_url" /></el-form-item>
         <el-form-item :label="t('payment.hashpayMerchantId')"><el-input v-model="form.hashpay_merchant_id" /></el-form-item>
         <el-form-item :label="t('payment.hashpayPrivateKey')"
@@ -57,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api'
@@ -67,12 +65,22 @@ const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
 const form = ref<any>({})
+const enabled = reactive({ bepusdt: true, hashpay: false })
+
+function syncGateway() {
+  const list: string[] = []
+  if (enabled.bepusdt) list.push('bepusdt')
+  if (enabled.hashpay) list.push('hashpay')
+  form.value.payment_gateway = list.length ? list.join(',') : 'bepusdt'
+}
 
 onMounted(async () => {
   loading.value = true
   try {
     const data = await api.get('/admin/settings')
     form.value = { ...data, payment_gateway: data.payment_gateway || 'bepusdt' }
+    enabled.bepusdt = (form.value.payment_gateway || '').split(',').includes('bepusdt')
+    enabled.hashpay = (form.value.payment_gateway || '').split(',').includes('hashpay')
     form.value.bepusdt_api_token = ''
     form.value.hashpay_private_key = ''
   } finally {
@@ -80,6 +88,7 @@ onMounted(async () => {
   }
 })
 async function save() {
+  syncGateway()
   saving.value = true
   try {
     await api.post('/admin/settings', form.value)

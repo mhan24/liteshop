@@ -162,7 +162,8 @@
           "turnstile_site_key": { "type": "string" },
           "logo_url": { "type": "string" },
           "favicon_url": { "type": "string" },
-          "payment_gateway": { "type": "string", "enum": ["bepusdt", "hashpay"], "description": "当前启用的支付网关" },
+          "payment_gateway": { "type": "string", "description": "主支付网关（启用列表首位）" },
+          "payment_gateways": { "type": "array", "items": { "type": "string", "enum": ["bepusdt", "hashpay"] }, "description": "启用的支付网关列表" },
           "maintenance": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "message": { "type": "string" } } }
         }
       },
@@ -174,6 +175,7 @@
           "qty": { "type": "integer", "default": 1 },
           "contact": { "type": "string", "format": "email" },
           "trade_type": { "type": "string" },
+          "gateway": { "type": "string", "enum": ["bepusdt", "hashpay"], "description": "用户选择的支付网关（默认主网关）" },
           "coupon_code": { "type": "string" },
           "cf-turnstile-response": { "type": "string" }
         }
@@ -280,6 +282,7 @@
                     "available": { "type": "integer" },
                     "trade_types": { "type": "array", "items": { "type": "string" } },
                     "payment_gateway": { "type": "string", "enum": ["bepusdt", "hashpay"] },
+                    "payment_gateways": { "type": "array", "items": { "type": "string", "enum": ["bepusdt", "hashpay"] } },
                     "turnstile_site_key": { "type": "string" },
                     "default_product_image": { "type": "string" },
                     "site_title": { "type": "string" }
@@ -684,7 +687,7 @@
         "tags": ["admin"],
         "security": [{ "sessionCookie": [] }],
         "summary": "支付设置保存（需 admin）",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "payment_gateway": { "type": "string", "enum": ["bepusdt", "hashpay"], "description": "当前启用的支付网关" }, "bepusdt_base_url": { "type": "string" }, "bepusdt_api_token": { "type": "string" }, "fiat": { "type": "string" }, "trade_types": { "type": "string" }, "bepusdt_timeout_sec": { "type": "integer" }, "shop_public_base_url": { "type": "string" }, "bepusdt_notify_url": { "type": "string" }, "bepusdt_notify_path": { "type": "string" }, "hashpay_base_url": { "type": "string" }, "hashpay_merchant_id": { "type": "string" }, "hashpay_private_key": { "type": "string", "description": "HashPay 商户私钥 PEM（留空保持不变）" }, "hashpay_currency": { "type": "string" }, "hashpay_notify_url": { "type": "string" }, "hashpay_notify_path": { "type": "string" } } } } } },
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "payment_gateway": { "type": "string", "description": "启用的支付网关列表（逗号分隔，如 bepusdt,hashpay）" }, "bepusdt_base_url": { "type": "string" }, "bepusdt_api_token": { "type": "string" }, "fiat": { "type": "string" }, "trade_types": { "type": "string" }, "bepusdt_timeout_sec": { "type": "integer" }, "shop_public_base_url": { "type": "string" }, "bepusdt_notify_url": { "type": "string" }, "bepusdt_notify_path": { "type": "string" }, "hashpay_base_url": { "type": "string" }, "hashpay_merchant_id": { "type": "string" }, "hashpay_private_key": { "type": "string", "description": "HashPay 商户私钥 PEM（留空保持不变）" }, "hashpay_currency": { "type": "string" }, "hashpay_notify_url": { "type": "string" }, "hashpay_notify_path": { "type": "string" } } } } } },
         "responses": { "200": { "description": "ok" }, "400": { "description": "参数错误" } }
       }
     },

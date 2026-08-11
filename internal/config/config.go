@@ -9,6 +9,7 @@ type Config struct {
 	PublicBaseURL     string
 	NotifyURL         string
 	PaymentGateway    string
+	EnabledGateways   []string
 	AdminUsername     string
 	AdminPassword     string
 	SessionSecret     string
@@ -63,6 +64,7 @@ func Load() Config {
 		PublicBaseURL:     "http://localhost:8080",
 		NotifyURL:         "http://localhost:8080/notify/bepusdt",
 		PaymentGateway:    "bepusdt",
+		EnabledGateways:   []string{"bepusdt"},
 		AdminUsername:     "admin",
 		AdminPassword:     "",
 		SessionSecret:     "",

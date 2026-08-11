@@ -118,10 +118,13 @@ func TestSettingsServiceSaveHashPay(t *testing.T) {
 	if cfg.PaymentGateway != "hashpay" || cfg.HashPayPrivateKey == "" || cfg.HashPayMerchantID != "merchant-1" {
 		t.Fatalf("payment config = %+v", cfg)
 	}
-	// HashPay 模式：订单使用 hashpay 货币作为 fiat。
+	// 双网关并存：主网关 hashpay，HashPay 货币独立配置。
 	ps := svc.PaymentServiceConfig()
-	if ps.Fiat != "USD" || ps.Gateway != "hashpay" {
+	if ps.HashPayCurrency != "USD" || ps.Gateway != "hashpay" {
 		t.Fatalf("payment service config = %+v", ps)
+	}
+	if len(ps.EnabledGateways) != 1 || ps.EnabledGateways[0] != "hashpay" {
+		t.Fatalf("enabled gateways = %v", ps.EnabledGateways)
 	}
 }
 
@@ -136,8 +139,33 @@ func TestSettingsServiceGatewayDefault(t *testing.T) {
 	if svc.GatewayName() != "bepusdt" {
 		t.Fatalf("invalid gateway must fall back, got %q", svc.GatewayName())
 	}
+	_ = st.SetSetting("payment_gateway", "stripe,hashpay")
+	if svc.GatewayName() != "hashpay" {
+		t.Fatalf("gateway name = %q, want hashpay", svc.GatewayName())
+	}
+	if !svc.GatewayEnabled("hashpay") || svc.GatewayEnabled("stripe") {
+		t.Fatalf("enabled = %v", svc.EnabledGateways())
+	}
 	if svc.HashPayNotifyPath() != "/notify/hashpay" {
 		t.Fatalf("default hashpay notify path = %q", svc.HashPayNotifyPath())
+	}
+}
+
+// TestSettingsServiceDualGateway 双网关并存：逗号分隔启用列表保存与读取。
+func TestSettingsServiceDualGateway(t *testing.T) {
+	st := newStubSettingsStore()
+	svc := NewSettingsService(st, security.NewCipher("test-secret"), config.Load())
+	if err := svc.SavePayment(map[string]any{
+		"payment_gateway": "bepusdt, hashpay",
+	}); err != nil {
+		t.Fatalf("save dual gateway: %v", err)
+	}
+	enabled := svc.EnabledGateways()
+	if len(enabled) != 2 || enabled[0] != "bepusdt" || enabled[1] != "hashpay" {
+		t.Fatalf("enabled = %v, want [bepusdt hashpay]", enabled)
+	}
+	if !svc.GatewayEnabled("bepusdt") || !svc.GatewayEnabled("hashpay") {
+		t.Fatalf("both gateways must be enabled: %v", enabled)
 	}
 }
 

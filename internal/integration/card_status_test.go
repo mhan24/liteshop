@@ -75,7 +75,7 @@ func TestManualCardStatusRejectsOrderBound(t *testing.T) {
 	svc, keyRepo, _, _, d, pid := newOrderService(t)
 	psvc := service.NewProductService(repository.NewProductRepository(d), keyRepo)
 
-	_, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
+	_, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "bepusdt", "")
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}

@@ -146,17 +146,10 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 // logStartupInfo 输出结构化启动横幅（版本 / 数据库 / 支付 / 监听地址）。
 func (s *Server) logStartupInfo() {
 	payCfg := s.settings.PaymentConfig()
-	paymentStatus := "ok"
-	if payCfg.PaymentGateway == "hashpay" {
-		if payCfg.HashPayMerchantID == "" || payCfg.HashPayPrivateKey == "" {
-			paymentStatus = "not_configured"
-		}
-	} else if payCfg.BepusdtBaseURL == "" || payCfg.BepusdtToken == "" {
-		paymentStatus = "not_configured"
-	}
+	paymentStatus := paymentStatusFor(payCfg)
 	logging.App().Sugar().Infof("LiteShop %s", version.String())
 	logging.App().Sugar().Infof("database: ok (path=%s)", s.dbPath)
-	logging.App().Sugar().Infof("payment: %s (gateway=%s)", paymentStatus, payCfg.PaymentGateway)
+	logging.App().Sugar().Infof("payment: %s (gateways=%s)", paymentStatus, strings.Join(payCfg.EnabledGateways, ","))
 	logging.App().Sugar().Infof("listen: %s", s.cfg.ListenAddr)
 	logging.App().Sugar().Infof("admin entry: %s/admin", s.cfg.PublicBaseURL)
 	logging.App().Sugar().Infof("notify url: %s", payCfg.NotifyURL)
@@ -206,14 +199,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		dbStatus = "fail"
 	}
 	payCfg := s.settings.PaymentConfig()
-	paymentStatus := "ok"
-	if payCfg.PaymentGateway == "hashpay" {
-		if payCfg.HashPayMerchantID == "" || payCfg.HashPayPrivateKey == "" {
-			paymentStatus = "not_configured"
-		}
-	} else if payCfg.BepusdtBaseURL == "" || payCfg.BepusdtToken == "" {
-		paymentStatus = "not_configured"
-	}
+	paymentStatus := paymentStatusFor(payCfg)
 	var dbSize int64
 	if st, err := os.Stat(s.dbPath); err == nil {
 		dbSize = st.Size()
@@ -253,6 +239,24 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, body)
+}
+
+// gatewayConfigured 判断指定网关凭据是否齐全。
+func gatewayConfigured(cfg config.Config, gateway string) bool {
+	if gateway == "hashpay" {
+		return cfg.HashPayMerchantID != "" && cfg.HashPayPrivateKey != ""
+	}
+	return cfg.BepusdtBaseURL != "" && cfg.BepusdtToken != ""
+}
+
+// paymentStatusFor 只要任一启用网关已配置即为 ok（双网关并存）。
+func paymentStatusFor(cfg config.Config) string {
+	for _, g := range cfg.EnabledGateways {
+		if gatewayConfigured(cfg, g) {
+			return "ok"
+		}
+	}
+	return "not_configured"
 }
 
 // latestBackupFile 返回备份目录（data/backups）中最新的 shop-*.db 备份。
@@ -344,10 +348,10 @@ func pathID(r *http.Request, name string) (int64, error) {
 	return strconv.ParseInt(r.PathValue(name), 10, 64)
 }
 
-// paymentGateway 按当前数据库配置构造支付网关（每次调用读取最新配置）。
-func (s *Server) paymentGateway() payment.Gateway {
+// paymentGateway 按名称构造支付网关（每次调用读取最新配置）。
+func (s *Server) paymentGateway(gateway string) payment.Gateway {
 	cfg := s.settings.PaymentConfig()
-	if cfg.PaymentGateway == "hashpay" {
+	if gateway == "hashpay" {
 		return payment.NewHashPay(cfg.HashPayBaseURL, cfg.HashPayMerchantID, cfg.HashPayPrivateKey, cfg.HashPayCurrency)
 	}
 	return payment.NewBEPusdt(cfg.BepusdtBaseURL, cfg.BepusdtToken)
@@ -485,7 +489,7 @@ func (s *Server) handlePaymentNotify(w http.ResponseWriter, r *http.Request) {
 	)
 	switch params["status"] {
 	case "2":
-		order, _, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], params["trade_id"], params["block_transaction_id"])
+		order, _, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], "bepusdt", params["trade_id"], params["block_transaction_id"])
 		if err != nil {
 			logging.Payment().Error("payment callback error",
 				zap.String("request_id", logging.RequestID(r.Context())),
@@ -549,7 +553,7 @@ func (s *Server) handleHashPayNotify(w http.ResponseWriter, r *http.Request) {
 	)
 	switch params["status"] {
 	case "paid":
-		order, _, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], params["trade_id"], params["block_transaction_id"])
+		order, _, changed, err := s.orders.MarkPaidAndDeliver(params["order_id"], "hashpay", params["trade_id"], params["block_transaction_id"])
 		if err != nil {
 			logging.Payment().Error("payment callback error",
 				zap.String("request_id", logging.RequestID(r.Context())),

@@ -2,7 +2,7 @@
 
 中文版：[README.md](README.md) ｜ Changelog: [CHANGELOG.md](CHANGELOG.md)
 
-**LiteShop v0.2.0 (codename: Moon)** — an automated digital-goods delivery (card / activation-code) shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) and [HashPay](https://github.com/TGDash/HashPay) crypto payment gateways (switchable from the admin panel). The buyer storefront uses Nuxt 3 SSR + Tailwind; the admin panel uses Vue 3 + TypeScript + Element Plus + Pinia; Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
+**LiteShop v0.2.0 (codename: Moon)** — an automated digital-goods delivery (card / activation-code) shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) and [HashPay](https://github.com/TGDash/HashPay) crypto payment gateways (**both can run at once; buyers choose**). The buyer storefront uses Nuxt 3 SSR + Tailwind; the admin panel uses Vue 3 + TypeScript + Element Plus + Pinia; Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
 
 > Version history: v0.1.0 codename **Earth**; v0.2.0 codename **Moon** — layering, abstractions, observability, and stability upgrades, see [CHANGELOG](CHANGELOG.md).
 >
@@ -30,7 +30,7 @@
 - Cards: import (dedupe) / delete / export
 - Orders: view / CSV export / mark expired / cancel / set status / resend / batch resend / redeliver
 - Coupons: fixed / percent, minimum amount, max uses, product scope, validity window; **100% coupons complete the order automatically and deliver cards immediately**
-- Payment: **gateway switch (BEpusdt / HashPay)** with per-gateway config (base URL / token / merchant private key / trade types / currency / timeout / callback URL, changes apply immediately)
+- Payment: **dual gateways (BEpusdt / HashPay, each independently enabled)** with per-gateway config (base URL / token / merchant private key / trade types / currency / timeout / callback URL, changes apply immediately)
 - Notifications: SMTP / Telegram / Webhook + **event templates** (order created / payment success / delivered / low stock / system error) + admin notification email + test buttons
 - Site: title / announcement / **public base URL** / logo / favicon / SEO / links / copyright / privacy / terms / Turnstile
 - Maintenance mode: toggle + notice + unlock password (hashed + AES-encrypted storage)
@@ -46,7 +46,7 @@
 - Domain events: typed events in `internal/events` (OrderPaid / OrderExpired / DeliveryFailed / LowStock …) with versioned payloads and **Fanout consumer isolation** — the service only publishes events, no scattered `bus.Publish`
 - **Outbox pattern**: payment-success/delivery events are written to `outbox_events` **in the same transaction** as the order state change; a worker publishes them; 5 consecutive failures move to `dead_events`; published events are purged after 30 days
 - Idempotency ledger: payment callbacks register the gateway trade ID as a unique key in `processed_events` (same transaction as the state change) — duplicates are processed once
-- Payment abstraction: order business depends only on `payment.Gateway`; built-in BEpusdt and HashPay implementations, switchable from the admin panel without touching business code
+- Payment abstraction: order business depends only on `payment.Gateway`; built-in BEpusdt and HashPay implementations, **buyers pick either gateway per order** (the order records its gateway; callbacks/idempotency are routed per gateway) without touching business code
 - Task system: goroutine + channel (mail / Telegram / Webhook) + ticker; panic isolation, startup compensation, `job_runs` records
 - Background jobs: auto-expire unpaid orders, retry failed mail, session/log/outbox/queue cleanup, daily verified backup
 - Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files; request_id / order_id / trace_id correlation
@@ -115,7 +115,7 @@ HTTP handler (internal/api)
 ## Payment flow
 
 ```
-Order → lock cards (atomic) → create transaction (payment.Gateway) → open checkout in a new tab
+Order (buyer picks gateway) → lock cards (atomic) → create transaction (payment.Gateway[selected]) → open checkout in a new tab
   → redirect to the order page (auto-polling)
   → user pays → gateway callback (path changeable at runtime; BEpusdt MD5 signature / HashPay RSA-encrypted envelope) → verify + processed_events idempotency → order paid
   → write outbox in the same transaction → worker sends delivery notification (mail/Telegram/Webhook) → cards shown
@@ -123,7 +123,7 @@ Order → lock cards (atomic) → create transaction (payment.Gateway) → open 
 
 - Cancel / expire: release stock + call the gateway `cancel-transaction` (atomic);
 - Transaction boundaries: checkout is a single transaction (create order + lock cards + decrement stock); failures atomically mark `payment_failed` and release cards; payment success is a single transaction and events/mail are sent **only after COMMIT**;
-- Switching gateways (BEpusdt ↔ HashPay, or future USDT / Stripe / PayPal) only requires a new `Gateway` adapter;
+- Dual gateways: each order records the chosen gateway, `processed_events` idempotency keys are gateway-prefixed, and callback routes are independent (`/notify/bepusdt`, `/notify/hashpay`); adding a gateway (future USDT / Stripe / PayPal) only requires a new `Gateway` adapter;
 - **payment.log** records every creation/callback with request_id / trace_id.
 
 ---
@@ -141,7 +141,7 @@ Order → lock cards (atomic) → create transaction (payment.Gateway) → open 
 | Logging | go.uber.org/zap + lumberjack |
 | Tasks | goroutine + channel + ticker (no MQ), Outbox pattern |
 | Reverse proxy | Caddy |
-| Payment | BEpusdt / HashPay (behind the `payment.Gateway` interface, switchable in admin) |
+| Payment | BEpusdt / HashPay coexist (behind the `payment.Gateway` interface, buyer chooses) |
 | Security | Cloudflare Turnstile |
 
 ---
@@ -272,8 +272,8 @@ Install-time variables: `DOMAIN` (required), `EMAIL`, `BRANCH`, `SKIP_SSL=1` (pl
 
 1. Deploy [HashPay](https://github.com/TGDash/HashPay) to Cloudflare Workers and finish its setup;
 2. In the HashPay merchant panel create a **Native API** merchant, save the **private key** (shown only once), and set the merchant **Callback URL** to LiteShop's HashPay notify URL (visible on the payment settings page, default `https://your-domain/notify/hashpay`);
-3. In LiteShop admin → Payment settings, switch the gateway to **HashPay**, fill in the HashPay site URL, merchant ID, private key, and currency (default USD), then save;
-4. In HashPay mode the storefront hides the payment-method selector (network/asset is chosen on HashPay's hosted checkout); orders are billed in the HashPay currency and cards are delivered automatically on payment — idempotency matches BEpusdt.
+3. In LiteShop admin → Payment settings, enable **HashPay** (it can run alongside BEpusdt), fill in the HashPay site URL, merchant ID, private key, and currency (default USD), then save;
+4. When more than one gateway is enabled the storefront shows a **payment-method picker**: choosing BEpusdt shows network options (TRC20/ERC20 etc.), choosing HashPay uses its hosted checkout for network/asset selection; orders are billed per the chosen gateway and cards are delivered automatically on payment — callbacks and idempotency are routed per gateway.
 
 > The private key is shown only once when the merchant is created; after saving it is AES-encrypted in the `secrets` table; leave blank to keep the current key.
 

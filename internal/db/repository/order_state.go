@@ -10,7 +10,7 @@ import (
 // enqueuePaidEventsTx 在支付成功事务内写入 OrderPaid + OrderDelivered 到 outbox，
 // 保证"数据库状态"与"事件"永久一致（提交后崩溃也不丢事件）。
 func enqueuePaidEventsTx(tx *sql.Tx, orderID int64) error {
-	o, err := scanOrder(tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE id = ?`, orderID))
+	o, err := scanOrder(tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, payment_gateway, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE id = ?`, orderID))
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func enqueuePaidEventsTx(tx *sql.Tx, orderID int64) error {
 // enqueuePaidOnlyEventTx 在支付事务内只写入 OrderPaid（人工手动交付订单无卡密可发，
 // 发货事件由管理员手动发货时另行触发）。
 func enqueuePaidOnlyEventTx(tx *sql.Tx, orderID int64) error {
-	o, err := scanOrder(tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE id = ?`, orderID))
+	o, err := scanOrder(tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, payment_gateway, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE id = ?`, orderID))
 	if err != nil {
 		return err
 	}

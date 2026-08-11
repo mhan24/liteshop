@@ -21,7 +21,7 @@ func manualOrderEnv(t *testing.T) (*service.OrderService, *testutil.MockGateway,
 	keyRepo := repository.NewKeyRepository(d)
 	gw := testutil.NewMockGateway()
 	rec := &testutil.NotifyRecorder{}
-	svc := service.NewOrderService(orderRepo, func() payment.Gateway { return gw }, func() service.PaymentConfig {
+	svc := service.NewOrderService(orderRepo, func(string) payment.Gateway { return gw }, func() service.PaymentConfig {
 		return service.PaymentConfig{
 			PublicBaseURL: "https://shop.test",
 			NotifyURL:     "https://shop.test/notify",
@@ -50,7 +50,7 @@ func manualProduct(pid int64) models.Product {
 func TestManualDeliveryFlow(t *testing.T) {
 	svc, gw, rec, _, pid := manualOrderEnv(t)
 
-	orderNo, paymentURL, _, _, err := svc.CreateOrder(manualProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
+	orderNo, paymentURL, _, _, err := svc.CreateOrder(manualProduct(pid), 1, "buyer@test.com", "usdt.trc20", "bepusdt", "")
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestManualDeliveryFlow(t *testing.T) {
 	}
 
 	// 支付回调 → 待发货
-	o2, cards2, changed, err := svc.MarkPaidAndDeliver(orderNo, gw.TradeID, "block-1")
+	o2, cards2, changed, err := svc.MarkPaidAndDeliver(orderNo, "bepusdt", gw.TradeID, "block-1")
 	if err != nil {
 		t.Fatalf("mark paid: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestManualDeliveryFreeOrder(t *testing.T) {
 		VALUES('FREE100', 'percent', 100, 0, ?, 1, ?, ?)`, pid, now, now); err != nil {
 		t.Fatalf("insert coupon: %v", err)
 	}
-	orderNo, _, _, _, err := svc.CreateOrder(manualProduct(pid), 1, "buyer@test.com", "usdt.trc20", "free100")
+	orderNo, _, _, _, err := svc.CreateOrder(manualProduct(pid), 1, "buyer@test.com", "usdt.trc20", "bepusdt", "free100")
 	if err != nil {
 		t.Fatalf("create free order: %v", err)
 	}

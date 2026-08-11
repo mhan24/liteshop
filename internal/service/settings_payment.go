@@ -25,8 +25,12 @@ func (s *SettingsService) TurnstileSiteKey() string {
 // PaymentConfig 合并数据库配置与启动默认值，返回完整支付配置。
 func (s *SettingsService) PaymentConfig() config.Config {
 	cfg := s.cfg
-	if v := strings.ToLower(strings.TrimSpace(s.Get("payment_gateway"))); v == "bepusdt" || v == "hashpay" {
-		cfg.PaymentGateway = v
+	// payment_gateway 为逗号分隔的启用网关列表（如 "bepusdt,hashpay"）。
+	// 存量单值（"bepusdt" / "hashpay"）直接兼容；首位作为主网关（订单默认）。
+	enabled := EnabledGatewaysFrom(s.Get("payment_gateway"))
+	cfg.EnabledGateways = enabled
+	if len(enabled) > 0 {
+		cfg.PaymentGateway = enabled[0]
 	}
 	cfg.BepusdtFiat = s.Fiat()
 	cfg.BepusdtTradeTypes = s.TradeTypes()
@@ -61,17 +65,13 @@ func (s *SettingsService) PaymentConfig() config.Config {
 		cfg.PublicBaseURL = strings.TrimRight(v, "/")
 		publicOverridden = true
 	}
-	if v := s.Get("bepusdt_notify_url"); v != "" && cfg.PaymentGateway == "bepusdt" {
+	if v := s.Get("bepusdt_notify_url"); v != "" {
 		cfg.NotifyURL = v
-	} else if v := s.Get("hashpay_notify_url"); v != "" && cfg.PaymentGateway == "hashpay" {
+	} else if v := s.Get("hashpay_notify_url"); v != "" {
 		cfg.NotifyURL = v
 	} else if publicOverridden {
-		// 使用当前网关回调路径（可配置），避免自定义路径下回调 404
-		notifyPath := s.NotifyPath()
-		if cfg.PaymentGateway == "hashpay" {
-			notifyPath = s.HashPayNotifyPath()
-		}
-		cfg.NotifyURL = cfg.PublicBaseURL + notifyPath
+		// 主网关回调路径（可配置），避免自定义路径下回调 404
+		cfg.NotifyURL = cfg.PublicBaseURL + s.NotifyPath()
 	}
 	return cfg
 }
@@ -79,24 +79,84 @@ func (s *SettingsService) PaymentConfig() config.Config {
 // PaymentServiceConfig 供 OrderService 读取支付配置。
 func (s *SettingsService) PaymentServiceConfig() PaymentConfig {
 	cfg := s.PaymentConfig()
-	fiat := cfg.BepusdtFiat
-	if cfg.PaymentGateway == "hashpay" && cfg.HashPayCurrency != "" {
-		fiat = cfg.HashPayCurrency
-	}
 	return PaymentConfig{
-		PublicBaseURL: cfg.PublicBaseURL,
-		NotifyURL:     cfg.NotifyURL,
-		TimeoutSec:    cfg.BepusdtTimeoutSec,
-		Fiat:          fiat,
-		TradeTypes:    cfg.BepusdtTradeTypes,
-		Gateway:       cfg.PaymentGateway,
+		PublicBaseURL:    cfg.PublicBaseURL,
+		NotifyURL:        cfg.NotifyURL,
+		BepusdtNotifyURL: s.notifyURLFor(cfg, "bepusdt"),
+		HashPayNotifyURL: s.notifyURLFor(cfg, "hashpay"),
+		TimeoutSec:       cfg.BepusdtTimeoutSec,
+		Fiat:             cfg.BepusdtFiat,
+		HashPayCurrency:  cfg.HashPayCurrency,
+		TradeTypes:       cfg.BepusdtTradeTypes,
+		EnabledGateways:  cfg.EnabledGateways,
+		Gateway:          cfg.PaymentGateway,
 	}
 }
 
-// GatewayName 返回当前启用的支付网关（bepusdt / hashpay）。
+// notifyURLFor 返回指定网关的有效回调地址（显式配置 > 公开地址 + 网关回调路径）。
+func (s *SettingsService) notifyURLFor(cfg config.Config, gateway string) string {
+	if gateway == "hashpay" {
+		if v := s.Get("hashpay_notify_url"); v != "" {
+			return v
+		}
+		if cfg.PublicBaseURL != "" {
+			return cfg.PublicBaseURL + s.HashPayNotifyPath()
+		}
+		return ""
+	}
+	if v := s.Get("bepusdt_notify_url"); v != "" {
+		return v
+	}
+	if cfg.PublicBaseURL != "" {
+		return cfg.PublicBaseURL + s.NotifyPath()
+	}
+	return ""
+}
+
+// EnabledGateways 返回启用的支付网关列表（bepusdt / hashpay）。
+func (s *SettingsService) EnabledGateways() []string {
+	return EnabledGatewaysFrom(s.Get("payment_gateway"))
+}
+
+// GatewayEnabled 判断指定网关是否启用。
+func (s *SettingsService) GatewayEnabled(name string) bool {
+	for _, g := range s.EnabledGateways() {
+		if g == name {
+			return true
+		}
+	}
+	return false
+}
+
+// GatewayName 返回主支付网关（启用列表首位，默认 bepusdt）。
 func (s *SettingsService) GatewayName() string {
-	cfg := s.PaymentConfig()
-	return cfg.PaymentGateway
+	enabled := s.EnabledGateways()
+	if len(enabled) > 0 {
+		return enabled[0]
+	}
+	return "bepusdt"
+}
+
+// EnabledGatewaysFrom 解析并校验逗号分隔的网关启用列表。
+// 非法值忽略；空结果回退 bepusdt（兼容存量/缺省配置）。
+func EnabledGatewaysFrom(raw string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range strings.Split(raw, ",") {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if v != "bepusdt" && v != "hashpay" {
+			continue
+		}
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		out = append(out, "bepusdt")
+	}
+	return out
 }
 
 // Fiat 返回收款法币（兼容旧版本误存到 "fiat" 键的配置）。
@@ -178,8 +238,10 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 			_ = s.Set(key, strings.TrimSpace(str(v)))
 		}
 	}
-	if v := strings.ToLower(strings.TrimSpace(str(input["payment_gateway"]))); v == "bepusdt" || v == "hashpay" {
-		_ = s.Set("payment_gateway", v)
+	// 网关启用列表（逗号分隔，可多选）；至少保留一个有效网关。
+	if v := strings.TrimSpace(str(input["payment_gateway"])); v != "" {
+		enabled := EnabledGatewaysFrom(v)
+		_ = s.Set("payment_gateway", strings.Join(enabled, ","))
 	}
 	set("bepusdt_timeout_sec", "bepusdt_timeout_sec")
 	if v, ok := input["bepusdt_base_url"]; ok {

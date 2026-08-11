@@ -13,7 +13,7 @@ type rowScanner interface {
 
 func scanOrder(row rowScanner) (models.Order, error) {
 	var o models.Order
-	err := row.Scan(&o.ID, &o.OrderNo, &o.ProductID, &o.ProductName, &o.Qty, &o.AmountCents, &o.CostCents, &o.Fiat, &o.TradeType, &o.BuyerContact, &o.ViewToken, &o.Status, &o.PaymentStatus, &o.TradeID, &o.PaymentURL, &o.BlockTransactionID, &o.DeliveryType, &o.DeliveryContent, &o.CreatedAt, &o.UpdatedAt, &o.PaidAt)
+	err := row.Scan(&o.ID, &o.OrderNo, &o.ProductID, &o.ProductName, &o.Qty, &o.AmountCents, &o.CostCents, &o.Fiat, &o.TradeType, &o.PaymentGateway, &o.BuyerContact, &o.ViewToken, &o.Status, &o.PaymentStatus, &o.TradeID, &o.PaymentURL, &o.BlockTransactionID, &o.DeliveryType, &o.DeliveryContent, &o.CreatedAt, &o.UpdatedAt, &o.PaidAt)
 	return o, err
 }
 

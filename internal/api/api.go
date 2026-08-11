@@ -170,6 +170,7 @@ func orderJSON(o models.Order) map[string]any {
 		"amount_cents":         o.AmountCents,
 		"fiat":                 o.Fiat,
 		"trade_type":           o.TradeType,
+		"payment_gateway":      o.PaymentGateway,
 		"buyer_contact":        o.BuyerContact,
 		"status":               o.Status,
 		"payment_status":       o.PaymentStatus,
@@ -226,6 +227,7 @@ func (s *Server) apiSite(w http.ResponseWriter, r *http.Request) {
 		"logo_url":              s.settings.SiteLogoURL(),
 		"favicon_url":           s.settings.SiteFaviconURL(),
 		"payment_gateway":       s.settings.GatewayName(),
+		"payment_gateways":      s.settings.EnabledGateways(),
 		"maintenance": map[string]any{
 			"enabled": enabled,
 			"message": s.settings.Get("maintenance_message"),
@@ -352,6 +354,7 @@ func (s *Server) apiProduct(w http.ResponseWriter, r *http.Request) {
 		"turnstile_site_key":    s.settings.TurnstileSiteKey(),
 		"default_product_image": s.settings.DefaultProductImage(),
 		"site_title":            s.settings.SiteSettings().Title,
+		"payment_gateways":      s.settings.EnabledGateways(),
 	})
 }
 
@@ -361,6 +364,7 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		Qty               int    `json:"qty"`
 		Contact           string `json:"contact"`
 		TradeType         string `json:"trade_type"`
+		Gateway           string `json:"gateway"`
 		CouponCode        string `json:"coupon_code"`
 		TurnstileResponse string `json:"cf-turnstile-response"`
 	}
@@ -391,26 +395,36 @@ func (s *Server) apiCreateOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "out of stock")
 		return
 	}
+	gateway := strings.ToLower(strings.TrimSpace(input.Gateway))
+	if gateway == "" {
+		gateway = s.settings.GatewayName() // 默认主网关
+	}
+	if !s.settings.GatewayEnabled(gateway) {
+		writeError(w, 400, "invalid payment gateway")
+		return
+	}
+	payCfg := s.settings.PaymentConfig()
+	if !gatewayConfigured(payCfg, gateway) {
+		writeError(w, 400, "payment gateway not configured")
+		return
+	}
 	tradeType := strings.TrimSpace(input.TradeType)
-	if s.settings.GatewayName() == "hashpay" {
+	if gateway == "hashpay" {
 		// HashPay 收银台由买家自选网络/资产，前台不展示收款类型选项；
 		// 订单上记录请求货币作为交易类型（对账用）。
 		if tradeType == "" {
-			tradeType = s.settings.PaymentConfig().HashPayCurrency
+			tradeType = payCfg.HashPayCurrency
 			if tradeType == "" {
 				tradeType = "USD"
 			}
 		}
-	} else {
-		if tradeType == "" {
-			tradeType = s.settings.TradeTypes()[0]
-		}
-		if !s.settings.TradeTypeAllowed(tradeType) {
-			writeError(w, 400, "invalid trade type")
-			return
-		}
+	} else if tradeType == "" {
+		tradeType = s.settings.TradeTypes()[0]
+	} else if !s.settings.TradeTypeAllowed(tradeType) {
+		writeError(w, 400, "invalid trade type")
+		return
 	}
-	orderNo, paymentURL, _, _, err := s.orders.CreateOrder(p, input.Qty, input.Contact, tradeType, input.CouponCode)
+	orderNo, paymentURL, _, _, err := s.orders.CreateOrder(p, input.Qty, input.Contact, tradeType, gateway, input.CouponCode)
 	if err != nil {
 		s.notifySvc.SystemError("创建支付交易失败: " + err.Error())
 		logging.Payment().Warn("payment create failed",
@@ -474,6 +488,7 @@ func (s *Server) apiOrdersByContact(w http.ResponseWriter, r *http.Request) {
 			"amount":       fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
 			"fiat":         o.Fiat,
 			"trade_type":   o.TradeType,
+			"payment_gateway": o.PaymentGateway,
 			"status":       o.Status,
 			"created_at":   o.CreatedAt,
 			"paid_at":      o.PaidAt,
@@ -1357,6 +1372,7 @@ func (s *Server) apiAdminSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{
 		"payment_gateway":          cfg.PaymentGateway,
+		"payment_gateways":         s.settings.EnabledGateways(),
 		"bepusdt_base_url":         cfg.BepusdtBaseURL,
 		"bepusdt_api_token_set":    cfg.BepusdtToken != "",
 		"fiat":                     s.settings.Fiat(),

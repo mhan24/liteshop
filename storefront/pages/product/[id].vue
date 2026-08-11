@@ -30,7 +30,40 @@
         </div>
 
         <form class="mt-4 grid gap-3" @submit.prevent="submit">
-          <div v-if="gateway !== 'hashpay' && tradeTypes.length > 1">
+          <div v-if="paymentGateways.length > 1">
+            <label class="text-sm font-semibold">{{ t('paymentMethod') }}</label>
+            <div class="grid grid-cols-2 gap-2 mt-1">
+              <button
+                v-if="paymentGateways.includes('bepusdt')"
+                type="button"
+                :class="[
+                  'border rounded-lg px-3 py-2.5 text-left transition',
+                  form.gateway === 'bepusdt'
+                    ? 'border-brand bg-brand/5 ring-1 ring-brand'
+                    : 'border-gray-200 hover:border-gray-400',
+                ]"
+                @click="form.gateway = 'bepusdt'"
+              >
+                <span class="block font-semibold text-sm">{{ t('gatewayBepusdt') }}</span>
+                <span class="block text-xs text-gray-500 mt-0.5">{{ t('gatewayBepusdtDesc') }}</span>
+              </button>
+              <button
+                v-if="paymentGateways.includes('hashpay')"
+                type="button"
+                :class="[
+                  'border rounded-lg px-3 py-2.5 text-left transition',
+                  form.gateway === 'hashpay'
+                    ? 'border-brand bg-brand/5 ring-1 ring-brand'
+                    : 'border-gray-200 hover:border-gray-400',
+                ]"
+                @click="form.gateway = 'hashpay'"
+              >
+                <span class="block font-semibold text-sm">{{ t('gatewayHashpay') }}</span>
+                <span class="block text-xs text-gray-500 mt-0.5">{{ t('gatewayHashpayDesc') }}</span>
+              </button>
+            </div>
+          </div>
+          <div v-if="form.gateway === 'bepusdt' && tradeTypes.length > 1">
             <label class="text-sm font-semibold">{{ t('network') }}</label>
             <div class="grid grid-cols-2 gap-2 mt-1">
               <button
@@ -169,8 +202,11 @@ function wholesalePrice(minQtyNum: number) {
   return Math.round((base * discount) / 100)
 }
 const tradeTypes = computed(() => (data.value as any)?.trade_types || [])
-// HashPay 模式：网络/资产在 HashPay 托管收银台选择，前台不再展示收款类型选项。
-const gateway = computed(() => (data.value as any)?.payment_gateway || 'bepusdt')
+// 启用的支付网关列表（双网关并存时由买家选择）。
+const paymentGateways = computed(() => {
+  const list: string[] = (data.value as any)?.payment_gateways || []
+  return list.length ? list : [(data.value as any)?.payment_gateway || 'bepusdt']
+})
 // trade_type 形如 usdt.trc20 → 币种 USDT / 网络 TRC20；未知格式原样展示
 const networkCoin = computed(() => (t: string) => {
   const coin = t.split('.')[0]
@@ -181,10 +217,13 @@ const networkName = computed(() => (t: string) => {
   return net ? net.toUpperCase() : t
 })
 const turnstileSiteKey = computed(() => (data.value as any)?.turnstile_site_key || '')
-const form = reactive({ trade_type: '', qty: 1, contact: '', coupon_code: '' })
+const form = reactive({ gateway: '', trade_type: '', qty: 1, contact: '', coupon_code: '' })
 const loading = ref(false)
 
-watchEffect(() => { if (!form.trade_type && tradeTypes.value.length) form.trade_type = tradeTypes.value[0] })
+watchEffect(() => {
+  if (!form.gateway && paymentGateways.value.length) form.gateway = paymentGateways.value[0]
+  if (!form.trade_type && tradeTypes.value.length) form.trade_type = tradeTypes.value[0]
+})
 
 const turnstileWidget = ref<any>(null)
 const turnstileOpen = ref(false)
@@ -276,6 +315,7 @@ async function createOrder(token: string) {
       qty: form.qty,
       contact: form.contact,
       trade_type: form.trade_type,
+      gateway: form.gateway,
       coupon_code: form.coupon_code.trim(),
       'cf-turnstile-response': token,
     })

@@ -17,7 +17,7 @@ func benchService(b *testing.B, cards int) (*service.OrderService, *testutil.Moc
 	orderRepo := repository.NewOrderRepository(d)
 	keyRepo := repository.NewKeyRepository(d)
 	gw := testutil.NewMockGateway()
-	svc := service.NewOrderService(orderRepo, func() payment.Gateway { return gw }, func() service.PaymentConfig {
+	svc := service.NewOrderService(orderRepo, func(string) payment.Gateway { return gw }, func() service.PaymentConfig {
 		return service.PaymentConfig{PublicBaseURL: "https://shop.test", NotifyURL: "https://shop.test/notify", TimeoutSec: 1200, Fiat: "CNY", TradeTypes: []string{"usdt.trc20"}}
 	})
 	svc.SetKeyRepository(keyRepo)
@@ -31,7 +31,7 @@ func BenchmarkCreateOrder(b *testing.B) {
 	p := testProduct(pid)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, _, _, _, err := svc.CreateOrder(p, 1, "bench@test.com", "usdt.trc20", ""); err != nil {
+		if _, _, _, _, err := svc.CreateOrder(p, 1, "bench@test.com", "usdt.trc20", "bepusdt", ""); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -44,11 +44,11 @@ func BenchmarkPaymentCallback(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		gw.TradeID = fmt.Sprintf("TRADE-%d", i)
-		orderNo, _, _, _, err := svc.CreateOrder(p, 1, "bench@test.com", "usdt.trc20", "")
+		orderNo, _, _, _, err := svc.CreateOrder(p, 1, "bench@test.com", "usdt.trc20", "bepusdt", "")
 		if err != nil {
 			b.Fatal(err)
 		}
-		if _, _, _, err := svc.MarkPaidAndDeliver(orderNo, gw.TradeID, "block"); err != nil {
+		if _, _, _, err := svc.MarkPaidAndDeliver(orderNo, "bepusdt", gw.TradeID, "block"); err != nil {
 			b.Fatal(err)
 		}
 	}

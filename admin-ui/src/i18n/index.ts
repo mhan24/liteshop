@@ -228,6 +228,8 @@ const messages = {
     payment: {
       title: '支付设置',
       gateway: '支付网关',
+      bepusdtEnabled: '启用 BEpusdt（USDT 网络收单）',
+      hashpayEnabled: '启用 HashPay（多链加密支付）',
       bepusdtSection: 'BEpusdt 配置',
       hashpaySection: 'HashPay 配置',
       baseUrl: 'BEpusdt 接口地址',
@@ -641,6 +643,8 @@ const messages = {
     payment: {
       title: 'Payment',
       gateway: 'Payment gateway',
+      bepusdtEnabled: 'Enable BEpusdt (USDT network)',
+      hashpayEnabled: 'Enable HashPay (multi-chain crypto)',
       bepusdtSection: 'BEpusdt configuration',
       hashpaySection: 'HashPay configuration',
       baseUrl: 'BEpusdt Base URL',

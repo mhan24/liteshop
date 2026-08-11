@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"shop/internal/events"
 	"shop/internal/models"
@@ -90,7 +91,11 @@ func (s *OrderService) cancelGatewayTx(orderID int64) {
 	if err != nil || o.TradeID == "" {
 		return
 	}
-	go func(tradeID string) {
-		_ = s.payFn().CancelTransaction(tradeID)
-	}(o.TradeID)
+	gateway := strings.ToLower(strings.TrimSpace(o.PaymentGateway))
+	if gateway != "bepusdt" && gateway != "hashpay" {
+		gateway = "bepusdt"
+	}
+	go func(gw, tradeID string) {
+		_ = s.payFn(gw).CancelTransaction(tradeID)
+	}(gateway, o.TradeID)
 }

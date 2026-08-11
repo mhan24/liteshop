@@ -297,10 +297,15 @@ components:
           type: string
         payment_gateway:
           type: string
-          enum:
-          - bepusdt
-          - hashpay
-          description: 当前启用的支付网关
+          description: 主支付网关（启用列表首位）
+        payment_gateways:
+          type: array
+          items:
+            type: string
+            enum:
+            - bepusdt
+            - hashpay
+          description: 启用的支付网关列表
         maintenance:
           type: object
           properties:
@@ -325,6 +330,12 @@ components:
           format: email
         trade_type:
           type: string
+        gateway:
+          type: string
+          enum:
+          - bepusdt
+          - hashpay
+          description: 用户选择的支付网关（默认主网关）
         coupon_code:
           type: string
         cf-turnstile-response:
@@ -541,6 +552,13 @@ paths:
                     enum:
                     - bepusdt
                     - hashpay
+                  payment_gateways:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                      - bepusdt
+                      - hashpay
                   turnstile_site_key:
                     type: string
                   default_product_image:
@@ -1340,10 +1358,7 @@ paths:
               properties:
                 payment_gateway:
                   type: string
-                  enum:
-                  - bepusdt
-                  - hashpay
-                  description: 当前启用的支付网关
+                  description: 启用的支付网关列表（逗号分隔，如 bepusdt,hashpay）
                 bepusdt_base_url:
                   type: string
                 bepusdt_api_token:

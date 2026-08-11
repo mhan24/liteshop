@@ -99,6 +99,7 @@ type Order struct {
 	CostSnapshotSource string
 	Fiat               string
 	TradeType          string
+	PaymentGateway     string // 用户选择的支付网关：bepusdt / hashpay
 	BuyerContact       string
 	ViewToken          string
 	Status             string

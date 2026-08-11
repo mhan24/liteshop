@@ -196,6 +196,7 @@ export interface paths {
                             trade_types?: string[];
                             /** @enum {string} */
                             payment_gateway?: "bepusdt" | "hashpay";
+                            payment_gateways?: ("bepusdt" | "hashpay")[];
                             turnstile_site_key?: string;
                             default_product_image?: string;
                             site_title?: string;
@@ -1788,11 +1789,8 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /**
-                         * @description 当前启用的支付网关
-                         * @enum {string}
-                         */
-                        payment_gateway?: "bepusdt" | "hashpay";
+                        /** @description 启用的支付网关列表（逗号分隔，如 bepusdt,hashpay） */
+                        payment_gateway?: string;
                         bepusdt_base_url?: string;
                         bepusdt_api_token?: string;
                         fiat?: string;
@@ -3027,11 +3025,10 @@ export interface components {
             turnstile_site_key?: string;
             logo_url?: string;
             favicon_url?: string;
-            /**
-             * @description 当前启用的支付网关
-             * @enum {string}
-             */
-            payment_gateway?: "bepusdt" | "hashpay";
+            /** @description 主支付网关（启用列表首位） */
+            payment_gateway?: string;
+            /** @description 启用的支付网关列表 */
+            payment_gateways?: ("bepusdt" | "hashpay")[];
             maintenance?: {
                 enabled?: boolean;
                 message?: string;
@@ -3044,6 +3041,11 @@ export interface components {
             /** Format: email */
             contact: string;
             trade_type?: string;
+            /**
+             * @description 用户选择的支付网关（默认主网关）
+             * @enum {string}
+             */
+            gateway?: "bepusdt" | "hashpay";
             coupon_code?: string;
             "cf-turnstile-response": string;
         };

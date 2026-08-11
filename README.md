@@ -2,7 +2,7 @@
 
 English: [README.en.md](README.en.md) ｜ 更新日志：[CHANGELOG.md](CHANGELOG.md)
 
-**LiteShop v0.2.0（代号：月球 Moon）** —— 基于 **Go + SQLite** 的自动发卡系统，对接 [BEpusdt](https://github.com/v03413/BEpusdt) 与 [HashPay](https://github.com/TGDash/HashPay) 加密货币收单网关（后台可切换）。买家前台使用 Nuxt 3 SSR + Tailwind；管理后台使用 Vue 3 + TypeScript + Element Plus + Pinia；Go 提供 JSON API、支付回调、内嵌后台与后台任务。
+**LiteShop v0.2.0（代号：月球 Moon）** —— 基于 **Go + SQLite** 的自动发卡系统，对接 [BEpusdt](https://github.com/v03413/BEpusdt) 与 [HashPay](https://github.com/TGDash/HashPay) 加密货币收单网关（**双网关并存，买家自主选择**）。买家前台使用 Nuxt 3 SSR + Tailwind；管理后台使用 Vue 3 + TypeScript + Element Plus + Pinia；Go 提供 JSON API、支付回调、内嵌后台与后台任务。
 
 > 版本沿革：v0.1.0 代号**地球（Earth）**；v0.2.0 代号**月球（Moon）**——分层、抽象、可观测性与稳定性全面升级，详见 [CHANGELOG](CHANGELOG.md)。
 >
@@ -16,7 +16,7 @@ English: [README.en.md](README.en.md) ｜ 更新日志：[CHANGELOG.md](CHANGELO
 
 - 商品列表：分类 / 置顶 / 排序 / 搜索 / 价格筛选
 - 商品详情 + Cloudflare Turnstile 人机验证
-- 下单：新标签页打开收银台，当前页跳转订单详情
+- 下单：**可选支付方式（BEpusdt 网络支付 / HashPay 加密支付）**，新标签页打开收银台，当前页跳转订单详情
 - 订单详情：待支付自动轮询、支付成功自动显示卡密、支持取消订单（同步关闭网关交易）
 - 订单查询：仅邮箱找回 + "发送查看链接到邮箱"（模糊响应，不泄露邮箱是否下过单）
 - 访问凭证：所有订单（含存量回填）凭随邮件发送的**查看令牌**访问卡密/取消；令牌只发往登记邮箱，邮箱查询接口不返回订单号与链接
@@ -30,7 +30,7 @@ English: [README.en.md](README.en.md) ｜ 更新日志：[CHANGELOG.md](CHANGELO
 - 卡密：导入（去重）/ 删除 / 导出
 - 订单：查看 / CSV 导出 / 标记过期 / 取消 / 改状态 / 重发 / 批量重发 / 补发
 - 优惠券：固定 / 百分比、最低金额、使用次数、适用商品、有效期；**100% 券订单自动完成并直接发卡**
-- 支付：**网关切换（BEpusdt / HashPay）** + 各网关独立配置（Base URL / Token / 商户私钥 / 收款类型 / 货币 / 超时 / 回调地址，修改即时生效）
+- 支付：**双网关并存（BEpusdt / HashPay，可分别启用/停用）** + 各网关独立配置（Base URL / Token / 商户私钥 / 收款类型 / 货币 / 超时 / 回调地址，修改即时生效）
 - 通知：SMTP / Telegram / Webhook + **事件模板**（订单创建 / 付款成功 / 发货 / 库存不足 / 系统异常）+ 管理员通知邮箱 + 测试按钮
 - 站点：标题 / 公告 / **公开地址** / Logo / Favicon / SEO / 链接 / 版权 / 隐私 / 条款 / Turnstile
 - 维护模式：开关 + 提示文案 + 解锁密码（哈希 + 加密存储）
@@ -46,7 +46,7 @@ English: [README.en.md](README.en.md) ｜ 更新日志：[CHANGELOG.md](CHANGELO
 - 领域事件：`internal/events` 类型化事件（OrderPaid / OrderExpired / DeliveryFailed / LowStock …）+ 版本化载荷 + **Fanout 消费者隔离**，service 只发布事件、不散落 `bus.Publish`
 - **Outbox 模式**：支付成功/发货事件与订单状态**同事务**写入 `outbox_events`，worker 发布；连续失败 5 次进 `dead_events`；已发布事件 30 天清理
 - 幂等台账：支付回调以网关交易号唯一键登记 `processed_events`（与状态迁移同事务），重复通知只处理一次
-- 支付抽象：订单业务只依赖 `payment.Gateway` 接口，内置 BEpusdt 与 HashPay 两个实现，后台一键切换，换网关不改业务
+- 支付抽象：订单业务只依赖 `payment.Gateway` 接口，内置 BEpusdt 与 HashPay 两个实现，**同一订单可选任一网关**（订单记录网关，回调/幂等按网关分流），换网关不改业务
 - 任务系统：goroutine + channel（邮件 / Telegram / Webhook）+ ticker；panic 隔离、启动补偿、`job_runs` 执行记录
 - 后台任务：订单超时自动关闭、失败邮件重试、会话/日志/outbox/队列清理、每日数据库备份（含完整性校验）
 - 日志（zap）：app / payment / security 三通道，50MB 轮转保留 7 份；request_id / order_id / trace_id 关联
@@ -117,7 +117,7 @@ HTTP handler (internal/api)
 ## 支付流程
 
 ```
-下单 → 锁定卡密（原子事务）→ 创建交易（payment.Gateway）→ 新标签页打开收银台
+下单（用户选择网关）→ 锁定卡密（原子事务）→ 创建交易（payment.Gateway[所选网关]）→ 新标签页打开收银台
   → 原页跳订单详情页（自动轮询）
 → 用户转账 → 网关回调（路径可运行时修改；BEpusdt MD5 验签 / HashPay RSA 解密信封）→ 验签 + processed_events 幂等 → 订单 paid
   → 同事务写 outbox → worker 发卡通知（邮件/Telegram/Webhook）→ 前台显示卡密
@@ -125,7 +125,7 @@ HTTP handler (internal/api)
 
 - 取消 / 过期：释放库存 + 调用网关 `cancel-transaction` 关闭交易（原子事务）；
 - 事务边界：下单 = 单事务（建单 + 锁卡 + 扣库存），失败原子置 `payment_failed` 并释放卡密；支付成功 = 单事务（paid + 发卡），**COMMIT 后才发布事件/发邮件**；
-- 换网关（BEpusdt ↔ HashPay 或未来其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器；
+- 双网关并存：每个订单记录所选网关，`processed_events` 幂等键带网关前缀，回调路由各自独立（`/notify/bepusdt`、`/notify/hashpay`）；换网关（或未来其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器；
 - **payment.log** 记录每次创建/回调：订单号、金额、交易 ID、回调时间、结果 + request_id / trace_id。
 
 ---
@@ -143,7 +143,7 @@ HTTP handler (internal/api)
 | 日志 | go.uber.org/zap + lumberjack |
 | 任务 | goroutine + channel + ticker（无 MQ），Outbox 模式 |
 | 反向代理 | Caddy |
-| 支付 | BEpusdt / HashPay（`payment.Gateway` 接口抽象，后台切换） |
+| 支付 | BEpusdt / HashPay 并存（`payment.Gateway` 接口抽象，前台可选） |
 | 安全 | Cloudflare Turnstile |
 
 ---
@@ -274,8 +274,8 @@ curl -sSL https://raw.githubusercontent.com/mhan24/liteshop/main/install.sh | \
 
 1. 部署 [HashPay](https://github.com/TGDash/HashPay) 到 Cloudflare Workers 并完成后台初始化；
 2. 在 HashPay 后台创建 **Native API** 商户，保存只显示一次的**私钥**，并把该商户的 **Callback 地址**填为 LiteShop 的 HashPay 回调地址（后台支付页可查看，默认 `https://你的域名/notify/hashpay`）；
-3. LiteShop 后台「支付设置」切换网关为 **HashPay**，填入 HashPay 站点地址、商户 ID、私钥与货币（默认 USD）并保存；
-4. HashPay 模式下前台不再展示收款类型选项（网络/资产由 HashPay 托管收银台选择）；订单按 HashPay 货币记账，支付成功后自动发卡，回调幂等与 BEpusdt 一致。
+3. LiteShop 后台「支付设置」勾选启用 **HashPay**（可与 BEpusdt 同时启用），填入 HashPay 站点地址、商户 ID、私钥与货币（默认 USD）并保存；
+4. 启用多个网关时前台展示**支付方式选择**：选 BEpusdt 显示网络选项（TRC20/ERC20 等），选 HashPay 由托管收银台选择网络/资产；订单按所选网关记账，支付成功后自动发卡，回调与幂等按网关分流。
 
 > 私钥仅创建商户时显示一次，后台保存后加密写入 `secrets` 表，留空表示保持当前密钥。
 

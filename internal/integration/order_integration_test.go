@@ -25,7 +25,7 @@ func newOrderService(t *testing.T) (*service.OrderService, *repository.KeyReposi
 	keyRepo := repository.NewKeyRepository(d)
 	gw := testutil.NewMockGateway()
 	rec := &testutil.NotifyRecorder{}
-	svc := service.NewOrderService(orderRepo, func() payment.Gateway { return gw }, func() service.PaymentConfig {
+	svc := service.NewOrderService(orderRepo, func(string) payment.Gateway { return gw }, func() service.PaymentConfig {
 		return service.PaymentConfig{
 			PublicBaseURL: "https://shop.test",
 			NotifyURL:     "https://shop.test/notify",
@@ -48,7 +48,7 @@ func testProduct(pid int64) models.Product {
 func TestPaymentCallbackAndDuplicate(t *testing.T) {
 	svc, keyRepo, gw, rec, d, pid := newOrderService(t)
 
-	orderNo, paymentURL, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
+	orderNo, paymentURL, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "bepusdt", "")
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestPaymentCallbackAndDuplicate(t *testing.T) {
 	testutil.WaitFor(t, 2*time.Second, func() bool { return rec.CreatedCount() == 1 }, "order_created notify")
 
 	// 支付回调
-	_, cards, changed, err := svc.MarkPaidAndDeliver(orderNo, gw.TradeID, "block-1")
+	_, cards, changed, err := svc.MarkPaidAndDeliver(orderNo, "bepusdt", gw.TradeID, "block-1")
 	if err != nil {
 		t.Fatalf("mark paid: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestPaymentCallbackAndDuplicate(t *testing.T) {
 	}
 
 	// 重复回调：幂等，不重复发卡/通知
-	_, cards2, changed2, err2 := svc.MarkPaidAndDeliver(orderNo, gw.TradeID, "block-1")
+	_, cards2, changed2, err2 := svc.MarkPaidAndDeliver(orderNo, "bepusdt", gw.TradeID, "block-1")
 	if err2 != nil || changed2 || len(cards2) != 1 {
 		t.Fatalf("duplicate callback: err=%v changed=%v cards=%d", err2, changed2, len(cards2))
 	}
@@ -140,7 +140,7 @@ func TestPaymentCallbackAndDuplicate(t *testing.T) {
 func TestCancelOrderReleasesCards(t *testing.T) {
 	svc, keyRepo, gw, _, _, pid := newOrderService(t)
 
-	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
+	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "bepusdt", "")
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestCancelOrderReleasesCards(t *testing.T) {
 func TestExpireStaleClosesTimeoutOrders(t *testing.T) {
 	svc, keyRepo, _, _, d, pid := newOrderService(t)
 
-	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
+	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "bepusdt", "")
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestPaymentCreateFailureReleasesCards(t *testing.T) {
 	svc, keyRepo, gw, _, _, pid := newOrderService(t)
 	gw.CreateErr = errors.New("gateway down")
 
-	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
+	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "bepusdt", "")
 	if err == nil {
 		t.Fatal("create order should fail when gateway errors")
 	}
@@ -225,7 +225,7 @@ func TestPaymentCreateFailureReleasesCards(t *testing.T) {
 func TestCallbackAfterCancelNoEffect(t *testing.T) {
 	svc, keyRepo, gw, _, _, pid := newOrderService(t)
 
-	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "")
+	orderNo, _, _, _, err := svc.CreateOrder(testProduct(pid), 1, "buyer@test.com", "usdt.trc20", "bepusdt", "")
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestCallbackAfterCancelNoEffect(t *testing.T) {
 	}
 	availAfterCancel, _ := keyRepo.AvailableCount(pid)
 
-	_, cards, changed, err := svc.MarkPaidAndDeliver(orderNo, gw.TradeID, "block-late")
+	_, cards, changed, err := svc.MarkPaidAndDeliver(orderNo, "bepusdt", gw.TradeID, "block-late")
 	if err != nil {
 		t.Fatalf("late callback: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestConcurrentLastCardPurchase(t *testing.T) {
 		orderRepo := repository.NewOrderRepository(d)
 		keyRepo := repository.NewKeyRepository(d)
 		gw := testutil.NewMockGateway()
-		svc := service.NewOrderService(orderRepo, func() payment.Gateway { return gw }, func() service.PaymentConfig {
+		svc := service.NewOrderService(orderRepo, func(string) payment.Gateway { return gw }, func() service.PaymentConfig {
 			return service.PaymentConfig{PublicBaseURL: "https://shop.test", NotifyURL: "https://shop.test/notify", TimeoutSec: 1200, Fiat: "CNY", TradeTypes: []string{"usdt.trc20"}}
 		})
 		pid := testutil.SeedProductWithCards(t, d, 1) // 最后一张
@@ -272,7 +272,7 @@ func TestConcurrentLastCardPurchase(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				_, _, _, _, err := svc.CreateOrder(p, 1, fmt.Sprintf("buyer%d@test.com", i), "usdt.trc20", "")
+				_, _, _, _, err := svc.CreateOrder(p, 1, fmt.Sprintf("buyer%d@test.com", i), "usdt.trc20", "bepusdt", "")
 				results[i] = err
 			}(i)
 		}
@@ -315,7 +315,7 @@ func TestConcurrentPressure100(t *testing.T) {
 		orderRepo := repository.NewOrderRepository(d)
 		keyRepo := repository.NewKeyRepository(d)
 		gw := testutil.NewMockGateway()
-		svc := service.NewOrderService(orderRepo, func() payment.Gateway { return gw }, func() service.PaymentConfig {
+		svc := service.NewOrderService(orderRepo, func(string) payment.Gateway { return gw }, func() service.PaymentConfig {
 			return service.PaymentConfig{PublicBaseURL: "https://shop.test", NotifyURL: "https://shop.test/notify", TimeoutSec: 1200, Fiat: "CNY", TradeTypes: []string{"usdt.trc20"}}
 		})
 		pid := testutil.SeedProductWithCards(t, d, 1)
@@ -327,7 +327,7 @@ func TestConcurrentPressure100(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				_, _, _, _, err := svc.CreateOrder(p, 1, fmt.Sprintf("u%d@test.com", i), "usdt.trc20", "")
+				_, _, _, _, err := svc.CreateOrder(p, 1, fmt.Sprintf("u%d@test.com", i), "usdt.trc20", "bepusdt", "")
 				results[i] = err
 			}(i)
 		}

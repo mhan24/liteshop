@@ -11,19 +11,23 @@ import (
 
 // PaymentConfig 提供支付所需配置（由 web 层实现，避免循环依赖）。
 type PaymentConfig struct {
-	PublicBaseURL string
-	NotifyURL     string
-	TimeoutSec    int
-	Fiat          string
-	TradeTypes    []string
-	Gateway       string // bepusdt / hashpay（幂等台账前缀）
+	PublicBaseURL    string
+	NotifyURL        string // 主网关回调（兼容旧引用）
+	BepusdtNotifyURL string
+	HashPayNotifyURL string
+	TimeoutSec       int
+	Fiat             string // BEpusdt 法币（CNY）
+	HashPayCurrency  string // HashPay 请求货币（USD）
+	TradeTypes       []string
+	EnabledGateways  []string
+	Gateway          string // 主网关（启用列表首位）
 }
 
 // OrderService 订单业务逻辑（按职责拆分到 order_*.go 小文件）。
 type OrderService struct {
 	repo  OrderRepository
 	keys  KeyRepository
-	payFn func() payment.Gateway
+	payFn func(gateway string) payment.Gateway
 	cfgFn func() PaymentConfig
 
 	// 领域事件发布器（装配层注入，service 不直接接触 jobs bus）。
@@ -59,7 +63,7 @@ func wrapCouponError(err error) error {
 // ErrNoCards 表示订单已支付但发卡数量为 0（需管理员处理）。
 var ErrNoCards = errors.New("order paid but no cards delivered")
 
-func NewOrderService(repo OrderRepository, payFn func() payment.Gateway, cfgFn func() PaymentConfig) *OrderService {
+func NewOrderService(repo OrderRepository, payFn func(gateway string) payment.Gateway, cfgFn func() PaymentConfig) *OrderService {
 	return &OrderService{repo: repo, payFn: payFn, cfgFn: cfgFn}
 }
 

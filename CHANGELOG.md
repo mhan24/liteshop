@@ -11,6 +11,12 @@
 - HashPay 回调路由 `/notify/hashpay`（路径可后台配置，动态兜底即时生效）；回调地址在后台支付页展示，便于配置 HashPay 商户 Callback
 - HashPay 模式前台隐藏收款类型选项（网络/资产由 HashPay 托管收银台选择），订单按 HashPay 货币记账（默认 USD）
 
+### 双网关并存（v0.2.1 增补）
+
+- 支付网关改为**并存启用**：后台可同时启用 BEpusdt 与 HashPay（`payment_gateway` 存逗号分隔列表，兼容存量单值），前台商品页展示**支付方式选择**（BEpusdt 网络支付 / HashPay 加密支付）
+- 订单新增 `payment_gateway` 列（迁移 027）记录所选网关；回调路由各自独立，`processed_events` 幂等键按网关前缀区分，取消/过期按订单网关关闭交易
+- 订单法币按所选网关记账（BEpusdt=CNY、HashPay=USD）；HashPay 订单以请求货币作为交易类型（对账用）
+
 ### 测试与文档
 
 - `internal/payment/hashpay_test.go`：RSA 签名原文校验、回调加密信封解密、时间窗/坏信封/未配置错误路径、下单签名与收银台解析

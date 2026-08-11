@@ -10,8 +10,9 @@ import (
 )
 
 // MarkPaidAndDeliver 处理支付成功回调：置为 paid 并发卡。
+// gateway 由回调路径决定（bepusdt / hashpay），用于幂等台账前缀。
 // 返回订单、卡密、是否发生变更。
-func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (models.Order, []models.Card, bool, error) {
+func (s *OrderService) MarkPaidAndDeliver(orderNo, gateway, tradeID, blockTx string) (models.Order, []models.Card, bool, error) {
 	o, err := s.repo.GetOrderByNo(orderNo)
 	if err != nil {
 		return models.Order{}, nil, false, err
@@ -28,7 +29,7 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (mod
 	now := models.Now()
 	// 人工手动交付：支付成功只确认支付，进入"待发货"，由管理员手动发货。
 	if o.DeliveryType == models.DeliveryTypeManual {
-		if err := s.repo.MarkPaidPendingDelivery(o.ID, s.gatewayPrefix(), tradeID, blockTx, now); err != nil {
+		if err := s.repo.MarkPaidPendingDelivery(o.ID, gateway, tradeID, blockTx, now); err != nil {
 			if errors.Is(err, models.ErrAlreadyProcessed) {
 				return o, nil, false, nil
 			}
@@ -41,7 +42,7 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, tradeID, blockTx string) (mod
 		_ = s.repo.AddLog(o.ID, "payment_success", "支付成功，等待人工发货", models.OrderWaitingPayment, models.OrderPendingDelivery, 0)
 		return o, nil, true, nil
 	}
-	delivered, err := s.repo.MarkPaidAndDeliver(o.ID, s.gatewayPrefix(), tradeID, blockTx, now)
+	delivered, err := s.repo.MarkPaidAndDeliver(o.ID, gateway, tradeID, blockTx, now)
 	if errors.Is(err, models.ErrAlreadyProcessed) {
 		// 幂等：该网关交易已处理过，直接返回 noop。
 		return o, nil, false, nil
@@ -105,14 +106,6 @@ func resendableStatus(status string) bool {
 		return true
 	}
 	return false
-}
-
-// gatewayPrefix 返回当前网关的幂等台账前缀（默认 bepusdt，兼容存量数据）。
-func (s *OrderService) gatewayPrefix() string {
-	if g := s.cfg().Gateway; g != "" {
-		return g
-	}
-	return "bepusdt"
 }
 
 // Resend 重发单个订单的发卡通知。

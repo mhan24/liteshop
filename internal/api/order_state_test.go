@@ -123,7 +123,7 @@ func TestOrderCancelFreesCards(t *testing.T) {
 	_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,'C1','available',?,?)`, productID, now, now)
 
 	repo := repository.NewOrderRepository(d)
-	svc := service.NewOrderService(repo, func() payment.Gateway { return nil }, nil)
+	svc := service.NewOrderService(repo, func(string) payment.Gateway { return nil }, nil)
 
 	orderRec := models.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreatePendingOrder(&orderRec); err != nil {
@@ -161,7 +161,7 @@ func TestFreeOrderWith100PercentCoupon(t *testing.T) {
 	_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,'C1','available',?,?)`, productID, now, now)
 
 	repo := repository.NewOrderRepository(d)
-	svc := service.NewOrderService(repo, func() payment.Gateway {
+	svc := service.NewOrderService(repo, func(string) payment.Gateway {
 		t.Fatal("payFn must not be called for a free order")
 		return nil
 	}, nil)
@@ -169,7 +169,7 @@ func TestFreeOrderWith100PercentCoupon(t *testing.T) {
 		t.Fatalf("create coupon: %v", err)
 	}
 	p := models.Product{ID: productID, Name: "t", PriceCents: 100, MinQty: 1, MaxQty: 10, Status: "active"}
-	orderNo, paymentURL, _, _, err := svc.CreateOrder(p, 1, "a@b.com", "usdt.trc20", "FREE100")
+	orderNo, paymentURL, _, _, err := svc.CreateOrder(p, 1, "a@b.com", "usdt.trc20", "bepusdt", "FREE100")
 	if err != nil {
 		t.Fatalf("create free order: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestRedeliverFromStock(t *testing.T) {
 	}
 
 	repo := repository.NewOrderRepository(d)
-	svc := service.NewOrderService(repo, func() payment.Gateway { return nil }, nil)
+	svc := service.NewOrderService(repo, func(string) payment.Gateway { return nil }, nil)
 
 	// 创建订单占用 1 张（模拟：直接建订单 + 锁定一张）
 	orderRec := models.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now}
@@ -262,7 +262,7 @@ func TestRedeliverIdempotent(t *testing.T) {
 		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,?, 'available', ?, ?)`, productID, "C"+string(rune('0'+i)), now, now)
 	}
 	repo := repository.NewOrderRepository(d)
-	svc := service.NewOrderService(repo, func() payment.Gateway { return nil }, nil)
+	svc := service.NewOrderService(repo, func(string) payment.Gateway { return nil }, nil)
 	orderRec := models.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: models.OrderCreated, CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreatePendingOrder(&orderRec); err != nil {
 		t.Fatalf("create: %v", err)
@@ -336,20 +336,20 @@ func TestCouponAndWholesale(t *testing.T) {
 		_, _ = d.Exec(`INSERT INTO cards(product_id, content, status, created_at, updated_at) VALUES(?,?, 'available', ?, ?)`, pid, "C"+string(rune('0'+i)), now, now)
 	}
 	repo := repository.NewOrderRepository(d)
-	svc := service.NewOrderService(repo, func() payment.Gateway { return payment.NewBEPusdt("", "") }, func() service.PaymentConfig { return service.PaymentConfig{} })
+	svc := service.NewOrderService(repo, func(string) payment.Gateway { return payment.NewBEPusdt("", "") }, func() service.PaymentConfig { return service.PaymentConfig{} })
 
 	// 固定券：满 1 元减 10 元（用于 1.8 元订单，可抵扣到 0 为止）
 	if err := repo.CreateCoupon(models.Coupon{Code: "TEST10", Type: "fixed", ValueCents: 1000, MinAmountCents: 100, MaxUses: 0, ProductID: 0, Active: true}); err != nil {
 		t.Fatalf("create coupon: %v", err)
 	}
 	// 限购：少于 min_qty 应报错
-	_, _, _, _, err = svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10}, 1, "a@b.com", "usdt-trc20", "")
+	_, _, _, _, err = svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10}, 1, "a@b.com", "usdt-trc20", "bepusdt", "")
 	if err == nil {
 		t.Fatalf("qty below min should fail")
 	}
 	// 批发价：买 2 件单价 9 折 = 100*2*90/100 = 180
 	// 固定券满 100 减 1000，抵扣后 180-1000 → 0 元订单直接完成（跳过支付）
-	orderNo, _, discount, couponID, err := svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10, Wholesale: []models.WholesaleTier{{MinQty: 2, Discount: 90}}}, 2, "a@b.com", "usdt-trc20", "TEST10")
+	orderNo, _, discount, couponID, err := svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10, Wholesale: []models.WholesaleTier{{MinQty: 2, Discount: 90}}}, 2, "a@b.com", "usdt-trc20", "bepusdt", "TEST10")
 	if err != nil {
 		t.Fatalf("0-amount order should complete directly: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestCouponAndWholesale(t *testing.T) {
 	if err := repo.CreateCoupon(models.Coupon{Code: "TEST10B", Type: "fixed", ValueCents: 10, MinAmountCents: 100, MaxUses: 0, ProductID: 0, Active: true}); err != nil {
 		t.Fatalf("create coupon B: %v", err)
 	}
-	orderNo2, _, _, couponID2, err := svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10, Wholesale: []models.WholesaleTier{{MinQty: 2, Discount: 90}}}, 2, "a@b.com", "usdt-trc20", "TEST10B")
+	orderNo2, _, _, couponID2, err := svc.CreateOrder(models.Product{ID: pid, Name: "t", PriceCents: 100, MinQty: 2, MaxQty: 10, Wholesale: []models.WholesaleTier{{MinQty: 2, Discount: 90}}}, 2, "a@b.com", "usdt-trc20", "bepusdt", "TEST10B")
 	if err == nil {
 		t.Fatalf("expected pay failure with nil client")
 	}
