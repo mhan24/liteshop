@@ -876,20 +876,26 @@ func productFromJSON(input map[string]any) (models.Product, error) {
 	if costCents < 0 {
 		costCents = 0
 	}
+	// 交付方式：auto（卡密自动发货，默认）/ manual（人工手动交付）
+	deliveryType := strings.TrimSpace(str(input["delivery_type"]))
+	if deliveryType != models.DeliveryTypeManual {
+		deliveryType = models.DeliveryTypeAuto
+	}
 	return models.Product{
-		Name:        name,
-		Description: strings.TrimSpace(str(input["description"])),
-		ImageURL:    strings.TrimSpace(str(input["image_url"])),
-		PriceCents:  price,
-		Status:      status,
-		Category:    strings.TrimSpace(str(input["category"])),
-		SortOrder:   sortOrder,
-		IsPinned:    input["is_pinned"] == true,
-		FAQ:         faq,
-		Wholesale:   wholesale,
-		MinQty:      minQty,
-		MaxQty:      maxQty,
-		CostCents:   costCents,
+		Name:         name,
+		Description:  strings.TrimSpace(str(input["description"])),
+		ImageURL:     strings.TrimSpace(str(input["image_url"])),
+		PriceCents:   price,
+		Status:       status,
+		Category:     strings.TrimSpace(str(input["category"])),
+		SortOrder:    sortOrder,
+		IsPinned:     input["is_pinned"] == true,
+		FAQ:          faq,
+		Wholesale:    wholesale,
+		MinQty:       minQty,
+		MaxQty:       maxQty,
+		CostCents:    costCents,
+		DeliveryType: deliveryType,
 	}, nil
 }
 
