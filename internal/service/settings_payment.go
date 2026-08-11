@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"regexp"
 	"strconv"
 	"strings"
@@ -318,6 +319,11 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 		}
 	}
 	if v := strings.TrimSpace(str(input["hashpay_private_key"])); v != "" {
+		// 防呆：HashPay 商户面板同时展示公钥与私钥，误填公钥会导致下单 502。
+		// 这里只认 PKCS#8 / PKCS#1 私钥头，明确提示而不是静默保存。
+		if !strings.Contains(v, "-----BEGIN PRIVATE KEY-----") && !strings.Contains(v, "-----BEGIN RSA PRIVATE KEY-----") {
+			return errors.New("HashPay 私钥格式错误：请粘贴 -----BEGIN PRIVATE KEY----- 开头的商户私钥（不是公钥）")
+		}
 		_ = s.SetSecret("hashpay_private_key", v)
 	}
 	return nil

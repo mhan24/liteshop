@@ -128,6 +128,30 @@ func TestSettingsServiceSaveHashPay(t *testing.T) {
 	}
 }
 
+// TestSettingsServiceHashPayPrivateKeyValidation 私钥栏误填公钥/非 PEM 必须报错（防呆）。
+func TestSettingsServiceHashPayPrivateKeyValidation(t *testing.T) {
+	st := newStubSettingsStore()
+	svc := NewSettingsService(st, security.NewCipher("test-secret"), config.Config{})
+	// 公钥被拒，且不写入。
+	if err := svc.SavePayment(map[string]any{"hashpay_private_key": "-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----"}); err == nil {
+		t.Fatal("public key must be rejected")
+	}
+	if _, ok := st.secrets["hashpay_private_key"]; ok {
+		t.Fatal("public key must not be stored")
+	}
+	// 非 PEM 文本被拒。
+	if err := svc.SavePayment(map[string]any{"hashpay_private_key": "not-a-key"}); err == nil {
+		t.Fatal("garbage key must be rejected")
+	}
+	// 合法 PKCS#8 私钥可保存。
+	if err := svc.SavePayment(map[string]any{"hashpay_private_key": "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----"}); err != nil {
+		t.Fatalf("valid private key: %v", err)
+	}
+	if st.secrets["hashpay_private_key"] == "" {
+		t.Fatal("valid private key must be stored")
+	}
+}
+
 // TestSettingsServiceGatewayDefault 未配置时默认 BEpusdt；非法网关值被忽略。
 func TestSettingsServiceGatewayDefault(t *testing.T) {
 	st := newStubSettingsStore()
