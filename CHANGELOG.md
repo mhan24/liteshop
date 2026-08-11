@@ -18,6 +18,7 @@
 ### 其他
 
 - README（中英双份）技术栈与目录说明同步更新；admin-ui / storefront 依赖清理（daisyui 已移除）
+- 结构梳理：后台自研组件移出 `components/ui/`（该目录只保留 shadcn-vue 生成组件），裁剪前后台未使用到的 shadcn 组件目录；README 整体重写并修正 OpenAPI 文件路径描述
 
 ## v0.2.2（2026-08-11）— 后台界面迁移 Tailwind CSS + daisyUI
 

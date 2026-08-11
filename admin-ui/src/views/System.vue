@@ -50,8 +50,8 @@ import { api } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { confirm } from '@/components/ui/confirm'
-import { toastError, toastSuccess } from '@/components/ui/toast'
+import { confirm } from '@/components/confirm'
+import { toastError, toastSuccess } from '@/components/toast'
 
 const router = useRouter()
 const { t } = useI18n()

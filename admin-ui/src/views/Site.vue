@@ -166,9 +166,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import FormField from '@/components/ui/FormField.vue'
-import ProductImage from '@/components/ui/ProductImage.vue'
-import { toastError, toastSuccess } from '@/components/ui/toast'
+import FormField from '@/components/FormField.vue'
+import ProductImage from '@/components/ProductImage.vue'
+import { toastError, toastSuccess } from '@/components/toast'
 
 const { t, locale } = useI18n()
 const editorLang = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'))

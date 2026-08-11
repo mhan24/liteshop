@@ -1,10 +1,10 @@
 # LiteShop
 
-中文版：[README.md](README.md) ｜ Changelog: [CHANGELOG.md](CHANGELOG.md)
+中文版：[README.md](README.md) ｜ Changelog: [CHANGELOG.md](CHANGELOG.md) ｜ Engineering conventions: [AGENTS.md](AGENTS.md)
 
-**LiteShop v0.2.0 (codename: Moon)** — an automated digital-goods delivery (card / activation-code) shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) and [HashPay](https://github.com/TGDash/HashPay) crypto payment gateways (**both can run at once; buyers choose**). The buyer storefront uses Nuxt 3 SSR + Tailwind CSS 4; the admin panel uses Vue 3 + TypeScript + Tailwind CSS 4 + shadcn-vue + Pinia; Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
+**LiteShop** — an automated digital-goods (coupon / card key) delivery shop built with **Go + SQLite**, integrated with the [BEpusdt](https://github.com/v03413/BEpusdt) and [HashPay](https://github.com/TGDash/HashPay) crypto payment gateways (**both can run at once; buyers choose**). The storefront is a Nuxt 3 SSR app and the admin panel is a Vue 3 SPA; both use **Tailwind CSS 4 + shadcn-vue**. Go serves the JSON API, payment callbacks, the embedded admin SPA, and background jobs.
 
-> Version history: v0.1.0 codename **Earth**; v0.2.0 codename **Moon** — layering, abstractions, observability, and stability upgrades, see [CHANGELOG](CHANGELOG.md).
+> History: v0.1.0 codename **Earth**; v0.2.0 codename **Moon** (engineering overhaul); v0.3.0 migrated both UIs to shadcn-vue. See [CHANGELOG](CHANGELOG.md).
 >
 > This project is not affiliated with the BEpusdt author. BEpusdt is GPL-3.0; this project is MIT.
 
@@ -12,49 +12,48 @@
 
 ## Features
 
-### Storefront (Nuxt 3 SSR)
+### Storefront (Nuxt 3 SSR + shadcn-vue)
 
-- Product listing: categories / pinned / sorting / search / price filter
-- Product detail + Cloudflare Turnstile
-- Checkout: open the checkout in a new tab, redirect to the order page
-- Order detail: auto-poll while pending, cards revealed on payment success, cancel order (synchronously closes the gateway transaction)
-- Order lookup: email-only recovery + "send view link to my email" (blurred response — never reveals whether an email has ordered)
-- Access credentials: every order (including legacy backfilled ones) uses a **view token** sent by email to view cards / cancel; tokens are only mailed to the registered address, and the lookup API never returns order numbers or links
-- Privacy / Terms / first-time `/setup`
+- Product listing: categories / pinned / sorting / search / price filter, grid & list views
+- Product detail with Cloudflare Turnstile verification, FAQ accordion, wholesale tiers
+- Checkout: **choose a payment method (BEpusdt network / HashPay crypto)**, checkout opens in a new tab, current page redirects to the order detail
+- Order detail: auto-polling while pending, card keys shown after payment, cancel support (closes the gateway transaction)
+- Order lookup: recover by email only + "send view links to email" (vague responses, no email enumeration)
+- Access credentials: every order is accessed via a **view token** emailed to the registered address; tokens are only sent to that email
+- Privacy / Terms pages and first-run `/setup`
 - SEO: canonical / OG / JSON-LD / sitemap / robots / favicon
 
-### Admin panel (Vue 3 SPA)
+### Admin panel (Vue 3 SPA + shadcn-vue)
 
-- Dashboard: products / cards / orders stats, sales trend & product share, profit (cost snapshot), low-stock alerts
-- Products: create / edit / category / pinned / sorting / price / status / FAQ / wholesale tiers / purchase limits
+- Dashboard: product / card / order stats, sales trend & product share, gross profit (cost snapshot), low-stock alerts
+- Products: create / edit / category / pin / sort / price / list-unlist / FAQ / wholesale tiers / quantity limits
 - Cards: import (dedupe) / delete / export
-- Orders: view / CSV export / mark expired / cancel / set status / resend / batch resend / redeliver
-- Coupons: fixed / percent, minimum amount, max uses, product scope, validity window; **100% coupons complete the order automatically and deliver cards immediately**
-- Payment: **dual gateways (BEpusdt / HashPay, each independently enabled)** with per-gateway config (base URL / token / merchant private key / trade types / currency / timeout / callback URL, changes apply immediately)
-- Notifications: SMTP / Telegram / Webhook + **event templates** (order created / payment success / delivered / low stock / system error) + admin notification email + test buttons
-- Site: title / announcement / **public base URL** / logo / favicon / SEO / links / copyright / privacy / terms / Turnstile
-- Maintenance mode: toggle + notice + unlock password (hashed + AES-encrypted storage)
-- Account: change username / change password
-- Security: TOTP 2FA (Google Authenticator, AES-encrypted secret), admin RBAC + audit logs
-- System: config backup / restore (excludes secrets) / wipe and re-init / **background job status** (last run per job + mail queue backlog + dead events)
+- Orders: view / CSV export / mark expired / cancel / change status / resend / batch resend / redeliver
+- Coupons: fixed / percent, minimum amount, usage limit, product filter, expiry; **100% coupons auto-complete and deliver**
+- Payments: **both gateways can run at once** with per-gateway config (base URL / token / merchant key / currency / timeout / callback path, applied immediately)
+- Notifications: SMTP / Telegram / Webhook + **event templates** + admin email + test buttons
+- Site: title / announcement / public URL / logo / favicon / SEO / links / copyright / privacy / terms / Turnstile
+- Maintenance mode: toggle + message + unlock password (hashed & encrypted)
+- Account: change username / password; TOTP 2FA (AES-encrypted secret)
+- Security: admin RBAC + audit logs
+- System: config backup / restore (no secrets) / full reset / background job status
 
 ### Backend (Go)
 
-- SQLite storage (pure Go, no CGO); no application-level environment variables — **all configuration is written to the database** during `/setup` and from the admin panel
-- Config system: `settings` + `secrets` (AES-GCM encrypted) + `settings_version` (config-structure upgrade versions)
-- Layering: api (handler) → service (business) → db/repository (data) → db/schema (schema evolution)
-- Domain events: typed events in `internal/events` (OrderPaid / OrderExpired / DeliveryFailed / LowStock …) with versioned payloads and **Fanout consumer isolation** — the service only publishes events, no scattered `bus.Publish`
-- **Outbox pattern**: payment-success/delivery events are written to `outbox_events` **in the same transaction** as the order state change; a worker publishes them; 5 consecutive failures move to `dead_events`; published events are purged after 30 days
-- Idempotency ledger: payment callbacks register the gateway trade ID as a unique key in `processed_events` (same transaction as the state change) — duplicates are processed once
-- Payment abstraction: order business depends only on `payment.Gateway`; built-in BEpusdt and HashPay implementations, **buyers pick either gateway per order** (the order records its gateway; callbacks/idempotency are routed per gateway) without touching business code
-- Task system: goroutine + channel (mail / Telegram / Webhook) + ticker; panic isolation, startup compensation, `job_runs` records
-- Background jobs: auto-expire unpaid orders, retry failed mail, session/log/outbox/queue cleanup, daily verified backup
-- Logging (zap): app / payment / security channels, 50MB rotation keeping 7 files; request_id / order_id / trace_id correlation
-- Migration system: numbered .sql migrations (`internal/db/schema/migrations/`), each run exactly once and recorded
-- Admin security: PBKDF2-SHA256, TOTP 2FA, **lockout after 5 failed logins for 10 minutes (keyed by IP+username)**, timing-equalized login
-- Security: RBAC, audit logs (indexed), tiered rate limiting, Turnstile, CSP, HSTS, security headers, CSV injection guard, fully parameterized SQL
-- Observability: component-level health check `/health` (database + jobs metrics), version injection, structured startup banner
-- API docs: `/docs` (OpenAPI 3.0, JSON + YAML, `/swagger` alias), admin-only
+- SQLite storage (pure Go, no CGO); no app-level environment variables — **all configuration is written to the database** during setup or from the admin panel
+- Config system: `settings` + `secrets` (AES-GCM encrypted) + `settings_version` (config schema upgrades)
+- Layering: `api` (handler) → `service` (business) → `db/repository` (data) → `db/schema` (migrations)
+- Domain events: typed events + versioned payloads + **Fanout consumer isolation**
+- **Outbox pattern**: payment/delivery events are written to `outbox_events` in the same transaction; worker publishes them; 5 consecutive failures move to `dead_events`; published events are cleaned after 30 days
+- Idempotency: payment callbacks register a unique key in `processed_events` (same transaction as the state change)
+- Payment abstraction: business code depends only on the `payment.Gateway` interface; BEpusdt and HashPay are two implementations
+- Jobs: goroutines + channels + ticker; panic isolation, startup compensation, `job_runs` records
+- Background tasks: order expiry, email retry, cleanup, daily backup (`VACUUM INTO` + `integrity_check`)
+- Logging (zap): app / payment / security channels, 50MB rotation x7; request_id / order_id / trace_id correlation
+- Migrations: numbered .sql files (run once); config upgrades via `settings_version`
+- Admin security: PBKDF2-SHA256, TOTP 2FA, login lockout (IP+username), timing equalization
+- Observability: component health check `/health`, version injection, structured startup banner
+- API docs: `/docs` (OpenAPI 3.0, json + yaml, `/swagger` alias), admin-only
 
 ---
 
@@ -75,8 +74,8 @@ Caddy (reverse proxy :443)
 | Process | Stack | Port |
 | --- | --- | --- |
 | Go API | Go 1.25.12+ + SQLite (modernc) | 8080 |
-| Storefront SSR | Nuxt 3 + Tailwind | 3001 |
-| Admin SPA | Vue 3 + TS + Tailwind CSS 4 + shadcn-vue + Pinia | embedded in Go |
+| Storefront SSR | Nuxt 3 + Tailwind CSS 4 + shadcn-vue | 3001 |
+| Admin SPA | Vue 3 + Vite + TS + Tailwind CSS 4 + shadcn-vue + Pinia | embedded in Go |
 
 ### Layering
 
@@ -84,47 +83,36 @@ Caddy (reverse proxy :443)
 HTTP handler (internal/api)
     → service (internal/service)
         → interfaces (OrderRepository / ProductRepository / KeyRepository / SettingsStore / AdminStore)
-        → internal/db/repository (SQLite implementation) + internal/db/schema (migrations)
+        → internal/db/repository (SQLite) + internal/db/schema (migrations)
 ```
 
-- Handlers only parse requests, write responses, and enforce HTTP security (Turnstile / rate limiting / cookies / auth middleware / Origin check); they never touch the database directly, call the payment gateway, or send notifications;
-- All business logic lives in `service`, which depends **only on interfaces** — never concrete SQLite — so tests use in-memory mocks; shared types/domain errors live in `internal/models`;
-- `internal/db/repository` centralizes all SQL; a `Store` turns config/admin/session/audit access into interface implementations;
-- Payments go through `payment.Gateway`; critical events go through Outbox; background jobs are scheduled by `internal/jobs`.
+- Handlers only adapt HTTP (parse / respond / rate limit / Turnstile / cookies / auth / Origin checks); no direct DB, gateway, or notification calls;
+- Business logic lives in `service` and depends only on interfaces (mockable in tests); shared types and domain errors live in `internal/models`;
+- All SQL lives in `internal/db/repository`; `internal/db/schema` is the only schema change entry point;
+- Payments go through `payment.Gateway`; notifications run async via `internal/notify` + the job bus; critical events use the Outbox; background jobs run under `internal/jobs`.
 
-### Database migrations (Laravel style)
+### UI component conventions
 
-- Migration files live in `internal/db/schema/migrations/`, numbered, applied in order, **each exactly once**;
-- Policy: new schema changes must be new numbered .sql files; no startup "table checks / auto column creation";
-- Go migration steps are reserved for legacy upgrades SQLite cannot express in pure SQL;
-- Config-structure upgrades go through `settings_version` (`internal/db/settings_migrations.go`).
-
-### Task system & background jobs
-
-- **Task bus**: goroutine + channel; notifications run asynchronously;
-- **Background jobs**: Go ticker scheduling
-  - `order_expire`: every 5 minutes, close overdue unpaid orders and release cards
-  - `email_retry`: failed mail retried with exponential backoff (max 5 attempts)
-  - `outbox_publish`: every 1 second, publishes outbox events (auto re-publish after a crash)
-  - `cleanup`: sessions / 180-day logs / outbox 30 days / mail queue / job_runs 7 days / memory state
-  - `backup`: daily `VACUUM INTO` snapshot + read-only `integrity_check` (corrupt files removed), keep 7
-- Robustness: worker/scheduler panic isolation; startup compensation for order_expire / email_retry / outbox_publish / cleanup; every run recorded in `job_runs`
+- Each app has a `components.json` (shadcn-vue config: reka-nova style, aliases, CSS entry);
+- `src/components/ui/` (admin) and `components/ui/` (storefront) contain **only shadcn-vue generated components**; add/remove them with `npx shadcn-vue@latest add <component>`, don't hand-edit core files;
+- Business components live in the admin's `src/components/` (Modal / DataTable / FormField / PaginationBar / Toast / Confirm / PageCard / SideNav) and the storefront's `components/` (SiteHeader / SiteFooter);
+- The theme uses shadcn-vue's default neutral CSS variables (inline in the CSS entry), with **no separate color/theme file**.
 
 ---
 
 ## Payment flow
 
 ```
-Order (buyer picks gateway) → lock cards (atomic) → create transaction (payment.Gateway[selected]) → open checkout in a new tab
-  → redirect to the order page (auto-polling)
-  → user pays → gateway callback (path changeable at runtime; BEpusdt MD5 signature / HashPay RSA-encrypted envelope) → verify + processed_events idempotency → order paid
-  → write outbox in the same transaction → worker sends delivery notification (mail/Telegram/Webhook) → cards shown
+Checkout (buyer picks gateway) → lock cards (atomic tx) → create transaction (payment.Gateway) → open checkout in new tab
+  → current page redirects to order detail (auto-polling)
+→ buyer transfers → gateway callback (BEpusdt MD5 / HashPay RSA envelope) → verify + processed_events idempotency → order paid
+  → write outbox in same tx → worker sends card notification (email/Telegram/Webhook) → cards shown on the frontend
 ```
 
-- Cancel / expire: release stock + close the gateway transaction (BEpusdt calls `cancel-transaction`; **HashPay has no merchant cancel API** — on cancel we proactively query the order status, wait for HashPay's expiry callback if unpaid, and alert the admin immediately if a cancel/pay race is detected (already paid); late callbacks never mis-deliver);
-- Transaction boundaries: checkout is a single transaction (create order + lock cards + decrement stock); failures atomically mark `payment_failed` and release cards; payment success is a single transaction and events/mail are sent **only after COMMIT**;
-- Dual gateways: each order records the chosen gateway, `processed_events` idempotency keys are gateway-prefixed, and callback routes are independent (`/notify/bepusdt`, `/notify/hashpay`); adding a gateway (future USDT / Stripe / PayPal) only requires a new `Gateway` adapter;
-- **payment.log** records every creation/callback with request_id / trace_id.
+- Cancel / expiry: release stock + close the gateway transaction (HashPay has no merchant cancel API; it polls the order and relies on expiry callbacks as a fallback; late callbacks never deliver by mistake);
+- Transaction boundaries: checkout = single tx (order + card lock + stock); failure atomically releases cards; payment success = single tx (paid + deliver), events/emails are only sent **after COMMIT**;
+- Both gateways can run at once: each order records its gateway, `processed_events` keys are gateway-prefixed, callbacks use separate routes (`/notify/bepusdt`, `/notify/hashpay`);
+- **payment.log** records every create/callback with order number, amount, trade ID, callback time, result, request_id / trace_id.
 
 ---
 
@@ -134,46 +122,62 @@ Order (buyer picks gateway) → lock cards (atomic) → create transaction (paym
 | --- | --- |
 | Storefront | Nuxt 3 SSR + Tailwind CSS 4 + shadcn-vue |
 | Admin | Vue 3 + Vite + TypeScript + Tailwind CSS 4 + shadcn-vue + Pinia + VueUse + @lucide/vue |
+| UI management | shadcn-vue CLI (`components.json`, powered by reka-ui) |
 | Admin quality | ESLint (flat config + typescript-eslint + eslint-plugin-vue) + Prettier |
-| API types | OpenAPI → TS auto-generated (`admin-ui npm run gen:api` → `src/api/types.ts`) |
+| API types | OpenAPI → TS generated (`admin-ui npm run gen:api` → `src/api/types.ts`) |
 | Backend | Go 1.25.12+ (govulncheck clean) |
-| Database | SQLite (modernc.org/sqlite), migrations + interface-based repository layering |
+| Database | SQLite (modernc.org/sqlite), migrations + interface-based repositories |
 | Logging | go.uber.org/zap + lumberjack |
-| Tasks | goroutine + channel + ticker (no MQ), Outbox pattern |
+| Jobs | goroutines + channels + ticker (no MQ), Outbox pattern |
 | Reverse proxy | Caddy |
-| Payment | BEpusdt / HashPay coexist (behind the `payment.Gateway` interface, buyer chooses) |
-| Security | Cloudflare Turnstile |
+| Payments | BEpusdt / HashPay (via `payment.Gateway` interface, buyer-selectable) |
+| Bot protection | Cloudflare Turnstile |
 
 ---
 
-## Directory structure
+## Repository layout
 
 ```
-cmd/shop/               Go entrypoint
-internal/api/           HTTP routes, JSON API, payment callback, embedded admin, API docs (handler layer)
-internal/service/       business logic (small files per domain)
-internal/service/repository.go    data-access interfaces consumed by service
-internal/db/            database connection layer: sqlite.go / postgres.go (future)
-internal/db/schema/     schema evolution: migration runner + migrations/*.sql
-internal/db/repository/ all data access: SQLite implementations + Store
-internal/db/settings_migrations.go   config-structure upgrades (settings_version)
-internal/models/        models, shared types and domain errors
-internal/payment/       payment gateway abstraction: interface.go + bepusdt.go
-internal/notify/        notifications (event templates / mail / Telegram / Webhook)
-internal/jobs/          task bus + scheduler + order_expire / email_retry / outbox_publish / cleanup / backup
-internal/logging/       zap logging + correlation IDs
-internal/security/      TOTP & AES-GCM cipher
-internal/events/        typed domain events + Fanout + versioned payloads
-internal/version/       build version info (-ldflags injected)
-internal/config/        configuration defaults
-internal/testutil/      integration test facilities (temp SQLite + MockGateway + NotifyRecorder)
-internal/integration/   order integration tests (callback / duplicate / cancel / expiry / concurrency)
-admin-ui/               shadcn-vue admin (src/api|views|stores|hooks|utils|components)
-storefront/             Nuxt 3 SSR storefront
-logs/                   runtime logs (app.log / payment.log / security.log)
-CHANGELOG.md            changelog (v0.1 Earth / v0.2 Moon)
-AGENTS.md               engineering conventions
+cmd/shop/                Go entrypoint
+internal/api/            HTTP routes, JSON API, payment callbacks, embedded admin, API docs (handler layer)
+internal/service/        Business logic (small files per domain; repository.go defines interfaces)
+internal/db/             Database connection layer
+internal/db/schema/      Migration runner + migrations/*.sql (single schema entry point)
+internal/db/repository/  All SQL (SQLite implementations + Store interfaces)
+internal/db/settings_migrations.go   Config upgrades (settings_version)
+internal/models/         Models, shared types, domain errors
+internal/payment/        Gateway abstraction: interface.go + bepusdt.go + hashpay.go
+internal/notify/         Notifications (templates / email / Telegram / Webhook)
+internal/jobs/           Job bus + scheduler (order_expire / email_retry / outbox_publish / cleanup / backup)
+internal/logging/        zap logging (app / payment / security) + correlation IDs
+internal/security/       TOTP and AES-GCM encryption
+internal/events/         Typed domain events + Fanout isolation + versioned payloads
+internal/version/        Build info (injected via -ldflags)
+internal/config/         Default configuration values
+internal/testutil/       Integration test facilities (temp SQLite + MockGateway + NotifyRecorder)
+internal/integration/    Order integration tests (callbacks / duplicate callbacks / cancel / timeout / concurrency)
+
+admin-ui/                Vue 3 + Vite + shadcn-vue admin panel
+  components.json        shadcn-vue component config
+  src/components/        Business components (Modal / DataTable / FormField / PaginationBar / Toast / Confirm / PageCard / SideNav)
+  src/components/ui/     shadcn-vue generated components
+  src/views/             15 admin pages
+  src/api/               API wrapper + generated types.ts
+  src/stores|hooks|utils|i18n
+
+storefront/              Nuxt 3 SSR storefront
+  components.json        shadcn-vue component config
+  components/ui/         shadcn-vue generated components (only the ones in use)
+  components/            Business components (SiteHeader / SiteFooter)
+  pages|layouts|composables|server|public
+  lib/utils.ts           cn() helper (shadcn dependency)
+
+data/                    Runtime data (SQLite + backups, gitignored)
+logs/                    Runtime logs (gitignored)
+AGENTS.md                Engineering conventions
 ```
+
+> `internal/api/admin-ui` is the admin build output (embedded in the Go binary) and `storefront/.output` is the SSR build output; both are gitignored.
 
 ---
 
@@ -183,7 +187,7 @@ AGENTS.md               engineering conventions
 
 - Go 1.25.12+ (govulncheck baseline)
 - Node.js 18+ / npm
-- A BEpusdt instance or a HashPay instance (runs on Cloudflare Workers; the merchant panel generates an RSA key pair)
+- A BEpusdt instance or a HashPay instance (on Cloudflare Workers; the merchant panel generates the RSA key pair)
 
 ### Local development
 
@@ -205,20 +209,20 @@ Storefront (3001):
 cd storefront && npm install && npm run dev
 ```
 
-### Build & validation
+### Build & verify
 
 ```bash
-# Admin static assets → internal/api/admin-ui
+# Admin assets → internal/api/admin-ui (embedded in the Go binary)
 cd admin-ui && npm install && npm run build && cd ..
 
 # Storefront SSR output → storefront/.output
 cd storefront && npm install && npm run build && cd ..
 
-# Single binary (embeds the admin UI), optionally with version info
-go build -ldflags "-X shop/internal/version.Version=0.2.0 -X shop/internal/version.Commit=$(git rev-parse --short HEAD)" -o shop ./cmd/shop
+# Single binary (embedded admin), optionally with version info
+go build -ldflags "-X shop/internal/version.Version=0.3.0 -X shop/internal/version.Commit=$(git rev-parse --short HEAD)" -o shop ./cmd/shop
 ./shop
 
-# Dependency security baselines
+# Dependency baselines
 govulncheck ./...
 cd admin-ui && npm audit --omit=dev
 
@@ -226,34 +230,33 @@ cd admin-ui && npm audit --omit=dev
 cd admin-ui && npm run lint && npm run format
 ```
 
-> `internal/api/admin-ui` is a build artifact, ignored by `.gitignore`, not committed.
+### Conventions (see AGENTS.md)
 
-### Code conventions (see AGENTS.md)
-
-- **Small service/repository files**: split by responsibility, keep each file under ~300 lines;
-- **Interface-based repositories**: service depends only on interfaces; shared types/domain errors live in `internal/models`;
-- New schema changes must be new numbered .sql migrations; config-structure upgrades go through `settings_version`; sensitive config always goes into the encrypted `secrets` table;
-- Critical domain events must use Outbox (same transaction as state); external events must be idempotent (`processed_events`);
-- API changes must update OpenAPI and re-run `npm run gen:api`; backups must verify with `integrity_check` and have a restore drill;
-- Security baselines: Go ≥1.25.12 + govulncheck; login lockout includes IP; admin Origin check; keep tests and the bilingual README in sync.
+- Small-file rule for service/repository: split by responsibility, ~300 lines per file max;
+- Repositories are interface-based; shared types/domain errors live in `internal/models`;
+- Schema changes require new numbered .sql migrations; config upgrades go through `settings_version`; secrets are stored encrypted in the `secrets` table;
+- Critical domain events go through the Outbox (same transaction); external events must be idempotent (`processed_events`);
+- API changes must sync the OpenAPI spec and `npm run gen:api`; backups need `integrity_check` verification and restore drills;
+- Manage shadcn components with the CLI; keep generated and business components in separate directories; no standalone color/theme file;
+- Security baseline: Go ≥1.25.12 + govulncheck; login lockout includes IP; Origin checks on admin mutating endpoints; update tests and this README (zh/en) with changes.
 
 ---
 
 ## Deployment (server)
 
-### Release process (tag → release)
+### Release flow (tag → release)
 
-Pushing a `v*` tag triggers the CI Release workflow: build admin-ui / storefront → Go binary (version from the tag) → package `liteshop-release.tgz` + `SHA256` checksum → create a GitHub Release with assets:
+Pushing a `v*` tag triggers the CI Release: builds admin-ui / storefront → Go binary (version from the tag) → `liteshop-release.tgz` + `SHA256` → GitHub Release:
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.3.0 && git push origin v0.3.0
 ```
 
-The artifact feeds `install.sh` via `BUILD_ARTIFACT` for fast deployment (checksum guards against tampering).
+The artifact can be used directly with `install.sh`'s `BUILD_ARTIFACT` for fast deployment.
 
 ### One-click install (install.sh)
 
-On a fresh Ubuntu / Debian / CentOS / Rocky / Alma server, point the domain A record to the server:
+On a fresh Ubuntu / Debian / CentOS / Rocky / Alma server, with the domain A record pointing to it:
 
 ```bash
 # Source build mode (~10 min; installs Go/Node/Caddy/systemd/SSL automatically)
@@ -264,41 +267,41 @@ curl -sSL https://raw.githubusercontent.com/mhan24/liteshop/main/install.sh | \
   DOMAIN=shop.example.com BUILD_ARTIFACT=https://…/liteshop-release.tgz bash
 ```
 
-Install-time variables: `DOMAIN` (required), `EMAIL`, `BRANCH`, `SKIP_SSL=1` (plain http), `BUILD_ARTIFACT`, `SHOP_USER`.
+Install variables: `DOMAIN` (required), `EMAIL`, `BRANCH`, `SKIP_SSL=1` (plain http), `BUILD_ARTIFACT`, `SHOP_USER`.
 
-> Runtime configuration is stored in the database via `/setup` and the admin panel; the app reads no application-level environment variables. The project does not rely on Docker.
+> Runtime configuration is initialized at `/setup` and written from the admin panel; the app reads no environment variables. No Docker dependency.
 
-### Adding HashPay
+### HashPay integration
 
 1. Deploy [HashPay](https://github.com/TGDash/HashPay) to Cloudflare Workers and finish its setup;
-2. In the HashPay merchant panel create a **Native API** merchant, save the **private key** (shown only once), and set the merchant **Callback URL** to LiteShop's HashPay notify URL (visible on the payment settings page, default `https://your-domain/notify/hashpay`);
-3. In LiteShop admin → Payment settings, enable **HashPay** (it can run alongside BEpusdt), fill in the HashPay site URL, merchant ID, private key, and currency (default USD), then save;
-4. When more than one gateway is enabled the storefront shows a **payment-method picker**: choosing BEpusdt shows network options (TRC20/ERC20 etc.), choosing HashPay uses its hosted checkout for network/asset selection; orders are billed per the chosen gateway and cards are delivered automatically on payment — callbacks and idempotency are routed per gateway.
+2. In the HashPay merchant panel create a **Native API** merchant, save the **private key** (shown once), and set the merchant Callback URL to LiteShop's HashPay callback (visible in the admin Payment page, default `https://your-domain/notify/hashpay`);
+3. Enable **HashPay** in LiteShop admin → Payment (can run alongside BEpusdt) and fill in the site URL, merchant ID, private key, and currency (default USD);
+4. With multiple gateways enabled, the storefront shows a **payment method choice**: BEpusdt shows network options (TRC20/ERC20 etc.), HashPay lets its hosted checkout pick the network/asset.
 
-> The private key is shown only once when the merchant is created; after saving it is AES-encrypted in the `secrets` table; leave blank to keep the current key.
+> The private key is shown once at merchant creation; LiteShop stores it AES-encrypted in the `secrets` table; leaving it blank keeps the current key.
 
-### Build deployment (build-release.sh)
+### Build & deploy (build-release.sh)
 
 ```bash
-bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/date injected) + storefront/.output
+bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (injects git tag/commit/date) + storefront/.output
 ```
 
 ### Manual deployment
 
-- Go: systemd `cardshop`, runs `/opt/cardshop/shop`, listens on 8080
-- Storefront: systemd `liteshop-storefront`, runs `/opt/liteshop-storefront/server/index.mjs`, listens on 3001
-- Caddy: route API/admin/callbacks to Go, everything else to Nuxt (storefront CSP included)
+- Go: systemd unit `cardshop`, runs `/opt/cardshop/shop`, listens on 8080
+- Storefront: systemd unit `liteshop-storefront`, runs `/opt/liteshop-storefront/server/index.mjs`, listens on 3001
+- Caddy: proxies API/admin/callbacks to Go and everything else to Nuxt (CSP on the storefront)
 
 ---
 
 ## Tests & CI
 
-- Unit & integration: `go test ./...` (migrations, signatures, hashing, state machine, coupons/free orders, sessions, lockout, task bus, scheduler, panic isolation, backup verification, mail retry, health, security headers, concurrency stress, restore drill, legacy upgrade, events/idempotency/dead-letter)
-- **Mock tests**: service depends on interfaces, so it can be tested without a database
-- **Integration tests** (`internal/integration` + `internal/testutil`): BEpusdt/HashPay payment callback delivery, duplicate-callback idempotency, cancel/expiry stock release + gateway cancellation, real HTTP callback route (signature / RSA envelope decryption / dynamic path / bad signature), **100 concurrent buyers for the last card**, outbox dead-letter, backup restore drill, old-DB upgrade
-- **Benchmarks**: `go test -bench=. ./internal/integration/` (order ~6.4ms / callback ~6.8ms / query ~21µs baseline)
-- **Dependency baseline**: `govulncheck ./...` clean (Go 1.25.12); `npm audit` 0 runtime vulnerabilities (admin-ui js-yaml advisory is build-time only, unreachable)
-- CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + gen:api diff check + storefront/admin builds
+- Unit/integration: `go test ./...` (migrations, signature verification, password hashing, state machines, coupons, sessions, login lockout, job bus, backups, health checks, security headers, concurrency, restore drills, legacy DB upgrades, events/idempotency/dead letters)
+- **Mock tests**: services depend on interfaces and can run against in-memory stubs
+- **Integration tests** (`internal/integration` + `internal/testutil`): temp SQLite + `MockGateway` / `NotifyRecorder`, covering both gateways' callbacks, **duplicate-callback idempotency**, cancel/timeout stock release, real HTTP callback routes, **100 concurrent buyers for 1 card**, Outbox dead letters, backup restore, legacy upgrades
+- **Benchmarks**: `go test -bench=. ./internal/integration/`
+- **Dependency baselines**: `govulncheck ./...` clean (Go 1.25.12); `npm audit` 0 runtime vulnerabilities (admin-ui only has the documented build-time js-yaml advisory)
+- CI (`.github/workflows/ci.yml`): Go `vet` / `build` / `test` + gen:api diff check + both frontends build
 
 ---
 
@@ -311,49 +314,47 @@ bash build-release.sh /tmp/liteshop-release.tgz   # shop binary (git tag/commit/
 | `/favicon.svg` | `public, max-age=86400` |
 | `/`, `/api/*`, `/admin/*`, `/order*`, `/product*`, `/page*`, `/setup`, `/health` | `no-store` + `X-Robots-Tag: noindex` |
 
-- Dynamic pages are never cached; the site origin comes from the database `public_base_url` — no Host/env dependency;
-- SSR caching policy: dynamic pages and product listings stay `no-store`; ISR / edge cache can be evaluated later under high traffic — not implemented today.
+- Dynamic pages are never cached; the site origin comes from the database (`public_base_url`), not Host/env vars;
+- SSR caching: dynamic pages and product listings stay `no-store`; ISR / edge cache is not implemented yet.
 
 ---
 
 ## Observability
 
-- Logging (zap): `logs/app.log` / `logs/payment.log` / `logs/security.log`, 50MB rotation keeping 7 files
-- Health check `GET /health`: app name, version, build ID, `config_version`, uptime and component status
+- Logging (zap): `logs/app.log` / `logs/payment.log` / `logs/security.log`, 50MB rotation x7
+- Health check `GET /health`: app name, version, build info, `config_version`, uptime, component status
 - Health metrics: `database` (status / size_bytes / migration_version / last_backup / integrity) + `jobs` (mail_queue_size / last_success)
-- Startup banner: `LiteShop vX.Y.Z (commit, date)` plus database / payment / listen / admin / notify info
-- Version lives in `internal/version`, injected via `-ldflags` (build-release.sh / Release workflow pick up git tag / commit / date)
-- Admin endpoints: `/api/v1/admin/version` (version/build/config_version) and `/api/v1/admin/jobs` (job runs / queue / dead events)
-- Correlation: per-request `request_id` (X-Request-ID header); payment logs carry request_id / order_no / trace_id
-- Security-header regression tests: `internal/api/security_test.go` pins nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / admin CSP / HSTS / session-cookie Secure; the storefront CSP allows inline + eval (required by Nuxt bootstrap and vue-i18n message compilation, consistent with the admin policy) and allows challenges.cloudflare.com (Turnstile)
+- Version is managed in `internal/version` and injected via `-ldflags` at build time
+- Admin endpoints `/api/v1/admin/version` (build info) and `/api/v1/admin/jobs` (job records, queue/dead-letter metrics)
+- Correlation: `request_id` per request; payment logs carry request_id / order_no / trace_id
+- Security header regression tests in `internal/api/security_test.go`; because the site sits behind Cloudflare, the admin CSP allows edge-injected scripts and the Web Analytics beacon (consistent with the storefront), and the storefront CSP allows Turnstile
 
 ---
 
 ## API docs
 
-- URL: `/docs` (alias `/swagger`), **visible only after admin login**
-- Spec files: `/docs/openapi.json` and `/docs/openapi.yaml` (OpenAPI 3.0, covering storefront / admin / payment callback)
-- Frontend types: `admin-ui/src/api/types.ts` auto-generated from the spec (`npm run gen:api`, CI diff check, zero drift)
-- Usage: import the URL into Swagger UI / Postman etc.; public endpoints need no auth, admin endpoints need the session cookie
-- Maintenance: API changes must be reflected in `internal/api/api_docs/openapi.json` (YAML and TS types are generated from it)
+- URL: `/docs` (alias `/swagger`), **visible to admins only**
+- Spec files: `internal/api/api_docs/openapi.json` and `openapi.yaml` (OpenAPI 3.0 covering storefront / admin / payment callbacks; embedded in the binary)
+- Frontend types: `admin-ui/src/api/types.ts` generated from the spec (`npm run gen:api`, CI diff check)
+- Maintenance: API changes must update `internal/api/api_docs/openapi.json` (yaml and TS types are generated from the json)
 
 ---
 
 ## Security notes
 
-- Passwords: PBKDF2-SHA256 (100k) + constant-time compare; timing-equalized login; **lockout after 5 failed attempts for 10 minutes (IP+username)**
-- TOTP 2FA secrets AES-GCM encrypted; sensitive config AES-encrypted in the `secrets` table
-- Order view tokens delivered only by email; persisted sessions revoked immediately on logout / admin deletion / restore / reset
-- Atomic order state machine; 100% coupons complete orders automatically; concurrent stock protected by `_txlock=immediate` + atomic conditional UPDATE
-- Fully parameterized SQL; markdown disables HTML + link-scheme whitelist; CSV formula-injection guard; CSP / HSTS / security headers
-- Config backups exclude secrets; explicit HTTP timeouts; async tasks never block callbacks; worker/event-consumer panic isolation
-- Rate-limit trust boundary: `CF-Connecting-IP` is honored only from Cloudflare edge IPs; admin non-idempotent requests validate Origin same-origin
+- Passwords: PBKDF2-SHA256 (100k iterations) + constant-time compare; login timing equalized; **5 failed attempts lock for 10 minutes (IP+username)**
+- TOTP 2FA secrets are AES-GCM encrypted; sensitive config (payment/email/notify/maintenance passwords) is AES-encrypted in the `secrets` table
+- Order view tokens are only delivered by email; sessions are revoked immediately on delete/logout/restore/reset
+- State machines are atomic (deliver/cancel/expire in single transactions); concurrent stock uses `_txlock=immediate` + atomic card locking
+- All SQL is parameterized; markdown disables HTML and whitelists link protocols; CSV formula-injection protection; CSP/HSTS/security headers
+- Config backups exclude secrets; explicit HTTP timeouts; async tasks never block payment callbacks; workers/event consumers are panic-isolated
+- Rate-limit trust boundary: `CF-Connecting-IP` is only trusted when the peer is a Cloudflare edge IP; admin mutating endpoints validate Origin
 - security.log records login success/failure/lockout and TOTP verification
-- The session master key (`session_secret`) is stored in plaintext in `settings` (a deliberate no-env tradeoff): protect DB access strictly; a server-local key file is planned via `settings_version` v2
+- The session master secret (`session_secret`) is stored in plain `settings` (a no-env-vars design tradeoff): protect database access strictly; a server-local key file is planned via `settings_version` v2
 
 ---
 
-## Versions & License
+## Versions & license
 
-- v0.2.0 codename **Moon**; v0.1.0 codename **Earth**; full changelog: [CHANGELOG.md](CHANGELOG.md)
-- MIT, see [LICENSE](LICENSE).
+- v0.3.0: UIs migrated to shadcn-vue; v0.2.0 codename **Moon**; v0.1.0 codename **Earth**; full changelog in [CHANGELOG.md](CHANGELOG.md)
+- MIT — see [LICENSE](LICENSE).

@@ -91,7 +91,7 @@ import {
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import SideNav from '@/components/SideNav.vue'
 import { useSession } from '@/hooks/useSession'
-import { confirm } from '@/components/ui/confirm'
+import { confirm } from '@/components/confirm'
 
 const route = useRoute()
 const router = useRouter()

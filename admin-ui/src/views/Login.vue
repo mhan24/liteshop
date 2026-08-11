@@ -47,8 +47,8 @@ import { api } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import FormField from '@/components/ui/FormField.vue'
-import { toastError, toastWarning } from '@/components/ui/toast'
+import FormField from '@/components/FormField.vue'
+import { toastError, toastWarning } from '@/components/toast'
 
 const { t } = useI18n()
 const loading = ref(false)

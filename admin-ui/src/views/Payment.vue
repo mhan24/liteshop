@@ -110,8 +110,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
-import FormField from '@/components/ui/FormField.vue'
-import { toastError, toastSuccess } from '@/components/ui/toast'
+import FormField from '@/components/FormField.vue'
+import { toastError, toastSuccess } from '@/components/toast'
 
 const { t } = useI18n()
 const loading = ref(false)

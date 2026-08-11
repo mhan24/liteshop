@@ -55,9 +55,9 @@ import { api } from '@/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
-import PaginationBar from '@/components/ui/PaginationBar.vue'
-import ProductImage from '@/components/ui/ProductImage.vue'
+import DataTable, { type DataColumn } from '@/components/DataTable.vue'
+import PaginationBar from '@/components/PaginationBar.vue'
+import ProductImage from '@/components/ProductImage.vue'
 
 const { t } = useI18n()
 const DEFAULT_IMAGE = ref('/default-product.svg')

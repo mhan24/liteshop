@@ -29,7 +29,7 @@ import { fmtDate } from '@/utils/format'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
+import DataTable, { type DataColumn } from '@/components/DataTable.vue'
 
 const { t } = useI18n()
 const loading = ref(false)

@@ -116,9 +116,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import FormField from '@/components/ui/FormField.vue'
-import ProductImage from '@/components/ui/ProductImage.vue'
-import { toastError, toastSuccess, toastWarning } from '@/components/ui/toast'
+import FormField from '@/components/FormField.vue'
+import ProductImage from '@/components/ProductImage.vue'
+import { toastError, toastSuccess, toastWarning } from '@/components/toast'
 
 const route = useRoute()
 const router = useRouter()

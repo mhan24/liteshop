@@ -76,8 +76,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import FormField from '@/components/ui/FormField.vue'
-import { toastError, toastSuccess, toastWarning } from '@/components/ui/toast'
+import FormField from '@/components/FormField.vue'
+import { toastError, toastSuccess, toastWarning } from '@/components/toast'
 
 const { t } = useI18n()
 const loading = ref(false)

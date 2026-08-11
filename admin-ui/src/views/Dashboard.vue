@@ -181,7 +181,7 @@ import { statusBadgeClass } from '@/utils/status'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
+import DataTable, { type DataColumn } from '@/components/DataTable.vue'
 
 const { t } = useI18n()
 const loading = ref(false)

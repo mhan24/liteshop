@@ -116,11 +116,11 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
-import Modal from '@/components/ui/Modal.vue'
-import FormField from '@/components/ui/FormField.vue'
-import { confirm } from '@/components/ui/confirm'
-import { toastError, toastSuccess } from '@/components/ui/toast'
+import DataTable, { type DataColumn } from '@/components/DataTable.vue'
+import Modal from '@/components/Modal.vue'
+import FormField from '@/components/FormField.vue'
+import { confirm } from '@/components/confirm'
+import { toastError, toastSuccess } from '@/components/toast'
 
 const { t } = useI18n()
 const loading = ref(false)

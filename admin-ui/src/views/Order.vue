@@ -216,10 +216,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import Modal from '@/components/ui/Modal.vue'
-import FormField from '@/components/ui/FormField.vue'
-import { confirm } from '@/components/ui/confirm'
-import { toastError, toastSuccess, toastWarning } from '@/components/ui/toast'
+import Modal from '@/components/Modal.vue'
+import FormField from '@/components/FormField.vue'
+import { confirm } from '@/components/confirm'
+import { toastError, toastSuccess, toastWarning } from '@/components/toast'
 
 const route = useRoute()
 const { t } = useI18n()

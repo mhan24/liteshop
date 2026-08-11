@@ -87,10 +87,10 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
-import PaginationBar from '@/components/ui/PaginationBar.vue'
-import FormField from '@/components/ui/FormField.vue'
-import { toastError, toastSuccess } from '@/components/ui/toast'
+import DataTable, { type DataColumn } from '@/components/DataTable.vue'
+import PaginationBar from '@/components/PaginationBar.vue'
+import FormField from '@/components/FormField.vue'
+import { toastError, toastSuccess } from '@/components/toast'
 
 const { t } = useI18n()
 const orders = ref<any[]>([])

@@ -98,10 +98,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
+import DataTable, { type DataColumn } from '@/components/DataTable.vue'
 import { statusBadgeClass } from '@/utils/status'
-import { confirm } from '@/components/ui/confirm'
-import { toastError, toastSuccess } from '@/components/ui/toast'
+import { confirm } from '@/components/confirm'
+import { toastError, toastSuccess } from '@/components/toast'
 
 const route = useRoute()
 const { t } = useI18n()
