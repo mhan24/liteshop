@@ -105,10 +105,8 @@ func TestManualDeliveryFlow(t *testing.T) {
 	if strings.TrimSpace(o3.DeliveryContent) != content {
 		t.Fatalf("delivery content = %q, want %q", o3.DeliveryContent, content)
 	}
-	// 买家通知已触发（SendPaid 收到带发货内容的订单）
-	if rec.PaidCount() == 0 {
-		t.Fatal("SendPaid should be triggered on manual deliver")
-	}
+	// 买家通知已触发（SendPaid 收到带发货内容的订单；异步发送，轮询等待）
+	testutil.WaitFor(t, 2*time.Second, func() bool { return rec.PaidCount() > 0 }, "SendPaid should be triggered on manual deliver")
 	last := rec.Paid[len(rec.Paid)-1]
 	if last.DeliveryContent != content {
 		t.Fatalf("SendPaid order delivery_content = %q", last.DeliveryContent)

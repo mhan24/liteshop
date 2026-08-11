@@ -19,6 +19,7 @@
 - 字体栈改为 Inter 优先 + 全局 `font-feature-settings: 'calt'`（Wise 排版特征）
 - 图标库从 `@element-plus/icons-vue` 换成官方新包 **`@lucide/vue`**（原 lucide-vue-next 已弃用），彻底移除 Element 相关依赖
 - 清理 eslint 配置中对已删除自动生成文件的 ignore 条目；代码中不再残留任何 Element Plus 引用（`npm audit` 仍为 AGENTS.md 记录的 js-yaml 构建期基线告警）
+- 测试修复：`TestManualDeliveryFlow` 的 SendPaid 断言改为轮询等待（人工发货通知为异步发送，原即时断言在慢速机器上必现失败）
 
 ## v0.2.1（2026-08-11）— 新增 HashPay 支付网关
 
