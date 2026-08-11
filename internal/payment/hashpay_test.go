@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -231,9 +232,47 @@ func TestHashPayCreateTransaction(t *testing.T) {
 	}
 }
 
-func TestHashPayCancelIsNoop(t *testing.T) {
-	gw := NewHashPay("https://pay.example.com", "m", "key", "USD")
-	if err := gw.CancelTransaction("any"); err != nil {
-		t.Fatalf("cancel should be no-op: %v", err)
+func TestHashPayCancelQueriesStatus(t *testing.T) {
+	privatePEM, _ := newHashPayTestKeys(t)
+	// pending：取消等待 HashPay 到期回调（nil）。
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/order/hp-1" || r.Method != http.MethodGet {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("X-Merchant-Id") == "" || r.Header.Get("X-Signature") == "" {
+			t.Fatal("signature headers missing on cancel query")
+		}
+		_, _ = w.Write([]byte(`{"status":"pending"}`))
+	}))
+	defer srv.Close()
+	gw := NewHashPay(srv.URL, "merchant-1", privatePEM, "USD")
+	if err := gw.CancelTransaction("hp-1"); err != nil {
+		t.Fatalf("pending cancel should be nil: %v", err)
+	}
+
+	// paid：取消与付款竞态。
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"paid"}`))
+	}))
+	defer srv2.Close()
+	gw2 := NewHashPay(srv2.URL, "merchant-1", privatePEM, "USD")
+	if err := gw2.CancelTransaction("hp-2"); !errors.Is(err, ErrHashPayAlreadyPaid) {
+		t.Fatalf("paid cancel error = %v, want ErrHashPayAlreadyPaid", err)
+	}
+
+	// 网关返回错误。
+	srv3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"key":"errors.order_not_found"}}`, http.StatusNotFound)
+	}))
+	defer srv3.Close()
+	gw3 := NewHashPay(srv3.URL, "merchant-1", privatePEM, "USD")
+	if err := gw3.CancelTransaction("hp-3"); err == nil {
+		t.Fatal("gateway error should propagate")
+	}
+
+	// 未配置。
+	empty := NewHashPay("https://pay.example.com", "", "", "USD")
+	if err := empty.CancelTransaction("hp-4"); err != ErrGatewayNotConfigured {
+		t.Fatalf("unconfigured cancel error = %v", err)
 	}
 }

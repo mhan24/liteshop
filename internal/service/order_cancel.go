@@ -1,11 +1,13 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"shop/internal/events"
 	"shop/internal/models"
+	"shop/internal/payment"
 )
 
 // ExpireStale 清理长时间停留 created / waiting_payment 的订单（释放卡密并回滚优惠券）。
@@ -96,6 +98,23 @@ func (s *OrderService) cancelGatewayTx(orderID int64) {
 		gateway = "bepusdt"
 	}
 	go func(gw, tradeID string) {
-		_ = s.payFn(gw).CancelTransaction(tradeID)
+		err := s.payFn(gw).CancelTransaction(tradeID)
+		if gw != "hashpay" {
+			return
+		}
+		// HashPay 无商户取消接口：取消/过期时主动查询订单状态，
+		// 检测"取消与付款竞态"并记录，其余状态等待 HashPay 到期回调兜底。
+		switch {
+		case err == nil:
+			_ = s.repo.AddLog(orderID, "gateway_cancel", "HashPay 无取消接口：已确认未支付，等待 HashPay 到期回调", "", "", 0)
+		case errors.Is(err, payment.ErrHashPayAlreadyPaid):
+			msg := "HashPay 订单在取消/过期时已支付，资金可能已到账（order=" + o.OrderNo + ", hashpay_order=" + tradeID + "），请人工核对"
+			_ = s.repo.AddLog(orderID, "gateway_cancel_race", msg, "", "", 0)
+			if s.SystemError != nil {
+				s.SystemError(msg)
+			}
+		default:
+			_ = s.repo.AddLog(orderID, "gateway_cancel_check_failed", "HashPay 取消确认失败: "+err.Error(), "", "", 0)
+		}
 	}(gateway, o.TradeID)
 }

@@ -37,6 +37,7 @@ type OrderService struct {
 	SendPaid          func(order models.Order, cards []models.Card)
 	SendLinks         func(contact string, links []string) error
 	LowStockThreshold func() int
+	SystemError       func(message string) // 系统异常告警（取消/过期发现网关竞态等）
 }
 
 // BusinessError 表示可安全展示给买家的业务错误（如券码无效、库存不足）。

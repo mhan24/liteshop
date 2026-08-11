@@ -121,7 +121,7 @@ Order (buyer picks gateway) → lock cards (atomic) → create transaction (paym
   → write outbox in the same transaction → worker sends delivery notification (mail/Telegram/Webhook) → cards shown
 ```
 
-- Cancel / expire: release stock + call the gateway `cancel-transaction` (atomic);
+- Cancel / expire: release stock + close the gateway transaction (BEpusdt calls `cancel-transaction`; **HashPay has no merchant cancel API** — on cancel we proactively query the order status, wait for HashPay's expiry callback if unpaid, and alert the admin immediately if a cancel/pay race is detected (already paid); late callbacks never mis-deliver);
 - Transaction boundaries: checkout is a single transaction (create order + lock cards + decrement stock); failures atomically mark `payment_failed` and release cards; payment success is a single transaction and events/mail are sent **only after COMMIT**;
 - Dual gateways: each order records the chosen gateway, `processed_events` idempotency keys are gateway-prefixed, and callback routes are independent (`/notify/bepusdt`, `/notify/hashpay`); adding a gateway (future USDT / Stripe / PayPal) only requires a new `Gateway` adapter;
 - **payment.log** records every creation/callback with request_id / trace_id.

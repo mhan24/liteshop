@@ -123,7 +123,7 @@ HTTP handler (internal/api)
   → 同事务写 outbox → worker 发卡通知（邮件/Telegram/Webhook）→ 前台显示卡密
 ```
 
-- 取消 / 过期：释放库存 + 调用网关 `cancel-transaction` 关闭交易（原子事务）；
+- 取消 / 过期：释放库存 + 关闭网关交易（BEpusdt 调 `cancel-transaction`；**HashPay 协议无商户取消接口**，取消时主动查询订单状态，未支付则等待 HashPay 到期回调兜底，若发现"取消与付款竞态"（已支付）立即告警管理员人工核对，迟到回调不会误发货）；
 - 事务边界：下单 = 单事务（建单 + 锁卡 + 扣库存），失败原子置 `payment_failed` 并释放卡密；支付成功 = 单事务（paid + 发卡），**COMMIT 后才发布事件/发邮件**；
 - 双网关并存：每个订单记录所选网关，`processed_events` 幂等键带网关前缀，回调路由各自独立（`/notify/bepusdt`、`/notify/hashpay`）；换网关（或未来其他 USDT / Stripe / PayPal）只需新增一个实现 `Gateway` 的适配器；
 - **payment.log** 记录每次创建/回调：订单号、金额、交易 ID、回调时间、结果 + request_id / trace_id。

@@ -37,6 +37,10 @@ type HashPay struct {
 // 编译期断言：HashPay 必须实现 Gateway。
 var _ Gateway = (*HashPay)(nil)
 
+// ErrHashPayAlreadyPaid 取消/过期时发现 HashPay 订单已支付（取消与付款竞态，
+// 资金可能已到 HashPay，需人工核对）。
+var ErrHashPayAlreadyPaid = errors.New("hashpay order already paid")
+
 func NewHashPay(baseURL, merchantID, privateKey, currency string) *HashPay {
 	return &HashPay{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
@@ -107,9 +111,54 @@ func (c *HashPay) CreateTransaction(in CreateInput) (string, string, error) {
 }
 
 // CancelTransaction 关闭交易。HashPay 协议未提供商户侧取消接口，订单过期
-// 由 HashPay 自身处理，这里返回 nil（调用方忽略结果）。
+// 由 HashPay 自身处理；这里主动查询订单状态以检测"取消与付款竞态"：
+// 已支付返回 ErrHashPayAlreadyPaid（调用方告警），其余状态等待 HashPay 到期回调兜底。
 func (c *HashPay) CancelTransaction(tradeID string) error {
+	if c.MerchantID == "" || c.PrivateKey == "" {
+		return ErrGatewayNotConfigured
+	}
+	if tradeID == "" {
+		return nil
+	}
+	status, err := c.QueryOrderStatus(tradeID)
+	if err != nil {
+		return fmt.Errorf("hashpay cancel check: %w", err)
+	}
+	if status == "paid" {
+		return ErrHashPayAlreadyPaid
+	}
 	return nil
+}
+
+// QueryOrderStatus 查询 HashPay 订单状态（GET /api/order/:orderId，签名时 body 为空）。
+// 返回 pending / paid / expired / invalid。
+func (c *HashPay) QueryOrderStatus(orderID string) (string, error) {
+	if c.MerchantID == "" || c.PrivateKey == "" {
+		return "", ErrGatewayNotConfigured
+	}
+	if orderID == "" {
+		return "", errors.New("hashpay order id is empty")
+	}
+	req, err := c.signedRequest(http.MethodGet, "/api/order/"+orderID, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return "", fmt.Errorf("decode hashpay order status: %w; body=%s", err, truncate(string(respBody)))
+	}
+	if resp.StatusCode != http.StatusOK || out.Status == "" {
+		return "", fmt.Errorf("hashpay query order failed: status=%d body=%s", resp.StatusCode, truncate(string(respBody)))
+	}
+	return out.Status, nil
 }
 
 // VerifyCallback 解密并校验 HashPay 回调信封（RSA-OAEP-256+A256GCM），

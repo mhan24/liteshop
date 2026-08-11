@@ -16,6 +16,7 @@
 - 支付网关改为**并存启用**：后台可同时启用 BEpusdt 与 HashPay（`payment_gateway` 存逗号分隔列表，兼容存量单值），前台商品页展示**支付方式选择**（BEpusdt 网络支付 / HashPay 加密支付）
 - 订单新增 `payment_gateway` 列（迁移 027）记录所选网关；回调路由各自独立，`processed_events` 幂等键按网关前缀区分，取消/过期按订单网关关闭交易
 - 订单法币按所选网关记账（BEpusdt=CNY、HashPay=USD）；HashPay 订单以请求货币作为交易类型（对账用）
+- HashPay 取消/过期：协议无商户取消接口，改为主动查询订单状态（`GET /api/order/:orderId`）；未支付等待到期回调兜底，检测到"取消与付款竞态"（已支付）记录订单日志并触发系统异常告警，迟到回调不会误发货
 
 ### 测试与文档
 

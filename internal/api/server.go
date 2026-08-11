@@ -92,6 +92,7 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 	keyRepo := repository.NewKeyRepository(database)
 	s.orders = service.NewOrderService(orderRepo, s.paymentGateway, s.settings.PaymentServiceConfig)
 	s.orders.SendPaid = notifier.SendPaid
+	s.orders.SystemError = notifier.NotifySystemError
 	// 领域事件 → 消费者扇出（每个消费者独立 goroutine + panic 隔离；
 	// service 只发布类型化事件，不接触 bus；直接事件 + outbox 共用同一分发器）。
 	dispatch := events.NewFanout(
