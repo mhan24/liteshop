@@ -1413,12 +1413,22 @@ paths:
                 gateway_bepusdt_desc:
                   type: string
                   description: BEpusdt 前台简介（留空回退默认）
+                gateway_bepusdt_priority:
+                  type: integer
+                  minimum: -1
+                  maximum: 99
+                  description: BEpusdt 优先级（默认 0，-1 最高）
                 gateway_hashpay_name:
                   type: string
                   description: HashPay 前台显示名称（留空回退默认）
                 gateway_hashpay_desc:
                   type: string
                   description: HashPay 前台简介（留空回退默认）
+                gateway_hashpay_priority:
+                  type: integer
+                  minimum: -1
+                  maximum: 99
+                  description: HashPay 优先级（默认 1）
       responses:
         '200':
           description: ok

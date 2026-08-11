@@ -236,6 +236,41 @@ func TestSettingsServiceGatewayMeta(t *testing.T) {
 	}
 }
 
+// TestSettingsServiceGatewayPriority 网关优先级排序：数值越小越靠前，默认 bepusdt 第一。
+func TestSettingsServiceGatewayPriority(t *testing.T) {
+	st := newStubSettingsStore()
+	svc := NewSettingsService(st, nil, config.Config{})
+	if err := svc.SavePayment(map[string]any{"payment_gateway": "bepusdt,hashpay"}); err != nil {
+		t.Fatalf("enable dual gateways: %v", err)
+	}
+	// 默认：bepusdt=0、hashpay=1 → bepusdt 第一，主网关 bepusdt。
+	enabled := svc.EnabledGateways()
+	if len(enabled) != 2 || enabled[0] != "bepusdt" || enabled[1] != "hashpay" {
+		t.Fatalf("default order = %v, want [bepusdt hashpay]", enabled)
+	}
+	if svc.GatewayName() != "bepusdt" {
+		t.Fatalf("default primary = %q, want bepusdt", svc.GatewayName())
+	}
+	// HashPay 优先级 -1（最高）→ 排到最前，主网关变为 hashpay。
+	if err := svc.SavePayment(map[string]any{"gateway_hashpay_priority": "-1"}); err != nil {
+		t.Fatalf("save hashpay priority: %v", err)
+	}
+	enabled = svc.EnabledGateways()
+	if len(enabled) != 2 || enabled[0] != "hashpay" || enabled[1] != "bepusdt" {
+		t.Fatalf("priority order = %v, want [hashpay bepusdt]", enabled)
+	}
+	if svc.GatewayName() != "hashpay" {
+		t.Fatalf("primary after priority = %q, want hashpay", svc.GatewayName())
+	}
+	// 非法优先级（越界）不保存。
+	if err := svc.SavePayment(map[string]any{"gateway_bepusdt_priority": "100"}); err != nil {
+		t.Fatalf("save invalid priority: %v", err)
+	}
+	if svc.gatewayPriority("bepusdt") == 100 {
+		t.Fatal("out-of-range priority must not be saved")
+	}
+}
+
 // TestSettingsServiceSaveNotifyWebhookURL 非法 webhook_url 应报错；合法 http(s) 可保存。
 func TestSettingsServiceSaveNotifyWebhookURL(t *testing.T) {
 	st := newStubSettingsStore()

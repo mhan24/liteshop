@@ -1392,8 +1392,10 @@ func (s *Server) apiAdminSettings(w http.ResponseWriter, r *http.Request) {
 		"hashpay_notify_url":       hashpayNotifyURL,
 		"gateway_bepusdt_name":     s.settings.Get("gateway_bepusdt_name"),
 		"gateway_bepusdt_desc":     s.settings.Get("gateway_bepusdt_desc"),
+		"gateway_bepusdt_priority": s.settings.Get("gateway_bepusdt_priority"),
 		"gateway_hashpay_name":     s.settings.Get("gateway_hashpay_name"),
 		"gateway_hashpay_desc":     s.settings.Get("gateway_hashpay_desc"),
+		"gateway_hashpay_priority": s.settings.Get("gateway_hashpay_priority"),
 	})
 }
 

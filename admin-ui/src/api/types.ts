@@ -1816,10 +1816,14 @@ export interface paths {
                         gateway_bepusdt_name?: string;
                         /** @description BEpusdt 前台简介（留空回退默认） */
                         gateway_bepusdt_desc?: string;
+                        /** @description BEpusdt 优先级（默认 0，-1 最高） */
+                        gateway_bepusdt_priority?: number;
                         /** @description HashPay 前台显示名称（留空回退默认） */
                         gateway_hashpay_name?: string;
                         /** @description HashPay 前台简介（留空回退默认） */
                         gateway_hashpay_desc?: string;
+                        /** @description HashPay 优先级（默认 1） */
+                        gateway_hashpay_priority?: number;
                     };
                 };
             };

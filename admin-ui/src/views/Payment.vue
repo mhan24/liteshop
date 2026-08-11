@@ -14,6 +14,9 @@
         <el-form-item :label="t('payment.gatewayDesc')"
           ><el-input v-model="form.gateway_bepusdt_desc" type="textarea" :rows="2" :maxlength="200"
         /></el-form-item>
+        <el-form-item :label="t('payment.gatewayPriority')"
+          ><el-input-number v-model="form.gateway_bepusdt_priority" :min="-1" :max="99"
+        /></el-form-item>
         <el-form-item :label="t('payment.baseUrl')"><el-input v-model="form.bepusdt_base_url" /></el-form-item>
         <el-form-item :label="t('payment.apiToken')"
           ><el-input
@@ -42,6 +45,9 @@
         /></el-form-item>
         <el-form-item :label="t('payment.gatewayDesc')"
           ><el-input v-model="form.gateway_hashpay_desc" type="textarea" :rows="2" :maxlength="200"
+        /></el-form-item>
+        <el-form-item :label="t('payment.gatewayPriority')"
+          ><el-input-number v-model="form.gateway_hashpay_priority" :min="-1" :max="99"
         /></el-form-item>
         <el-form-item :label="t('payment.hashpayBaseUrl')"><el-input v-model="form.hashpay_base_url" /></el-form-item>
         <el-form-item :label="t('payment.hashpayMerchantId')"><el-input v-model="form.hashpay_merchant_id" /></el-form-item>
@@ -98,6 +104,14 @@ onMounted(async () => {
     form.value = { ...data, payment_gateway: gateways.join(',') }
     enabled.bepusdt = gateways.includes('bepusdt')
     enabled.hashpay = gateways.includes('hashpay')
+    form.value.gateway_bepusdt_priority =
+      form.value.gateway_bepusdt_priority === undefined || form.value.gateway_bepusdt_priority === ''
+        ? 0
+        : Number(form.value.gateway_bepusdt_priority)
+    form.value.gateway_hashpay_priority =
+      form.value.gateway_hashpay_priority === undefined || form.value.gateway_hashpay_priority === ''
+        ? 1
+        : Number(form.value.gateway_hashpay_priority)
     form.value.bepusdt_api_token = ''
     form.value.hashpay_private_key = ''
   } finally {

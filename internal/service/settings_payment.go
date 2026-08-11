@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -26,9 +27,9 @@ func (s *SettingsService) TurnstileSiteKey() string {
 // PaymentConfig 合并数据库配置与启动默认值，返回完整支付配置。
 func (s *SettingsService) PaymentConfig() config.Config {
 	cfg := s.cfg
-	// payment_gateway 为逗号分隔的启用网关列表（如 "bepusdt,hashpay"）。
-	// 存量单值（"bepusdt" / "hashpay"）直接兼容；首位作为主网关（订单默认）。
-	enabled := EnabledGatewaysFrom(s.Get("payment_gateway"))
+	// payment_gateway 为逗号分隔的启用网关列表（如 "bepusdt,hashpay"），
+	// 展示顺序按各网关优先级排序（数值越小越靠前），首位作为主网关（订单默认）。
+	enabled := s.EnabledGateways()
 	cfg.EnabledGateways = enabled
 	if len(enabled) > 0 {
 		cfg.PaymentGateway = enabled[0]
@@ -114,9 +115,32 @@ func (s *SettingsService) notifyURLFor(cfg config.Config, gateway string) string
 	return ""
 }
 
-// EnabledGateways 返回启用的支付网关列表（bepusdt / hashpay）。
+// EnabledGateways 返回启用的支付网关列表，按优先级排序（数值越小越靠前；
+// -1 最高，0 为常规第一）。未配置优先级时默认 bepusdt=0、hashpay=1。
 func (s *SettingsService) EnabledGateways() []string {
-	return EnabledGatewaysFrom(s.Get("payment_gateway"))
+	enabled := EnabledGatewaysFrom(s.Get("payment_gateway"))
+	sort.SliceStable(enabled, func(i, j int) bool {
+		return s.gatewayPriority(enabled[i]) < s.gatewayPriority(enabled[j])
+	})
+	return enabled
+}
+
+// gatewayPriority 返回网关优先级（后台可配置；越小越靠前）。
+func (s *SettingsService) gatewayPriority(gateway string) int {
+	if gateway == "hashpay" {
+		if v := s.Get("gateway_hashpay_priority"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				return n
+			}
+		}
+		return 1 // 默认排在 bepusdt 之后
+	}
+	if v := s.Get("gateway_bepusdt_priority"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0 // 默认 bepusdt 第一
 }
 
 // GatewayEnabled 判断指定网关是否启用。
@@ -367,6 +391,14 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 				cleaned = string([]rune(cleaned)[:200])
 			}
 			_ = s.Set(field, cleaned)
+		}
+	}
+	// 网关优先级（越小越靠前；-1 最高，0 为常规第一，默认 bepusdt=0 / hashpay=1）。
+	for _, field := range []string{"gateway_bepusdt_priority", "gateway_hashpay_priority"} {
+		if v, ok := input[field]; ok {
+			if n, err := strconv.Atoi(strings.TrimSpace(str(v))); err == nil && n >= -1 && n <= 99 {
+				_ = s.Set(field, strconv.Itoa(n))
+			}
 		}
 	}
 	return nil
