@@ -30,8 +30,6 @@ jobs:
         run: |
           npm ci
           npm run build
-          mkdir -p ../internal/api/admin-ui
-          cp -r dist/* ../internal/api/admin-ui/
 
       - name: Build storefront
         working-directory: storefront

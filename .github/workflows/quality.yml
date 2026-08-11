@@ -32,10 +32,6 @@ jobs:
           git diff --exit-code -- src/api/types.ts
       - name: Build
         run: npm run build
-      - name: Copy admin bundle into Go embed dir
-        run: |
-          mkdir -p ../internal/api/admin-ui
-          cp -r dist/* ../internal/api/admin-ui/
 
       - name: Upload admin bundle
         uses: actions/upload-artifact@v4
