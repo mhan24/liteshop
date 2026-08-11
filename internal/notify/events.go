@@ -150,7 +150,7 @@ func (n *Notifier) SendTestEvent(event, channel string) error {
 	switch channel {
 	case "telegram":
 		if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
-			return errors.New("Telegram 未配置")
+			return errors.New("telegram 未配置")
 		}
 		return n.sendTelegramWithConfig(cfg, "[TEST] ["+site+"] "+text)
 	case "mail":

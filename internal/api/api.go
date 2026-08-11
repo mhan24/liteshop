@@ -111,17 +111,6 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/admin/coupons/{id}/delete", s.requireRole(models.RoleOperator, http.HandlerFunc(s.apiAdminCouponDelete)))
 }
 
-func faqJSON(faq []models.FAQItem) string {
-	if len(faq) == 0 {
-		return ""
-	}
-	raw, err := json.Marshal(faq)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
-}
-
 func productJSON(p models.Product) map[string]any {
 	faq := []map[string]string{}
 	for _, f := range p.FAQ {

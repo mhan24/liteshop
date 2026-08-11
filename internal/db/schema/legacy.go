@@ -49,19 +49,6 @@ func ensureAdminColumns(db *sql.DB) error {
 	return nil
 }
 
-// addColumnIfMissing 仅当列不存在时执行 ALTER，保证迁移幂等。
-func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
-	exists, err := columnExists(db, table, column)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = db.Exec(ddl)
-	return err
-}
-
 func rebuildAdminsTable(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {

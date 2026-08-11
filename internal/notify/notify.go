@@ -282,7 +282,7 @@ func (n *Notifier) SendOrderLinks(to string, links []string) error {
 func (n *Notifier) SendTestTelegram() error {
 	cfg := n.CurrentConfig()
 	if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
-		return errors.New("Telegram 未配置")
+		return errors.New("telegram 未配置")
 	}
 	return n.sendTelegramWithConfig(cfg, "发卡系统 Telegram 测试")
 }
