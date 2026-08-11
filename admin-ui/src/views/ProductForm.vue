@@ -1,46 +1,49 @@
 <template>
   <PageCard :title="isEdit ? t('products.edit') : t('products.new')" :loading="loading">
-    <div class="max-w-2xl space-y-4">
+    <div class="max-w-2xl space-y-5">
       <FormField :label="t('products.name')" required>
-        <input v-model="form.name" class="input input-bordered w-full" />
+        <Input v-model="form.name" />
       </FormField>
 
       <FormField :label="t('products.priceCny')" required>
-        <input v-model.number="form.price" type="number" step="0.01" min="0.01" class="input input-bordered w-full" />
+        <Input v-model.number="form.price" type="number" step="0.01" min="0.01" />
       </FormField>
 
       <FormField :label="t('products.deliveryType')" :hint="t('products.manualDeliveryHint')">
-        <select v-model="form.delivery_type" class="select select-bordered w-full">
-          <option value="auto">{{ t('products.autoDelivery') }}</option>
-          <option value="manual">{{ t('products.manualDelivery') }}</option>
-        </select>
+        <Select v-model="form.delivery_type">
+          <SelectTrigger class="w-full">
+            <SelectValue :placeholder="t('products.deliveryType')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">{{ t('products.autoDelivery') }}</SelectItem>
+            <SelectItem value="manual">{{ t('products.manualDelivery') }}</SelectItem>
+          </SelectContent>
+        </Select>
       </FormField>
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <FormField :label="t('products.minQty')">
-          <input v-model.number="form.min_qty" type="number" min="1" class="input input-bordered w-full" />
+          <Input v-model.number="form.min_qty" type="number" min="1" />
         </FormField>
         <FormField :label="t('products.maxQty')">
-          <input v-model.number="form.max_qty" type="number" min="1" class="input input-bordered w-full" />
+          <Input v-model.number="form.max_qty" type="number" min="1" />
         </FormField>
         <FormField :label="t('products.cost')">
-          <input v-model.number="form.cost" type="number" step="0.01" min="0" class="input input-bordered w-full" />
+          <Input v-model.number="form.cost" type="number" step="0.01" min="0" />
         </FormField>
       </div>
 
       <FormField :label="t('products.wholesale')">
         <div class="w-full space-y-2">
           <div v-for="(tier, idx) in form.wholesale" :key="idx" class="flex flex-wrap items-center gap-2">
-            <input v-model.number="tier.min_qty" type="number" min="2" class="input input-bordered w-28" />
-            <input v-model.number="tier.discount" type="number" min="1" max="99" class="input input-bordered w-28" />
-            <span class="text-sm opacity-60">%</span>
-            <button class="btn btn-ghost btn-error btn-sm" @click="removeWholesale(idx)">
+            <Input v-model.number="tier.min_qty" type="number" min="2" class="w-28" />
+            <Input v-model.number="tier.discount" type="number" min="1" max="99" class="w-28" />
+            <span class="text-sm text-muted-foreground">%</span>
+            <Button variant="ghost" size="sm" class="text-destructive" @click="removeWholesale(idx)">
               {{ t('site.delete') }}
-            </button>
+            </Button>
           </div>
-          <button class="btn btn-outline btn-primary btn-sm" @click="addWholesale">
-            {{ t('products.addWholesale') }}
-          </button>
+          <Button variant="outline" size="sm" @click="addWholesale">{{ t('products.addWholesale') }}</Button>
         </div>
       </FormField>
 
@@ -50,47 +53,49 @@
 
       <FormField :label="t('products.faq')">
         <div class="w-full space-y-3">
-          <div v-for="(item, idx) in form.faq" :key="idx" class="space-y-2 rounded-lg bg-base-200/60 p-3">
-            <input v-model="item.q" class="input input-bordered w-full" :placeholder="t('products.faqQ')" />
-            <textarea v-model="item.a" class="textarea textarea-bordered w-full" rows="2" :placeholder="t('products.faqA')" />
-            <button class="btn btn-ghost btn-error btn-sm" @click="removeFaq(idx)">{{ t('site.delete') }}</button>
+          <div v-for="(item, idx) in form.faq" :key="idx" class="space-y-2 rounded-lg border bg-muted/30 p-3">
+            <Input v-model="item.q" :placeholder="t('products.faqQ')" />
+            <Textarea v-model="item.a" rows="2" :placeholder="t('products.faqA')" />
+            <Button variant="ghost" size="sm" class="text-destructive" @click="removeFaq(idx)">
+              {{ t('site.delete') }}
+            </Button>
           </div>
-          <button class="btn btn-outline btn-primary btn-sm" @click="addFaq">{{ t('products.addFaq') }}</button>
+          <Button variant="outline" size="sm" @click="addFaq">{{ t('products.addFaq') }}</Button>
         </div>
       </FormField>
 
       <FormField :label="t('products.imageUrl')" :hint="t('products.imageUrlPlaceholder')">
-        <input v-model="form.image_url" class="input input-bordered w-full" />
-        <div class="mt-2 h-32 w-32 border border-base-300 bg-base-200 p-1">
+        <Input v-model="form.image_url" />
+        <div class="mt-2 h-32 w-32 overflow-hidden rounded-lg border bg-muted">
           <ProductImage :src="form.image_url" :fallback="DEFAULT_IMAGE" />
         </div>
       </FormField>
 
       <FormField :label="t('products.categoryPlaceholder')">
-        <input v-model="form.category" class="input input-bordered w-full" />
+        <Input v-model="form.category" />
       </FormField>
 
       <FormField :label="t('products.sort')">
-        <input v-model.number="form.sort_order" type="number" min="0" class="input input-bordered w-full" />
+        <Input v-model.number="form.sort_order" type="number" min="0" />
       </FormField>
 
       <div class="flex items-center gap-6">
-        <label class="flex cursor-pointer items-center gap-2">
-          <input v-model="pinned" type="checkbox" class="checkbox checkbox-primary checkbox-sm" />
-          <span class="text-sm">{{ t('products.pinned') }}</span>
-        </label>
-        <label class="flex cursor-pointer items-center gap-2">
-          <input v-model="active" type="checkbox" class="checkbox checkbox-primary checkbox-sm" />
-          <span class="text-sm">{{ t('products.onSale') }}</span>
-        </label>
+        <div class="flex items-center gap-2">
+          <Checkbox id="pinned" :checked="pinned" @update:checked="pinned = $event" />
+          <Label for="pinned" class="text-sm">{{ t('products.pinned') }}</Label>
+        </div>
+        <div class="flex items-center gap-2">
+          <Checkbox id="active" :checked="active" @update:checked="active = $event" />
+          <Label for="active" class="text-sm">{{ t('products.onSale') }}</Label>
+        </div>
       </div>
 
       <div class="flex items-center gap-2 pt-2">
-        <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="save">
-          <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+        <Button :disabled="saving" @click="save">
+          <Loader2 v-if="saving" class="animate-spin" />
           {{ t('common.save') }}
-        </button>
-        <button class="btn btn-ghost" @click="$router.back()">{{ t('common.back') }}</button>
+        </Button>
+        <Button variant="ghost" @click="$router.back()">{{ t('common.back') }}</Button>
       </div>
     </div>
   </PageCard>
@@ -100,10 +105,17 @@
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { Loader2 } from '@lucide/vue'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { api } from '@/api'
 import PageCard from '@/components/PageCard.vue'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import FormField from '@/components/ui/FormField.vue'
 import ProductImage from '@/components/ui/ProductImage.vue'
 import { toastError, toastSuccess, toastWarning } from '@/components/ui/toast'

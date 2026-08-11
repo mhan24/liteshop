@@ -1,39 +1,54 @@
 <template>
   <div class="relative">
-    <div v-if="loading" class="absolute inset-0 z-10 flex items-center justify-center rounded-box bg-base-100/70">
-      <span class="loading loading-spinner loading-lg text-primary"></span>
+    <div
+      v-if="loading"
+      class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/70"
+    >
+      <Loader2 class="h-6 w-6 animate-spin text-primary" />
     </div>
     <div class="overflow-x-auto">
-      <table class="table table-sm table-zebra">
-        <thead>
-          <tr>
-            <th
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead
               v-for="col in columns"
               :key="col.label"
               :style="col.width ? { width: col.width } : undefined"
               :class="alignClass(col.align)"
             >
               {{ col.label }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, i) in rows" :key="i">
-            <td v-for="col in columns" :key="col.label" :class="alignClass(col.align)">
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-for="(row, i) in rows" :key="i">
+            <TableCell v-for="col in columns" :key="col.label" :class="alignClass(col.align)">
               <slot v-if="col.slot" :name="col.slot" :row="row" :index="i">{{ cellText(col, row) }}</slot>
               <template v-else>{{ cellText(col, row) }}</template>
-            </td>
-          </tr>
-          <tr v-if="!rows.length && !loading">
-            <td :colspan="columns.length" class="py-10 text-center text-sm opacity-60">{{ emptyText }}</td>
-          </tr>
-        </tbody>
-      </table>
+            </TableCell>
+          </TableRow>
+          <TableRow v-if="!rows.length && !loading">
+            <TableCell :colspan="columns.length" class="h-24 text-center text-muted-foreground">
+              {{ emptyText }}
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { Loader2 } from '@lucide/vue'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+
 export interface DataColumn {
   label: string
   key?: string

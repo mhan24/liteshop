@@ -3,74 +3,79 @@
     <div class="mb-4 flex items-center justify-between gap-3">
       <h2 class="text-xl font-bold">{{ t('cards.title') }}</h2>
       <div class="flex items-center gap-2">
-        <button class="btn btn-outline btn-sm" @click="exportCsv">{{ t('cards.export') }}</button>
-        <button class="btn btn-ghost btn-sm" @click="$router.push('/products')">{{ t('cards.back') }}</button>
+        <Button variant="outline" size="sm" @click="exportCsv">{{ t('cards.export') }}</Button>
+        <Button variant="ghost" size="sm" @click="$router.push('/products')">{{ t('cards.back') }}</Button>
       </div>
     </div>
 
-    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-      <div class="card-body">
-        <h3 class="font-semibold">{{ t('cards.import') }}</h3>
-        <textarea
+    <Card>
+      <CardHeader>
+        <CardTitle class="text-base">{{ t('cards.import') }}</CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-3">
+        <Textarea
           v-model="cardsText"
-          class="textarea textarea-bordered w-full font-mono"
+          class="font-mono"
           rows="6"
           placeholder="CARD-001&#10;CARD-002"
-        ></textarea>
-        <label class="flex cursor-pointer items-center gap-2">
-          <input v-model="dedupe" type="checkbox" class="checkbox checkbox-primary checkbox-sm" />
-          <span class="text-sm">{{ t('cards.dedupe') }}</span>
-        </label>
-        <div>
-          <button class="btn btn-primary btn-sm" :class="{ 'btn-disabled': importing }" @click="importCards">
-            <span v-if="importing" class="loading loading-spinner loading-xs"></span>
-            {{ t('cards.importBtn') }}
-          </button>
+        />
+        <div class="flex items-center gap-2">
+          <Checkbox id="dedupe" :checked="dedupe" @update:checked="dedupe = $event" />
+          <Label for="dedupe" class="text-sm">{{ t('cards.dedupe') }}</Label>
         </div>
-      </div>
-    </div>
+        <Button size="sm" :disabled="importing" @click="importCards">
+          <Loader2 v-if="importing" class="animate-spin" />
+          {{ t('cards.importBtn') }}
+        </Button>
+      </CardContent>
+    </Card>
 
-    <div class="card mt-4 bg-base-100 shadow-sm ring-1 ring-base-300">
-      <div class="card-body !p-0">
+    <Card class="mt-4">
+      <CardContent class="p-0">
         <DataTable :columns="columns" :rows="cards" :loading="loading" :empty-text="t('audit.empty')">
           <template #status="{ row }">
-            <span class="badge badge-sm" :class="statusBadgeClass(row.status)">{{ statusText(row.status) }}</span>
+            <Badge :class="statusBadgeClass(row.status)">{{ statusText(row.status) }}</Badge>
           </template>
           <template #reservedOrder="{ row }">{{ row.reserved_order || '-' }}</template>
           <template #soldOrder="{ row }">{{ row.sold_order || '-' }}</template>
           <template #createdAt="{ row }">{{ date(row.created_at) }}</template>
           <template #soldAt="{ row }">{{ date(row.sold_at) }}</template>
           <template #actions="{ row }">
-            <div v-if="canManage(row)" class="dropdown dropdown-end">
-              <div tabindex="0" role="button" class="btn btn-outline btn-primary btn-xs">
-                {{ t('common.actions') }}
-                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </div>
-              <ul tabindex="0" class="menu dropdown-content z-50 mt-1 w-44 rounded-box bg-base-100 p-2 shadow-lg ring-1 ring-base-300">
-                <li v-if="row.status !== 'available'">
-                  <a @click="onAction(row, 'available')">{{ t('cards.markAvailable') }}</a>
-                </li>
-                <li v-if="row.status !== 'locked'">
-                  <a @click="onAction(row, 'locked')">{{ t('cards.markLocked') }}</a>
-                </li>
-                <li v-if="row.status !== 'sold'">
-                  <a @click="onAction(row, 'sold')">{{ t('cards.markSold') }}</a>
-                </li>
-                <li v-if="row.status !== 'disabled'">
-                  <a @click="onAction(row, 'disabled')">{{ t('cards.markDisabled') }}</a>
-                </li>
-                <li v-if="row.status === 'available'" class="mt-1 border-t border-base-300 pt-1">
-                  <a class="text-error" @click="onAction(row, 'delete')">{{ t('common.delete') }}</a>
-                </li>
-              </ul>
-            </div>
-            <span v-else class="text-sm opacity-50">{{ t('cards.orderBound') }}</span>
+            <DropdownMenu v-if="canManage(row)">
+              <DropdownMenuTrigger as-child>
+                <Button variant="outline" size="sm" class="h-7 px-2">
+                  {{ t('common.actions') }}
+                  <ChevronDown class="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" class="w-44">
+                <DropdownMenuItem v-if="row.status !== 'available'" @click="onAction(row, 'available')">
+                  {{ t('cards.markAvailable') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="row.status !== 'locked'" @click="onAction(row, 'locked')">
+                  {{ t('cards.markLocked') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="row.status !== 'sold'" @click="onAction(row, 'sold')">
+                  {{ t('cards.markSold') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="row.status !== 'disabled'" @click="onAction(row, 'disabled')">
+                  {{ t('cards.markDisabled') }}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator v-if="row.status === 'available'" />
+                <DropdownMenuItem
+                  v-if="row.status === 'available'"
+                  class="text-destructive"
+                  @click="onAction(row, 'delete')"
+                >
+                  {{ t('common.delete') }}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <span v-else class="text-sm text-muted-foreground">{{ t('cards.orderBound') }}</span>
           </template>
         </DataTable>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
@@ -78,7 +83,21 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { ChevronDown, Loader2 } from '@lucide/vue'
 import { api } from '@/api'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
 import { statusBadgeClass } from '@/utils/status'
 import { confirm } from '@/components/ui/confirm'

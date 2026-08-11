@@ -1,137 +1,145 @@
 <template>
   <div>
-    <h1 class="text-3xl font-extrabold text-base-content mb-1">{{ site?.title || 'LiteShop' }}</h1>
-    <p v-if="site?.subtitle" class="text-base-content/60 mb-4">{{ site.subtitle }}</p>
-    <div v-if="site?.announcement" class="alert alert-info text-sm mb-4 md-body">
+    <h1 class="mb-1 text-3xl font-extrabold">{{ site?.title || 'LiteShop' }}</h1>
+    <p v-if="site?.subtitle" class="mb-4 text-muted-foreground">{{ site.subtitle }}</p>
+    <div v-if="site?.announcement" class="mb-4 rounded-lg border bg-muted/50 p-3 text-sm md-body">
       <span v-html="renderMarkdown(site.announcement)"></span>
     </div>
 
-    <div class="card bg-base-100 shadow-sm mb-4">
-      <div class="card-body p-3 gap-2">
-        <form class="flex flex-wrap gap-2 items-center" @submit.prevent="submit">
-        <input
-          v-model="filters.q"
-          :placeholder="t('searchPlaceholder')"
-          class="input input-bordered input-sm flex-1 min-w-40"
-        />
-        <select v-model="filters.category" class="select select-bordered select-sm bg-base-100">
-          <option value="all">{{ t('allCategories') }}</option>
-          <option v-for="c in allCategories" :key="c" :value="c">{{ c }}</option>
-        </select>
-        <input
-          v-model="filters.min_price"
-          type="number"
-          step="0.01"
-          :placeholder="t('minPrice')"
-          class="input input-bordered input-sm w-24"
-        />
-        <span class="text-base-content/40 text-sm">-</span>
-        <input
-          v-model="filters.max_price"
-          type="number"
-          step="0.01"
-          :placeholder="t('maxPrice')"
-          class="input input-bordered input-sm w-24"
-        />
-        <button type="submit" class="btn btn-primary btn-sm">
-          {{ t('searchBtn') }}
-        </button>
-        <button
-          v-if="isFiltering"
-          type="button"
-          class="btn btn-ghost btn-sm text-base-content/60"
-          @click="reset"
-        >{{ t('resetFilter') }}</button>
+    <Card class="mb-4">
+      <CardContent class="space-y-3">
+        <form class="flex flex-wrap items-center gap-2" @submit.prevent="submit">
+          <Input
+            v-model="filters.q"
+            :placeholder="t('searchPlaceholder')"
+            class="min-w-40 flex-1"
+          />
+          <Select v-model="categoryFilter">
+            <SelectTrigger class="w-36">
+              <SelectValue :placeholder="t('allCategories')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{{ t('allCategories') }}</SelectItem>
+              <SelectItem v-for="c in allCategories" :key="c" :value="c">{{ c }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            v-model="filters.min_price"
+            type="number"
+            step="0.01"
+            :placeholder="t('minPrice')"
+            class="w-24"
+          />
+          <span class="text-sm text-muted-foreground">-</span>
+          <Input
+            v-model="filters.max_price"
+            type="number"
+            step="0.01"
+            :placeholder="t('maxPrice')"
+            class="w-24"
+          />
+          <Button size="sm" type="submit">{{ t('searchBtn') }}</Button>
+          <Button
+            v-if="isFiltering"
+            variant="ghost"
+            size="sm"
+            class="text-muted-foreground"
+            @click="reset"
+          >
+            {{ t('resetFilter') }}
+          </Button>
         </form>
         <div class="flex justify-end">
-        <div class="join">
-          <button
-            type="button"
-            :class="viewMode === 'grid' ? 'btn-active' : ''"
-            class="btn btn-sm join-item"
-            @click="setView('grid')"
-          >{{ t('viewGrid') }}</button>
-          <button
-            type="button"
-            :class="viewMode === 'list' ? 'btn-active' : ''"
-            class="btn btn-sm join-item"
-            @click="setView('list')"
-          >{{ t('viewList') }}</button>
+          <div class="flex items-center gap-1">
+            <Button
+              :variant="viewMode === 'grid' ? 'secondary' : 'ghost'"
+              size="sm"
+              @click="setView('grid')"
+            >
+              {{ t('viewGrid') }}
+            </Button>
+            <Button
+              :variant="viewMode === 'list' ? 'secondary' : 'ghost'"
+              size="sm"
+              @click="setView('list')"
+            >
+              {{ t('viewList') }}
+            </Button>
+          </div>
         </div>
-      </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
 
     <div v-for="cat in categories" :key="cat.name || cat.default_key" class="mt-6">
-      <h2 class="text-xl font-bold text-base-content mb-3">{{ catTitle(cat) }}</h2>
-      <div v-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div v-for="p in cat.products" :key="p.product.id" class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow">
-          <figure class="aspect-square w-full overflow-hidden bg-base-200 flex items-center justify-center">
-            <NuxtLink :to="productUrl(p.product)" class="block w-full h-full flex items-center justify-center">
-              <img
-                :src="imgSrc(p.product.image_url)"
-                :alt="p.product.name"
-                loading="lazy"
-                class="max-w-full max-h-full w-auto h-auto"
-              />
+      <h2 class="mb-3 text-xl font-bold">{{ catTitle(cat) }}</h2>
+      <div v-if="viewMode === 'grid'" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card v-for="p in cat.products" :key="p.product.id" class="transition hover:shadow-md">
+          <div class="flex aspect-square w-full items-center justify-center overflow-hidden bg-muted">
+            <NuxtLink :to="productUrl(p.product)" class="flex h-full w-full items-center justify-center">
+              <img :src="imgSrc(p.product.image_url)" :alt="p.product.name" loading="lazy" class="h-auto max-h-full w-auto max-w-full" />
             </NuxtLink>
-          </figure>
-          <div class="card-body p-4 gap-1">
-            <h3 class="font-semibold text-lg leading-snug"><NuxtLink :to="productUrl(p.product)" class="hover:text-primary">{{ p.product.name }}</NuxtLink></h3>
-            <p class="text-base-content/60 text-sm line-clamp-2">{{ markdownText(p.product.description) }}</p>
-            <p class="text-2xl font-bold text-primary mt-2">{{ money(p.product.price_cents) }}</p>
-            <p class="text-base-content/60 text-sm">{{ t('stock') }} {{ stockLabel(p.available) }}</p>
-            <div class="card-actions mt-2">
-              <NuxtLink v-if="p.available !== 0" :to="productUrl(p.product)" class="btn btn-primary btn-sm normal-case">{{ t('buyNow') }}</NuxtLink>
-              <span v-else class="btn btn-disabled btn-sm normal-case">{{ t('soldOut') }}</span>
-            </div>
           </div>
-        </div>
-      </div>
-      <div v-else class="card bg-base-100 shadow-sm divide-y divide-base-200">
-        <div v-for="p in cat.products" :key="p.product.id" class="flex items-center gap-4 p-4">
-          <NuxtLink :to="productUrl(p.product)" class="shrink-0">
-            <div class="w-16 h-16 rounded-lg bg-base-200 overflow-hidden flex items-center justify-center">
-              <img
-                :src="imgSrc(p.product.image_url)"
-                :alt="p.product.name"
-                loading="lazy"
-                class="max-w-full max-h-full w-auto h-auto"
-              />
-            </div>
-          </NuxtLink>
-          <div class="flex-1 min-w-0">
-            <h3 class="font-semibold truncate">
+          <CardContent class="space-y-1">
+            <h3 class="text-lg font-semibold leading-snug">
               <NuxtLink :to="productUrl(p.product)" class="hover:text-primary">{{ p.product.name }}</NuxtLink>
             </h3>
-            <p class="text-base-content/60 text-sm truncate mt-0.5">{{ markdownText(p.product.description) }}</p>
-          </div>
-          <div class="text-right shrink-0">
-            <p class="text-xl font-bold text-primary">{{ money(p.product.price_cents) }}</p>
-            <p class="text-base-content/60 text-xs">{{ t('stock') }} {{ stockLabel(p.available) }}</p>
-          </div>
-          <div class="shrink-0">
-            <NuxtLink
-              v-if="p.available !== 0"
-              :to="productUrl(p.product)"
-              class="btn btn-primary btn-sm normal-case"
-            >{{ t('buyNow') }}</NuxtLink>
-            <span v-else class="btn btn-disabled btn-sm normal-case">{{ t('soldOut') }}</span>
-          </div>
-        </div>
+            <p class="line-clamp-2 text-sm text-muted-foreground">{{ markdownText(p.product.description) }}</p>
+            <p class="mt-2 text-2xl font-bold text-primary">{{ money(p.product.price_cents) }}</p>
+            <p class="text-sm text-muted-foreground">{{ t('stock') }} {{ stockLabel(p.available) }}</p>
+            <div class="pt-2">
+              <Button as-child v-if="p.available !== 0" size="sm">
+                <NuxtLink :to="productUrl(p.product)">{{ t('buyNow') }}</NuxtLink>
+              </Button>
+              <Button v-else variant="secondary" size="sm" disabled>{{ t('soldOut') }}</Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
+      <Card v-else>
+        <CardContent class="divide-y p-0">
+          <div v-for="p in cat.products" :key="p.product.id" class="flex items-center gap-4 p-4">
+            <NuxtLink :to="productUrl(p.product)" class="shrink-0">
+              <div class="flex h-16 w-16 items-center justify-center overflow-hidden rounded-lg bg-muted">
+                <img :src="imgSrc(p.product.image_url)" :alt="p.product.name" loading="lazy" class="h-auto max-h-full w-auto max-w-full" />
+              </div>
+            </NuxtLink>
+            <div class="min-w-0 flex-1">
+              <h3 class="truncate font-semibold">
+                <NuxtLink :to="productUrl(p.product)" class="hover:text-primary">{{ p.product.name }}</NuxtLink>
+              </h3>
+              <p class="mt-0.5 truncate text-sm text-muted-foreground">{{ markdownText(p.product.description) }}</p>
+            </div>
+            <div class="shrink-0 text-right">
+              <p class="text-xl font-bold text-primary">{{ money(p.product.price_cents) }}</p>
+              <p class="text-xs text-muted-foreground">{{ t('stock') }} {{ stockLabel(p.available) }}</p>
+            </div>
+            <div class="shrink-0">
+              <Button as-child v-if="p.available !== 0" size="sm">
+                <NuxtLink :to="productUrl(p.product)">{{ t('buyNow') }}</NuxtLink>
+              </Button>
+              <Button v-else variant="secondary" size="sm" disabled>{{ t('soldOut') }}</Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
     <div v-if="pending" class="flex justify-center py-10">
-      <span class="loading loading-spinner loading-lg text-primary"></span>
+      <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
     </div>
-    <div v-else-if="!categories.length" class="card bg-base-100 shadow-sm">
-      <div class="card-body text-center text-base-content/60">{{ t('noProducts') }}</div>
-    </div>
+    <Card v-else-if="!categories.length">
+      <CardContent class="py-8 text-center text-muted-foreground">{{ t('noProducts') }}</CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { reactive, computed } from 'vue'
+import { Loader2 } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+
 const { t } = useI18n()
 const { money, stockText } = useSiteConfig()
 const api = useApi()
@@ -141,6 +149,7 @@ const { data: site } = await useAsyncData('site', () => api.get('/site'))
 
 const filters = reactive({ q: '', category: 'all', min_price: '', max_price: '' })
 const applied = reactive({ q: '', category: 'all', min_price: '', max_price: '' })
+const categoryFilter = ref('all')
 
 const { data, pending, refresh } = await useAsyncData('products', () =>
   api.get('/products', {
@@ -186,10 +195,12 @@ const isFiltering = computed(() =>
 )
 
 function submit() {
-  Object.assign(applied, { q: filters.q.trim(), category: filters.category, min_price: filters.min_price.trim(), max_price: filters.max_price.trim() })
+  filters.category = categoryFilter.value
+  Object.assign(applied, { q: filters.q.trim(), category: categoryFilter.value, min_price: filters.min_price.trim(), max_price: filters.max_price.trim() })
   refresh()
 }
 function reset() {
+  categoryFilter.value = 'all'
   Object.assign(filters, { q: '', category: 'all', min_price: '', max_price: '' })
   Object.assign(applied, { q: '', category: 'all', min_price: '', max_price: '' })
   refresh()

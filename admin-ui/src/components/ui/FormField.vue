@@ -1,16 +1,16 @@
 <template>
-  <div class="form-control w-full">
-    <label v-if="label" class="label pb-1 pt-0">
-      <span class="label-text font-medium">
-        {{ label }}<span v-if="required" class="text-error"> *</span>
-      </span>
-    </label>
+  <div class="w-full space-y-1.5">
+    <Label v-if="label" class="text-sm font-medium">
+      {{ label }}<span v-if="required" class="text-destructive"> *</span>
+    </Label>
     <slot />
-    <span v-if="hint" class="label-text-alt mt-1 opacity-60">{{ hint }}</span>
+    <p v-if="hint" class="text-xs text-muted-foreground">{{ hint }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
+import { Label } from '@/components/ui/label'
+
 withDefaults(
   defineProps<{
     label?: string

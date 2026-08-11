@@ -3,61 +3,62 @@
     <PageCard :title="t('account.title')" :loading="loading">
       <div class="max-w-md space-y-4">
         <FormField :label="t('account.username')" required>
-          <input v-model="form.username" class="input input-bordered w-full" />
+          <Input v-model="form.username" />
         </FormField>
         <FormField :label="t('account.currentPassword')" required>
-          <input v-model="form.current_password" type="password" class="input input-bordered w-full" />
+          <Input v-model="form.current_password" type="password" />
         </FormField>
         <FormField :label="t('account.newPassword')">
-          <input v-model="form.new_password" type="password" class="input input-bordered w-full" />
+          <Input v-model="form.new_password" type="password" />
         </FormField>
         <FormField :label="t('account.confirmPassword')">
-          <input v-model="form.confirm_password" type="password" class="input input-bordered w-full" />
+          <Input v-model="form.confirm_password" type="password" />
         </FormField>
-        <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="save">
-          <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+        <Button :disabled="saving" @click="save">
+          <Loader2 v-if="saving" class="animate-spin" />
           {{ t('common.save') }}
-        </button>
+        </Button>
       </div>
     </PageCard>
 
     <PageCard :title="t('account.totp')" :loading="totpLoading">
       <div v-if="!totp.enabled" class="max-w-md space-y-4">
-        <p class="text-sm opacity-70">{{ t('account.totpHint') }}</p>
-        <button class="btn btn-primary btn-sm" @click="generateTotp">{{ t('account.totpGenerate') }}</button>
+        <p class="text-sm text-muted-foreground">{{ t('account.totpHint') }}</p>
+        <Button size="sm" @click="generateTotp">{{ t('account.totpGenerate') }}</Button>
 
-        <div v-if="totp.secret" class="rounded-xl bg-base-200/70 p-4">
-          <div class="alert alert-info text-sm">
-            <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="16" x2="12" y2="12" />
-              <line x1="12" y1="8" x2="12.01" y2="8" />
-            </svg>
-            {{ t('account.totpScanHint') }}
-          </div>
-          <img v-if="qrDataUrl" :src="qrDataUrl" alt="TOTP QR" class="mt-3 h-48 w-48 rounded-lg border border-base-300 bg-white p-1" />
-          <p class="mt-2 text-sm opacity-70">
+        <div v-if="totp.secret" class="space-y-3 rounded-lg border bg-muted/30 p-4">
+          <Alert>
+            <Info class="h-4 w-4" />
+            <AlertDescription>{{ t('account.totpScanHint') }}</AlertDescription>
+          </Alert>
+          <img
+            v-if="qrDataUrl"
+            :src="qrDataUrl"
+            alt="TOTP QR"
+            class="h-48 w-48 rounded-lg border bg-white p-1"
+          />
+          <p class="text-sm text-muted-foreground">
             {{ t('account.totpSecret') }}: <code class="mono font-semibold">{{ totp.secret }}</code>
           </p>
-          <p class="mono mt-1 text-xs opacity-60">{{ otpauth }}</p>
-          <div class="mt-3 flex items-center gap-2">
-            <input v-model="totpCode" class="input input-bordered input-sm w-40" :placeholder="t('account.totpCodePlaceholder')" />
-            <button class="btn btn-primary btn-sm" :class="{ 'btn-disabled': totpSaving }" @click="enableTotp">
-              <span v-if="totpSaving" class="loading loading-spinner loading-xs"></span>
+          <p class="mono text-xs text-muted-foreground">{{ otpauth }}</p>
+          <div class="flex items-center gap-2">
+            <Input v-model="totpCode" class="w-40" :placeholder="t('account.totpCodePlaceholder')" />
+            <Button size="sm" :disabled="totpSaving" @click="enableTotp">
+              <Loader2 v-if="totpSaving" class="animate-spin" />
               {{ t('account.totpConfirm') }}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
 
       <div v-else class="max-w-md space-y-4">
-        <span class="badge badge-success">{{ t('account.totpEnabled') }}</span>
+        <Badge class="bg-emerald-500/15 text-emerald-700">{{ t('account.totpEnabled') }}</Badge>
         <div class="flex items-center gap-2">
-          <input v-model="disableCode" class="input input-bordered input-sm w-40" :placeholder="t('account.totpCodePlaceholder')" />
-          <button class="btn btn-error btn-outline btn-sm" :class="{ 'btn-disabled': totpSaving }" @click="disableTotp">
-            <span v-if="totpSaving" class="loading loading-spinner loading-xs"></span>
+          <Input v-model="disableCode" class="w-40" :placeholder="t('account.totpCodePlaceholder')" />
+          <Button variant="destructive" size="sm" :disabled="totpSaving" @click="disableTotp">
+            <Loader2 v-if="totpSaving" class="animate-spin" />
             {{ t('account.totpDisable') }}
-          </button>
+          </Button>
         </div>
       </div>
     </PageCard>
@@ -67,9 +68,14 @@
 <script setup lang="ts">
 import { reactive, ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Info, Loader2 } from '@lucide/vue'
 import QRCode from 'qrcode'
 import { api } from '@/api'
 import PageCard from '@/components/PageCard.vue'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import FormField from '@/components/ui/FormField.vue'
 import { toastError, toastSuccess, toastWarning } from '@/components/ui/toast'
 

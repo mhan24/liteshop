@@ -1,173 +1,171 @@
 <template>
   <div>
     <div v-if="loading" class="flex justify-center py-24">
-      <span class="loading loading-spinner loading-lg text-primary"></span>
+      <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
     </div>
 
     <template v-else>
-      <!-- 今日指标 -->
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-          <div class="card-body !p-5">
-            <div class="text-sm opacity-60">{{ t('dashboard.todayOrders') }}</div>
+        <Card>
+          <CardContent class="!py-5">
+            <div class="text-sm text-muted-foreground">{{ t('dashboard.todayOrders') }}</div>
             <div class="mt-1 text-3xl font-bold">{{ stats.today_orders || 0 }}</div>
-          </div>
-        </div>
-        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-          <div class="card-body !p-5">
-            <div class="text-sm opacity-60">{{ t('dashboard.todayRevenue') }}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent class="!py-5">
+            <div class="text-sm text-muted-foreground">{{ t('dashboard.todayRevenue') }}</div>
             <div class="mt-1 text-3xl font-bold">{{ revenue }}</div>
-            <div class="text-xs opacity-60">{{ currencyLabel }}</div>
-          </div>
-        </div>
-        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-          <div class="card-body !p-5">
-            <div class="text-sm opacity-60">{{ t('dashboard.todaySales') }}</div>
+            <div class="text-xs text-muted-foreground">{{ currencyLabel }}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent class="!py-5">
+            <div class="text-sm text-muted-foreground">{{ t('dashboard.todaySales') }}</div>
             <div class="mt-1 text-3xl font-bold">{{ stats.today_sales || 0 }}</div>
-          </div>
-        </div>
-        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-          <div class="card-body !p-5">
-            <div class="text-sm opacity-60">{{ t('dashboard.todayCards') }}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent class="!py-5">
+            <div class="text-sm text-muted-foreground">{{ t('dashboard.todayCards') }}</div>
             <div class="mt-1 text-3xl font-bold">{{ stats.today_paid_cards || 0 }}</div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
 
-      <!-- 待处理告警 -->
       <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-        <div class="card cursor-pointer bg-base-100 shadow-sm ring-1 ring-base-300 transition hover:ring-2 hover:ring-primary/50" @click="$router.push('/orders')">
-          <div class="card-body flex-row items-center gap-4 !py-5">
-            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-warning/15 text-warning">
+        <Card class="cursor-pointer transition hover:ring-2 hover:ring-ring" @click="$router.push('/orders')">
+          <CardContent class="flex items-center gap-4 !py-5">
+            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600">
               <Clock class="h-6 w-6" />
             </div>
             <div>
-              <div class="text-sm opacity-60">{{ t('dashboard.pendingOrders') }}</div>
+              <div class="text-sm text-muted-foreground">{{ t('dashboard.pendingOrders') }}</div>
               <div class="text-2xl font-bold">{{ stats.pending_orders || 0 }}</div>
             </div>
-          </div>
-        </div>
-        <div class="card cursor-pointer bg-base-100 shadow-sm ring-1 ring-base-300 transition hover:ring-2 hover:ring-error/50" @click="$router.push('/orders?status=payment_failed')">
-          <div class="card-body flex-row items-center gap-4 !py-5">
-            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-error/15 text-error">
+          </CardContent>
+        </Card>
+        <Card
+          class="cursor-pointer transition hover:ring-2 hover:ring-ring"
+          @click="$router.push('/orders?status=payment_failed')"
+        >
+          <CardContent class="flex items-center gap-4 !py-5">
+            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-red-500/15 text-red-600">
               <TriangleAlert class="h-6 w-6" />
             </div>
             <div>
-              <div class="text-sm opacity-60">{{ t('dashboard.paymentFailed') }}</div>
+              <div class="text-sm text-muted-foreground">{{ t('dashboard.paymentFailed') }}</div>
               <div class="text-2xl font-bold">{{ stats.payment_failed || 0 }}</div>
             </div>
-          </div>
-        </div>
-        <div class="card cursor-pointer bg-base-100 shadow-sm ring-1 ring-base-300 transition hover:ring-2 hover:ring-error/50" @click="$router.push('/orders?status=delivery_failed')">
-          <div class="card-body flex-row items-center gap-4 !py-5">
-            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-error/15 text-error">
+          </CardContent>
+        </Card>
+        <Card
+          class="cursor-pointer transition hover:ring-2 hover:ring-ring"
+          @click="$router.push('/orders?status=delivery_failed')"
+        >
+          <CardContent class="flex items-center gap-4 !py-5">
+            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-red-500/15 text-red-600">
               <XCircle class="h-6 w-6" />
             </div>
             <div>
-              <div class="text-sm opacity-60">{{ t('dashboard.deliveryFailed') }}</div>
+              <div class="text-sm text-muted-foreground">{{ t('dashboard.deliveryFailed') }}</div>
               <div class="text-2xl font-bold">{{ stats.delivery_failed || 0 }}</div>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <!-- 库存不足 -->
-        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-          <div class="card-body !pb-2">
-            <div class="flex items-center justify-between">
-              <h3 class="font-semibold">{{ t('dashboard.lowStock') }}</h3>
-              <span class="badge badge-error badge-sm">{{ stats.low_stock?.length || 0 }}</span>
-            </div>
-          </div>
-          <div class="card-body !pt-2">
+        <Card>
+          <CardHeader class="flex-row items-center justify-between">
+            <CardTitle class="text-base">{{ t('dashboard.lowStock') }}</CardTitle>
+            <Badge variant="destructive">{{ stats.low_stock?.length || 0 }}</Badge>
+          </CardHeader>
+          <CardContent>
             <DataTable
               :columns="lowStockColumns"
               :rows="stats.low_stock || []"
               :empty-text="t('dashboard.noLowStock')"
             >
               <template #stock="{ row }">
-                <span class="badge" :class="row.available === 0 ? 'badge-error' : 'badge-warning'">
+                <Badge :class="row.available === 0 ? 'bg-red-500/15 text-red-700' : 'bg-amber-500/15 text-amber-700'">
                   {{ row.available }}
-                </span>
+                </Badge>
               </template>
               <template #price="{ row }">{{ fmtMoney(row.price_cents) }}</template>
               <template #action="{ row }">
-                <button class="btn btn-ghost btn-xs" @click="$router.push('/products/' + row.id + '/cards')">
+                <Button variant="ghost" size="sm" class="h-7 px-2" @click="$router.push('/products/' + row.id + '/cards')">
                   {{ t('common.edit') }}
-                </button>
+                </Button>
               </template>
             </DataTable>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
-        <!-- 系统状态 -->
-        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-          <div class="card-body !pb-2">
-            <h3 class="font-semibold">{{ t('dashboard.systemStatus') }}</h3>
-          </div>
-          <div class="card-body !pt-2">
-            <dl class="divide-y divide-base-200 text-sm">
+        <Card>
+          <CardHeader>
+            <CardTitle class="text-base">{{ t('dashboard.systemStatus') }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl class="divide-y text-sm">
               <div class="flex items-center justify-between py-2.5">
-                <dt class="opacity-60">{{ t('dashboard.goVersion') }}</dt>
+                <dt class="text-muted-foreground">{{ t('dashboard.goVersion') }}</dt>
                 <dd class="font-medium">{{ stats.system?.go_version || '-' }}</dd>
               </div>
               <div class="flex items-center justify-between py-2.5">
-                <dt class="opacity-60">{{ t('dashboard.uptime') }}</dt>
+                <dt class="text-muted-foreground">{{ t('dashboard.uptime') }}</dt>
                 <dd class="font-medium">{{ uptimeText }}</dd>
               </div>
               <div class="flex items-center justify-between py-2.5">
-                <dt class="opacity-60">{{ t('dashboard.dbSize') }}</dt>
+                <dt class="text-muted-foreground">{{ t('dashboard.dbSize') }}</dt>
                 <dd class="font-medium">{{ dbSizeText }}</dd>
               </div>
               <div class="flex items-center justify-between py-2.5">
-                <dt class="opacity-60">{{ t('dashboard.products') }}</dt>
+                <dt class="text-muted-foreground">{{ t('dashboard.products') }}</dt>
                 <dd class="font-medium">{{ stats.products || 0 }}</dd>
               </div>
               <div class="flex items-center justify-between py-2.5">
-                <dt class="opacity-60">{{ t('dashboard.cardStock') }}</dt>
-                <dd class="flex items-center gap-1.5">
-                  <span class="badge badge-success badge-sm">{{ t('cards.status.available') }}: {{ stats.available_cards || 0 }}</span>
-                  <span class="badge badge-warning badge-sm">{{ t('cards.status.locked') }}: {{ stats.locked_cards || 0 }}</span>
-                  <span class="badge badge-ghost badge-sm">{{ t('cards.status.sold') }}: {{ stats.sold_cards || 0 }}</span>
+                <dt class="text-muted-foreground">{{ t('dashboard.cardStock') }}</dt>
+                <dd class="flex flex-wrap items-center gap-1.5">
+                  <Badge class="bg-emerald-500/15 text-emerald-700">{{ t('cards.status.available') }}: {{ stats.available_cards || 0 }}</Badge>
+                  <Badge class="bg-amber-500/15 text-amber-700">{{ t('cards.status.locked') }}: {{ stats.locked_cards || 0 }}</Badge>
+                  <Badge variant="secondary">{{ t('cards.status.sold') }}: {{ stats.sold_cards || 0 }}</Badge>
                 </dd>
               </div>
             </dl>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
 
-      <!-- 销售报表 -->
       <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-          <div class="card-body !pb-2">
-            <h3 class="font-semibold">{{ t('dashboard.salesTrend') }}</h3>
-          </div>
-          <div class="card-body"><div ref="trendChart" class="h-[260px] w-full"></div></div>
-        </div>
-        <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-          <div class="card-body !pb-2">
-            <h3 class="font-semibold">{{ t('dashboard.productShare') }}</h3>
-          </div>
-          <div class="card-body"><div ref="shareChart" class="h-[260px] w-full"></div></div>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle class="text-base">{{ t('dashboard.salesTrend') }}</CardTitle>
+          </CardHeader>
+          <CardContent><div ref="trendChart" class="h-[260px] w-full"></div></CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle class="text-base">{{ t('dashboard.productShare') }}</CardTitle>
+          </CardHeader>
+          <CardContent><div ref="shareChart" class="h-[260px] w-full"></div></CardContent>
+        </Card>
       </div>
 
-      <!-- 最近交易 -->
-      <div class="card mt-4 bg-base-100 shadow-sm ring-1 ring-base-300">
-        <div class="card-body !pb-2">
-          <h3 class="font-semibold">{{ t('dashboard.recentOrders') }}</h3>
-        </div>
-        <div class="card-body !pt-2">
+      <Card class="mt-4">
+        <CardHeader>
+          <CardTitle class="text-base">{{ t('dashboard.recentOrders') }}</CardTitle>
+        </CardHeader>
+        <CardContent>
           <DataTable :columns="recentColumns" :rows="stats.recent_orders || []">
             <template #status="{ row }">
-              <span class="badge badge-sm" :class="statusBadgeClass(row.status)">{{ statusText(row.status) }}</span>
+              <Badge :class="statusBadgeClass(row.status)">{{ statusText(row.status) }}</Badge>
             </template>
             <template #amount="{ row }">{{ row.amount }} {{ row.fiat }}</template>
             <template #createdAt="{ row }">{{ date(row.created_at) }}</template>
           </DataTable>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </template>
   </div>
 </template>
@@ -176,10 +174,13 @@
 import * as echarts from 'echarts'
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Clock, TriangleAlert, XCircle } from '@lucide/vue'
+import { Clock, Loader2, TriangleAlert, XCircle } from '@lucide/vue'
 import { api } from '@/api'
 import { fmtMoney, fmtDate, currencyLabel as getCurrencyLabel } from '@/utils/format'
 import { statusBadgeClass } from '@/utils/status'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
 
 const { t } = useI18n()

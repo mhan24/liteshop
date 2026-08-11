@@ -1,154 +1,167 @@
 <template>
   <div class="flex flex-col lg:flex-row lg:items-start lg:gap-8">
-    <div class="max-w-xl w-full">
-      <NuxtLink to="/" class="link link-hover link-neutral text-sm">{{ t('backProducts') }}</NuxtLink>
-      <div v-if="pending" class="py-10 flex justify-center">
-        <span class="loading loading-spinner loading-lg text-primary"></span>
+    <div class="w-full max-w-xl">
+      <Button as-child variant="ghost" size="sm" class="mb-2 -ml-2">
+        <NuxtLink to="/">{{ t('backProducts') }}</NuxtLink>
+      </Button>
+      <div v-if="pending" class="flex justify-center py-10">
+        <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
-      <div v-else-if="product">
-      <div class="card bg-base-100 shadow-xl">
-        <figure class="aspect-square w-full overflow-hidden bg-base-200 flex items-center justify-center rounded-t-2xl">
-          <img :src="imgSrc(product.image_url)" :alt="product.name" class="max-w-full max-h-full w-auto h-auto" />
-        </figure>
-        <div class="card-body">
-          <h1 class="text-2xl font-bold text-base-content">{{ product.name }}</h1>
-          <div class="md-body text-base-content/70 mt-2" v-html="renderMarkdown(product.description)"></div>
-          <p class="text-3xl font-extrabold text-primary mt-3">{{ siteMoney(product.price_cents) }}</p>
-          <p class="text-base-content/60 text-sm">{{ t('currentStock') }} {{ stockLabel(available) }}</p>
+      <Card v-else-if="product">
+        <div class="flex aspect-square w-full items-center justify-center overflow-hidden bg-muted">
+          <img :src="imgSrc(product.image_url)" :alt="product.name" class="h-auto max-h-full w-auto max-w-full" />
+        </div>
+        <CardContent class="space-y-3">
+          <h1 class="text-2xl font-bold">{{ product.name }}</h1>
+          <div class="md-body text-muted-foreground" v-html="renderMarkdown(product.description)"></div>
+          <p class="text-3xl font-extrabold text-primary">{{ siteMoney(product.price_cents) }}</p>
+          <p class="text-sm text-muted-foreground">{{ t('currentStock') }} {{ stockLabel(available) }}</p>
 
-          <div v-if="wholesale.length" class="mt-2 overflow-x-auto">
-            <table class="table table-sm table-zebra w-full text-sm">
-              <thead>
-                <tr>
-                  <th>{{ t('wholesaleQty') }}</th>
-                  <th>{{ t('wholesalePrice') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="t in wholesale" :key="t.min_qty">
-                  <td>{{ t('wholesaleFrom') }} {{ t.min_qty }}</td>
-                  <td>{{ siteMoney(wholesalePrice(t.min_qty)) }}<span v-if="t.discount < 100" class="badge badge-error badge-xs ml-1">{{ t.discount }}%</span></td>
-                </tr>
-              </tbody>
-            </table>
+          <div v-if="wholesale.length" class="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{{ t('wholesaleQty') }}</TableHead>
+                  <TableHead>{{ t('wholesalePrice') }}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="t in wholesale" :key="t.min_qty">
+                  <TableCell>{{ t('wholesaleFrom') }} {{ t.min_qty }}</TableCell>
+                  <TableCell>
+                    {{ siteMoney(wholesalePrice(t.min_qty)) }}
+                    <Badge v-if="t.discount < 100" class="ml-1 bg-red-500/15 text-red-700">
+                      {{ t.discount }}%
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
           </div>
 
-          <form class="mt-4 grid gap-3" @submit.prevent="submit">
-          <div v-if="paymentGateways.length > 1">
-            <label class="text-sm font-semibold text-base-content">{{ t('paymentMethod') }}</label>
-            <div class="grid grid-cols-2 gap-2 mt-1">
-              <button
-                v-if="paymentGateways.includes('bepusdt')"
-                type="button"
-                :class="[
-                  'card border-2 px-3 py-2.5 text-left transition cursor-pointer',
-                  form.gateway === 'bepusdt'
-                    ? 'border-primary bg-primary/10'
-                    : 'border-base-300 hover:border-primary/50',
-                ]"
-                @click="form.gateway = 'bepusdt'"
-              >
-                <span class="block font-semibold text-sm">{{ gatewayTitle('bepusdt') }}</span>
-                <span class="block text-xs text-base-content/60 mt-0.5">{{ gatewayDesc('bepusdt') }}</span>
-              </button>
-              <button
-                v-if="paymentGateways.includes('hashpay')"
-                type="button"
-                :class="[
-                  'card border-2 px-3 py-2.5 text-left transition cursor-pointer',
-                  form.gateway === 'hashpay'
-                    ? 'border-primary bg-primary/10'
-                    : 'border-base-300 hover:border-primary/50',
-                ]"
-                @click="form.gateway = 'hashpay'"
-              >
-                <span class="block font-semibold text-sm">{{ gatewayTitle('hashpay') }}</span>
-                <span class="block text-xs text-base-content/60 mt-0.5">{{ gatewayDesc('hashpay') }}</span>
-              </button>
+          <form class="grid gap-3" @submit.prevent="submit">
+            <div v-if="paymentGateways.length > 1">
+              <label class="text-sm font-semibold">{{ t('paymentMethod') }}</label>
+              <div class="mt-1 grid grid-cols-2 gap-2">
+                <button
+                  v-if="paymentGateways.includes('bepusdt')"
+                  type="button"
+                  :class="[
+                    'rounded-lg border-2 bg-card px-3 py-2.5 text-left transition',
+                    form.gateway === 'bepusdt' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50',
+                  ]"
+                  @click="form.gateway = 'bepusdt'"
+                >
+                  <span class="block text-sm font-semibold">{{ gatewayTitle('bepusdt') }}</span>
+                  <span class="mt-0.5 block text-xs text-muted-foreground">{{ gatewayDesc('bepusdt') }}</span>
+                </button>
+                <button
+                  v-if="paymentGateways.includes('hashpay')"
+                  type="button"
+                  :class="[
+                    'rounded-lg border-2 bg-card px-3 py-2.5 text-left transition',
+                    form.gateway === 'hashpay' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50',
+                  ]"
+                  @click="form.gateway = 'hashpay'"
+                >
+                  <span class="block text-sm font-semibold">{{ gatewayTitle('hashpay') }}</span>
+                  <span class="mt-0.5 block text-xs text-muted-foreground">{{ gatewayDesc('hashpay') }}</span>
+                </button>
+              </div>
             </div>
-          </div>
-          <div v-if="form.gateway === 'bepusdt' && tradeTypes.length > 1">
-            <label class="text-sm font-semibold text-base-content">{{ t('network') }}</label>
-            <div class="grid grid-cols-2 gap-2 mt-1">
-              <button
-                type="button"
-                v-for="t in tradeTypes"
-                :key="t"
-                :class="[
-                  'card border-2 px-3 py-2.5 text-left transition cursor-pointer',
-                  form.trade_type === t
-                    ? 'border-primary bg-primary/10'
-                    : 'border-base-300 hover:border-primary/50',
-                ]"
-                @click="form.trade_type = t"
-              >
-                <span class="block font-semibold text-sm">{{ networkName(t) }}</span>
-                <span class="block text-xs text-base-content/60 mt-0.5">{{ networkCoin(t) }}</span>
-              </button>
+            <div v-if="form.gateway === 'bepusdt' && tradeTypes.length > 1">
+              <label class="text-sm font-semibold">{{ t('network') }}</label>
+              <div class="mt-1 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  v-for="t in tradeTypes"
+                  :key="t"
+                  :class="[
+                    'rounded-lg border-2 bg-card px-3 py-2.5 text-left transition',
+                    form.trade_type === t ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50',
+                  ]"
+                  @click="form.trade_type = t"
+                >
+                  <span class="block text-sm font-semibold">{{ networkName(t) }}</span>
+                  <span class="mt-0.5 block text-xs text-muted-foreground">{{ networkCoin(t) }}</span>
+                </button>
+              </div>
             </div>
-          </div>
-          <div>
-            <label class="text-sm font-semibold text-base-content">{{ t('quantity') }} ({{ minQty }}-{{ maxQty }})</label>
-            <input type="number" v-model.number="form.qty" :min="minQty" :max="maxQty" class="input input-bordered w-full mt-1" />
-          </div>
-          <div>
-            <label class="text-sm font-semibold text-base-content">{{ t('couponCode') }}</label>
-            <input v-model="form.coupon_code" :placeholder="t('couponPlaceholder')" class="input input-bordered w-full mt-1" />
-          </div>
-          <div>
-            <label class="text-sm font-semibold text-base-content">{{ t('email') }}</label>
-            <input type="email" v-model="form.contact" required class="input input-bordered w-full mt-1" />
-          </div>
-          <button type="submit" :disabled="loading" class="btn btn-primary btn-block mt-1 normal-case">
-            {{ loading ? t('processing') : t('payNow') }}
-          </button>
+            <div>
+              <label class="text-sm font-semibold">{{ t('quantity') }} ({{ minQty }}-{{ maxQty }})</label>
+              <Input v-model.number="form.qty" type="number" :min="minQty" :max="maxQty" class="mt-1" />
+            </div>
+            <div>
+              <label class="text-sm font-semibold">{{ t('couponCode') }}</label>
+              <Input v-model="form.coupon_code" :placeholder="t('couponPlaceholder')" class="mt-1" />
+            </div>
+            <div>
+              <label class="text-sm font-semibold">{{ t('email') }}</label>
+              <Input v-model="form.contact" type="email" required class="mt-1" />
+            </div>
+            <Button type="submit" class="w-full" :disabled="loading">
+              <Loader2 v-if="loading" class="animate-spin" />
+              {{ loading ? t('processing') : t('payNow') }}
+            </Button>
           </form>
 
-          <div v-if="faqItems.length" class="mt-4">
-            <h2 class="text-lg font-bold text-base-content mb-2">{{ t('faqTitle') }}</h2>
-            <div class="space-y-2">
-              <details v-for="(item, idx) in faqItems" :key="idx" class="collapse collapse-arrow bg-base-200">
-                <summary class="collapse-title font-semibold">{{ item.q }}</summary>
-                <div class="collapse-content">
-                  <div class="md-body text-base-content/70 text-sm" v-html="renderMarkdown(item.a)"></div>
-                </div>
-              </details>
-            </div>
+          <div v-if="faqItems.length">
+            <h2 class="mb-2 text-lg font-bold">{{ t('faqTitle') }}</h2>
+            <Accordion type="single" collapsible>
+              <AccordionItem v-for="(item, idx) in faqItems" :key="idx" :value="'faq-' + idx">
+                <AccordionTrigger class="text-left">{{ item.q }}</AccordionTrigger>
+                <AccordionContent>
+                  <div class="md-body text-sm text-muted-foreground" v-html="renderMarkdown(item.a)"></div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </div>
-        </div>
-      </div>
-      </div>
-      <div v-else class="card bg-base-100 shadow-sm">
-        <div class="card-body text-center text-base-content/60">{{ t('productNotFound') }}</div>
-      </div>
+        </CardContent>
+      </Card>
+      <Card v-else>
+        <CardContent class="py-8 text-center text-muted-foreground">{{ t('productNotFound') }}</CardContent>
+      </Card>
 
-      <div v-if="turnstileOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div class="modal-box text-center">
-          <h2 class="text-lg font-bold">{{ t('verifyTitle') }}</h2>
-          <p class="text-sm text-base-content/60 mt-1">{{ t('verifyHint') }}</p>
+      <Dialog :open="turnstileOpen" @update:open="turnstileOpen = $event">
+        <DialogContent class="max-w-sm text-center">
+          <DialogHeader>
+            <DialogTitle>{{ t('verifyTitle') }}</DialogTitle>
+          </DialogHeader>
+          <p class="text-sm text-muted-foreground">{{ t('verifyHint') }}</p>
           <!-- 注意：不要加 cf-turnstile 类（会触发 api.js 自动渲染，与下方显式 render 冲突） -->
           <div ref="turnstileContainer" class="mt-4 flex justify-center"></div>
-          <p v-if="turnstileError" class="text-error text-sm mt-2">{{ t('verifyRetry') }}</p>
-          <button type="button" class="mt-4 text-sm link link-neutral" @click="closeTurnstile">{{ t('verifyCancel') }}</button>
-        </div>
-      </div>
+          <p v-if="turnstileError" class="mt-2 text-sm text-destructive">{{ t('verifyRetry') }}</p>
+          <Button variant="ghost" size="sm" class="mt-2" @click="closeTurnstile">
+            {{ t('verifyCancel') }}
+          </Button>
+        </DialogContent>
+      </Dialog>
     </div>
 
-    <aside v-if="showQr" class="shrink-0 mt-6 lg:mt-0 lg:sticky lg:top-6">
-      <div class="card bg-base-100 shadow-sm text-center w-60">
-        <div class="card-body p-5">
-        <p class="text-sm font-semibold text-base-content">{{ t('scanTitle') }}</p>
-        <div class="mt-3 bg-base-200 rounded-lg p-2">
-          <img v-if="qrDataUrl" :src="qrDataUrl" alt="QR" class="w-full h-auto block" />
-        </div>
-        <p class="text-xs text-base-content/60 mt-2">{{ t('scanHint') }}</p>
-        </div>
-      </div>
+    <aside v-if="showQr" class="mt-6 w-60 shrink-0 lg:sticky lg:top-6 lg:mt-0">
+      <Card class="text-center">
+        <CardContent class="space-y-3 p-5">
+          <p class="text-sm font-semibold">{{ t('scanTitle') }}</p>
+          <div class="rounded-lg bg-muted p-2">
+            <img v-if="qrDataUrl" :src="qrDataUrl" alt="QR" class="block h-auto w-full" />
+          </div>
+          <p class="text-xs text-muted-foreground">{{ t('scanHint') }}</p>
+        </CardContent>
+      </Card>
     </aside>
   </div>
 </template>
 
 <script setup lang="ts">
+import { Loader2 } from '@lucide/vue'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+
 const route = useRoute()
 const { t } = useI18n()
 const { money: siteMoney, currency: siteCurrency, stockText } = useSiteConfig()

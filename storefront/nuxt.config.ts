@@ -3,6 +3,9 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-11',
   devServer: { port: 3001, host: '127.0.0.1' },
+  // shadcn-vue 组件目录含 index.ts 与 .vue 同名文件，关闭 Nuxt 组件自动扫描，
+  // 页面/布局中全部组件均显式导入，避免重复注册告警
+  components: false,
   runtimeConfig: {
     public: { apiBase: '/api/v1' },
   },
@@ -26,7 +29,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       title: 'LiteShop',
-      htmlAttrs: { lang: 'zh-CN', 'data-theme': 'liteshop' },
+      htmlAttrs: { lang: 'zh-CN' },
       // key: 'icon' 让后台设置的自定义 favicon（layouts/default.vue）可覆盖内置图标，避免重复输出
       link: [{ rel: 'icon', key: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
       meta: [

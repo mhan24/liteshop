@@ -1,47 +1,56 @@
 <template>
-  <div class="max-w-xl card bg-base-100 shadow-sm">
-    <div class="card-body">
-    <h1 class="text-xl font-bold text-base-content">{{ t('orderQuery') }}</h1>
-    <p class="text-base-content/60 text-sm mt-1">{{ t('forgotOrderNo') }}</p>
-    <form class="mt-4 grid gap-3" @submit.prevent="submit">
-      <div>
-        <label class="text-sm font-semibold text-base-content">{{ t('email') }}</label>
-        <input type="email" v-model="form.contact" required class="input input-bordered w-full mt-1" />
-      </div>
-      <div>
-        <label class="text-sm font-semibold text-base-content">{{ t('orderNoOptional') }}</label>
-        <input v-model="form.order_no" :placeholder="t('orderNoOptionalHint')" class="input input-bordered w-full mt-1" />
-      </div>
-      <button type="submit" :disabled="loading" class="btn btn-primary normal-case disabled:opacity-60">
-        {{ form.order_no ? t('queryOrder') : t('recoverByEmail') }}
-      </button>
-    </form>
-    <p class="text-xs text-base-content/40 mt-2">{{ t('orderLinkHint') }}</p>
-
-    <div v-if="orders.length" class="mt-5 divide-y divide-base-200">
-      <div v-for="(item, idx) in orders" :key="idx" class="py-3 flex flex-wrap items-center justify-between gap-2">
+  <Card class="w-full max-w-xl">
+    <CardContent>
+      <h1 class="text-xl font-bold">{{ t('orderQuery') }}</h1>
+      <p class="mt-1 text-sm text-muted-foreground">{{ t('forgotOrderNo') }}</p>
+      <form class="mt-4 grid gap-3" @submit.prevent="submit">
         <div>
-          <div class="font-semibold">{{ item.product_name }} x{{ item.qty }}</div>
-          <div class="text-sm text-base-content/60">
-            <span>{{ orderSub(item) }} · {{ date(item.paid_at || item.created_at) }}</span>
-          </div>
-          <span class="badge badge-sm" :class="badgeClass(item.status)">{{ statusText(item.status) }}</span>
+          <label class="text-sm font-semibold">{{ t('email') }}</label>
+          <Input v-model="form.contact" type="email" required class="mt-1" />
         </div>
-        <div class="flex gap-2">
-          <a v-if="item.payment_url" :href="item.payment_url" class="link link-primary font-semibold">{{ t('continuePay') }}</a>
+        <div>
+          <label class="text-sm font-semibold">{{ t('orderNoOptional') }}</label>
+          <Input v-model="form.order_no" :placeholder="t('orderNoOptionalHint')" class="mt-1" />
+        </div>
+        <Button type="submit" :disabled="loading" class="w-fit">
+          <Loader2 v-if="loading" class="animate-spin" />
+          {{ form.order_no ? t('queryOrder') : t('recoverByEmail') }}
+        </Button>
+      </form>
+      <p class="mt-2 text-xs text-muted-foreground">{{ t('orderLinkHint') }}</p>
+
+      <div v-if="orders.length" class="mt-5 divide-y">
+        <div v-for="(item, idx) in orders" :key="idx" class="flex flex-wrap items-center justify-between gap-2 py-3">
+          <div>
+            <div class="font-semibold">{{ item.product_name }} x{{ item.qty }}</div>
+            <div class="text-sm text-muted-foreground">
+              <span>{{ orderSub(item) }} · {{ date(item.paid_at || item.created_at) }}</span>
+            </div>
+            <Badge :class="badgeClass(item.status)">{{ statusText(item.status) }}</Badge>
+          </div>
+          <div class="flex gap-2">
+            <Button as-child v-if="item.payment_url" variant="link" class="px-0 font-semibold">
+              <a :href="item.payment_url">{{ t('continuePay') }}</a>
+            </Button>
+          </div>
         </div>
       </div>
-    </div>
-    <div v-if="searched" class="mt-4">
-      <button class="btn btn-link btn-sm link-primary px-0" @click="sendAllLinks">{{ t('sendAllLinks') }}</button>
-    </div>
-    <div ref="turnstileContainer" v-if="turnstilePending" class="mt-3"></div>
-    <div v-else-if="searched && !loading" class="text-base-content/60 mt-5">{{ t('noOrders') }}</div>
-    </div>
-  </div>
+      <div v-if="searched" class="mt-4">
+        <Button variant="link" class="px-0" @click="sendAllLinks">{{ t('sendAllLinks') }}</Button>
+      </div>
+      <div ref="turnstileContainer" v-if="turnstilePending" class="mt-3"></div>
+      <p v-else-if="searched && !loading" class="mt-5 text-muted-foreground">{{ t('noOrders') }}</p>
+    </CardContent>
+  </Card>
 </template>
 
 <script setup lang="ts">
+import { Loader2 } from '@lucide/vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+
 const { t } = useI18n()
 const { date: siteDate } = useSiteConfig()
 const api = useApi()
@@ -157,13 +166,13 @@ function statusText(status: string) {
 }
 function badgeClass(status: string) {
   const m: any = {
-    paid: 'badge-success', processing: 'badge-success',
-    delivered: 'badge-success', completed: 'badge-success',
-    waiting_payment: 'badge-warning', created: 'badge-neutral',
-    expired: 'badge-error', payment_failed: 'badge-error',
-    delivery_failed: 'badge-error', cancelled: 'badge-neutral',
+    paid: 'bg-emerald-500/15 text-emerald-700', processing: 'bg-emerald-500/15 text-emerald-700',
+    delivered: 'bg-emerald-500/15 text-emerald-700', completed: 'bg-emerald-500/15 text-emerald-700',
+    waiting_payment: 'bg-amber-500/15 text-amber-700', created: 'bg-muted text-muted-foreground',
+    expired: 'bg-red-500/15 text-red-700', payment_failed: 'bg-red-500/15 text-red-700',
+    delivery_failed: 'bg-red-500/15 text-red-700', cancelled: 'bg-muted text-muted-foreground',
   }
-  return m[status] || 'badge-neutral'
+  return m[status] || 'bg-muted text-muted-foreground'
 }
 useHead({ title: t('orderQuery'), meta: [{ name: 'description', content: t('orderQueryDesc') }, { name: 'robots', content: 'noindex,nofollow' }] })
 </script>

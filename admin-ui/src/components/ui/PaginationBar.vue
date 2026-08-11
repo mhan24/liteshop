@@ -1,26 +1,36 @@
 <template>
   <div v-if="total > 0" class="mt-4 flex items-center justify-end gap-3">
-    <span class="text-sm opacity-60">{{ t('pagination.total', { total }) }}</span>
-    <div class="join">
-      <button class="join-item btn btn-sm" :disabled="page <= 1" @click="emit('update:page', page - 1)">
-        «
-      </button>
-      <template v-for="p in pages" :key="p">
-        <button
-          class="join-item btn btn-sm"
-          :class="{ 'btn-active': p === page }"
-          @click="emit('update:page', p)"
-        >
-          {{ p }}
-        </button>
-      </template>
-      <button
-        class="join-item btn btn-sm"
+    <span class="text-sm text-muted-foreground">{{ t('pagination.total', { total }) }}</span>
+    <div class="flex items-center gap-1">
+      <Button
+        variant="outline"
+        size="icon"
+        class="h-8 w-8"
+        :disabled="page <= 1"
+        @click="emit('update:page', page - 1)"
+      >
+        <ChevronLeft class="h-4 w-4" />
+      </Button>
+      <Button
+        v-for="p in pages"
+        :key="p"
+        :variant="p === page ? 'default' : 'outline'"
+        size="icon"
+        class="h-8 w-8"
+        :disabled="p < 0"
+        @click="emit('update:page', p)"
+      >
+        {{ p < 0 ? '…' : p }}
+      </Button>
+      <Button
+        variant="outline"
+        size="icon"
+        class="h-8 w-8"
         :disabled="page >= pageCount"
         @click="emit('update:page', page + 1)"
       >
-        »
-      </button>
+        <ChevronRight class="h-4 w-4" />
+      </Button>
     </div>
   </div>
 </template>
@@ -28,6 +38,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ChevronLeft, ChevronRight } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
 
 const props = defineProps<{
   total: number

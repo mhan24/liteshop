@@ -1,71 +1,52 @@
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-base-200 p-4">
-    <div class="card w-full max-w-sm bg-base-100 shadow-xl">
-      <div class="card-body">
-        <div class="mb-4 flex items-center gap-3">
-          <div
-            class="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-content"
-          >
-            <svg
-              class="h-6 w-6"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-          </div>
-          <div>
-            <h1 class="card-title">{{ t('login.title') }}</h1>
-            <p class="text-sm opacity-60">LiteShop</p>
-          </div>
+  <div class="flex min-h-screen items-center justify-center bg-muted/30 p-4">
+    <Card class="w-full max-w-sm">
+      <CardHeader class="items-center text-center">
+        <div class="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+          <Store class="h-6 w-6" />
         </div>
-
+        <CardTitle class="text-xl">{{ t('login.title') }}</CardTitle>
+        <p class="text-sm text-muted-foreground">LiteShop</p>
+      </CardHeader>
+      <CardContent class="space-y-4">
         <FormField :label="t('login.username')" required>
-          <input
-            v-model="form.username"
-            class="input input-bordered w-full"
-            autocomplete="username"
-            @keyup.enter="submit"
-          />
+          <Input v-model="form.username" autocomplete="username" @keyup.enter="submit" />
         </FormField>
         <FormField :label="t('login.password')" required>
-          <input
+          <Input
             v-model="form.password"
             type="password"
-            class="input input-bordered w-full"
             autocomplete="current-password"
             @keyup.enter="submit"
           />
         </FormField>
         <FormField v-if="totpStep" :label="t('login.otp')" required>
-          <input
+          <Input
             v-model="form.otp"
             inputmode="numeric"
             maxlength="6"
-            class="input input-bordered w-full text-center text-lg tracking-[0.5em]"
+            class="text-center text-lg tracking-[0.5em]"
             autocomplete="one-time-code"
             @keyup.enter="submit"
           />
         </FormField>
-
-        <button class="btn btn-primary mt-3 w-full" :class="{ 'btn-disabled': loading }" @click="submit">
-          <span v-if="loading" class="loading loading-spinner"></span>
+        <Button class="w-full" :disabled="loading" @click="submit">
+          <Loader2 v-if="loading" class="animate-spin" />
           {{ t(totpStep ? 'login.verify' : 'login.login') }}
-        </button>
-      </div>
-    </div>
+        </Button>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Loader2, Store } from '@lucide/vue'
 import { api } from '@/api'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import FormField from '@/components/ui/FormField.vue'
 import { toastError, toastWarning } from '@/components/ui/toast'
 

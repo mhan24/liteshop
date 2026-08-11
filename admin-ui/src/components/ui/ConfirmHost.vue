@@ -1,25 +1,42 @@
 <template>
-  <Modal
-    :open="confirmState.visible"
-    :title="confirmState.title"
-    @close="settleConfirm(false)"
-  >
-    <p class="text-sm leading-relaxed opacity-80">{{ confirmState.message }}</p>
-    <template #footer>
-      <button class="btn btn-ghost" @click="settleConfirm(false)">
-        {{ confirmState.cancelText || t('common.cancel') }}
-      </button>
-      <button class="btn" :class="confirmState.danger ? 'btn-error' : 'btn-primary'" @click="settleConfirm(true)">
-        {{ confirmState.okText || t('common.confirm') }}
-      </button>
-    </template>
-  </Modal>
+  <AlertDialog :open="confirmState.visible" @update:open="onOpenChange">
+    <AlertDialogContent class="max-w-md">
+      <AlertDialogHeader>
+        <AlertDialogTitle>{{ confirmState.title || t('common.prompt') }}</AlertDialogTitle>
+        <AlertDialogDescription v-if="confirmState.message">{{ confirmState.message }}</AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel @click="settleConfirm(false)">
+          {{ confirmState.cancelText || t('common.cancel') }}
+        </AlertDialogCancel>
+        <AlertDialogAction
+          :class="confirmState.danger ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''"
+          @click="settleConfirm(true)"
+        >
+          {{ confirmState.okText || t('common.confirm') }}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import Modal from './Modal.vue'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { confirmState, settleConfirm } from './confirm'
 
 const { t } = useI18n()
+
+function onOpenChange(open: boolean) {
+  if (!open) settleConfirm(false)
+}
 </script>

@@ -1,18 +1,21 @@
 <template>
-  <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-    <div v-if="title" class="card-body !pb-2">
-      <h2 class="card-title text-lg">{{ title }}</h2>
-    </div>
-    <div class="card-body" :class="title ? '!pt-3' : ''">
+  <Card>
+    <CardHeader v-if="title">
+      <CardTitle class="text-lg">{{ title }}</CardTitle>
+    </CardHeader>
+    <CardContent :class="title ? 'pt-0' : ''">
       <div v-if="loading" class="flex justify-center py-10">
-        <span class="loading loading-spinner loading-lg text-primary"></span>
+        <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
       <slot v-else />
-    </div>
-  </div>
+    </CardContent>
+  </Card>
 </template>
 
 <script setup lang="ts">
+import { Loader2 } from '@lucide/vue'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+
 withDefaults(
   defineProps<{
     title?: string

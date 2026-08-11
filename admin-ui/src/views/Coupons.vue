@@ -2,11 +2,11 @@
   <div>
     <div class="mb-4 flex items-center justify-between gap-3">
       <h2 class="text-xl font-bold">{{ t('coupons.title') }}</h2>
-      <button class="btn btn-primary btn-sm" @click="openCreate">{{ t('coupons.add') }}</button>
+      <Button size="sm" @click="openCreate">{{ t('coupons.add') }}</Button>
     </div>
 
-    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-      <div class="card-body !p-0">
+    <Card>
+      <CardContent class="p-0">
         <DataTable :columns="columns" :rows="coupons" :loading="loading" :empty-text="t('audit.empty')">
           <template #type="{ row }">{{ row.type === 'percent' ? '%' : t('coupons.fixed') }}</template>
           <template #value="{ row }">
@@ -16,80 +16,88 @@
           <template #minAmount="{ row }">{{ row.min_amount_cents ? fmtMoney(row.min_amount_cents) : '-' }}</template>
           <template #usage="{ row }">{{ row.used_count }}/{{ row.max_uses || '∞' }}</template>
           <template #status="{ row }">
-            <span class="badge badge-sm" :class="row.active ? 'badge-success' : 'badge-ghost'">
+            <Badge :class="row.active ? 'bg-emerald-500/15 text-emerald-700' : 'bg-muted text-muted-foreground'">
               {{ row.active ? t('common.yes') : t('common.no') }}
-            </span>
+            </Badge>
           </template>
           <template #expires="{ row }">{{ row.expires_at ? fmtDate(row.expires_at) : '∞' }}</template>
           <template #actions="{ row }">
             <div class="flex items-center gap-1">
-              <button class="btn btn-ghost btn-xs" @click="openEdit(row)">{{ t('common.edit') }}</button>
-              <button class="btn btn-ghost btn-error btn-xs" @click="remove(row)">{{ t('common.delete') }}</button>
+              <Button variant="ghost" size="sm" class="h-7 px-2" @click="openEdit(row)">
+                {{ t('common.edit') }}
+              </Button>
+              <Button variant="ghost" size="sm" class="h-7 px-2 text-destructive" @click="remove(row)">
+                {{ t('common.delete') }}
+              </Button>
             </div>
           </template>
         </DataTable>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
 
     <Modal :open="dialog" :title="editing ? t('coupons.edit') : t('coupons.add')" @close="dialog = false">
       <div class="space-y-4">
         <FormField :label="t('coupons.code')">
-          <input v-model="form.code" class="input input-bordered w-full" :disabled="!!editing" />
+          <Input v-model="form.code" :disabled="!!editing" />
         </FormField>
         <div class="grid grid-cols-2 gap-4">
           <FormField :label="t('coupons.type')">
-            <select v-model="form.type" class="select select-bordered w-full">
-              <option value="fixed">{{ t('coupons.fixed') }}</option>
-              <option value="percent">%</option>
-            </select>
+            <Select v-model="form.type">
+              <SelectTrigger class="w-full">
+                <SelectValue :placeholder="t('coupons.type')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fixed">{{ t('coupons.fixed') }}</SelectItem>
+                <SelectItem value="percent">%</SelectItem>
+              </SelectContent>
+            </Select>
           </FormField>
           <FormField :label="t('coupons.valueLabel')">
-            <input
+            <Input
               v-if="form.type === 'percent'"
               v-model.number="form.percent"
               type="number"
               min="1"
               max="100"
-              class="input input-bordered w-full"
             />
-            <input
-              v-else
-              v-model.number="form.value"
-              type="number"
-              step="0.01"
-              min="0.01"
-              class="input input-bordered w-full"
-            />
+            <Input v-else v-model.number="form.value" type="number" step="0.01" min="0.01" />
           </FormField>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <FormField :label="t('coupons.minAmountLabel')">
-            <input v-model.number="form.min_amount" type="number" step="0.01" min="0" class="input input-bordered w-full" />
+            <Input v-model.number="form.min_amount" type="number" step="0.01" min="0" />
           </FormField>
           <FormField :label="t('coupons.maxUses')">
-            <input v-model.number="form.max_uses" type="number" min="0" class="input input-bordered w-full" />
+            <Input v-model.number="form.max_uses" type="number" min="0" />
           </FormField>
         </div>
         <FormField :label="t('coupons.productFilter')">
-          <select v-model="form.product_id" class="select select-bordered w-full">
-            <option :value="undefined"></option>
-            <option v-for="p in products" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
+          <Select v-model="productFilter">
+            <SelectTrigger class="w-full">
+              <SelectValue :placeholder="t('coupons.productFilter')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{{ t('orders.allStatus') }}</SelectItem>
+              <SelectItem v-for="p in products" :key="p.id" :value="String(p.id)">
+                {{ p.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </FormField>
         <FormField :label="t('coupons.expiresLabel')">
-          <input v-model="expiresLocal" type="datetime-local" class="input input-bordered w-full" />
+          <Input v-model="expiresLocal" type="datetime-local" />
         </FormField>
-        <label class="flex cursor-pointer items-center gap-2">
-          <input v-model="form.active" type="checkbox" class="checkbox checkbox-primary checkbox-sm" />
-          <span class="text-sm">{{ t('coupons.active') }}</span>
-        </label>
+        <div class="flex items-center gap-2">
+          <Checkbox id="coupon-active" :checked="form.active" @update:checked="form.active = $event" />
+          <Label for="coupon-active" class="text-sm">{{ t('coupons.active') }}</Label>
+        </div>
       </div>
       <template #footer>
-        <button class="btn btn-ghost" @click="dialog = false">{{ t('common.cancel') }}</button>
-        <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="save">
-          <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+        <Button variant="outline" @click="dialog = false">{{ t('common.cancel') }}</Button>
+        <Button :disabled="saving" @click="save">
+          <Loader2 v-if="saving" class="animate-spin" />
           {{ t('common.save') }}
-        </button>
+        </Button>
       </template>
     </Modal>
   </div>
@@ -98,8 +106,16 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Loader2 } from '@lucide/vue'
 import { api } from '@/api'
 import { fmtMoney, fmtDate } from '@/utils/format'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
 import Modal from '@/components/ui/Modal.vue'
 import FormField from '@/components/ui/FormField.vue'
@@ -114,6 +130,7 @@ const editing = ref<number | null>(null)
 const coupons = ref<any[]>([])
 const products = ref<any[]>([])
 const expiresLocal = ref('')
+const productFilter = ref('all')
 const form = reactive({
   code: '',
   type: 'fixed',
@@ -172,6 +189,7 @@ function openCreate() {
     active: true,
   })
   expiresLocal.value = ''
+  productFilter.value = 'all'
   dialog.value = true
 }
 function openEdit(row: any) {
@@ -188,6 +206,7 @@ function openEdit(row: any) {
     active: row.active,
   })
   expiresLocal.value = toLocal(row.expires_at)
+  productFilter.value = row.product_id ? String(row.product_id) : 'all'
   dialog.value = true
 }
 async function save() {
@@ -200,7 +219,7 @@ async function save() {
       value_cents: Math.round(form.value * 100),
       min_amount_cents: Math.round(form.min_amount * 100),
       max_uses: form.max_uses,
-      product_id: form.product_id || 0,
+      product_id: productFilter.value === 'all' ? 0 : Number(productFilter.value),
       expires_at: fromLocal(expiresLocal.value),
       active: form.active,
     }

@@ -1,5 +1,24 @@
 # 更新日志
 
+## v0.3.0（2026-08-11）— 前后台迁移 shadcn-vue
+
+### 后台（admin-ui）
+
+- 移除 daisyUI，改用 **shadcn-vue（reka-nova 风格）**：Button / Card / Input / Select / Textarea / Table / Dialog / AlertDialog / DropdownMenu / Badge / Checkbox / Switch / RadioGroup / Accordion / Tabs / Sheet / Skeleton / Sonner 等官方组件
+- 自研基础件同步替换：toast → vue-sonner（Sonner）、确认框 → AlertDialog、弹窗 → Dialog、表格 → shadcn Table、分页/表单字段/页卡均基于 shadcn 重写；侧边栏与顶栏（用户下拉、语言切换）重构
+- 主题使用 shadcn-vue 默认 neutral 变量（`globals.css` 内联，**不保留任何自定义配色文件**，Wise 配色文件已删除）
+- `internal/api/security_test.go` 与 CSP 不受影响；15 个后台页面全部重写并通过浏览器实测
+
+### 前台（storefront）
+
+- 移除 daisyUI，改用与后台同一套 **shadcn-vue** 组件；首页搜索/视图切换、商品页（批发表格 / FAQ 手风琴 / 支付方式选择 / Turnstile 弹窗）、订单查询与详情、条款页、初始化页全部重写
+- Nuxt 组件目录改为显式导入（`components: false`），避免 index.ts 与 .vue 同名组件重复注册告警
+- 主题同样使用 shadcn-vue 默认变量，删除 Wise 配色文件
+
+### 其他
+
+- README（中英双份）技术栈与目录说明同步更新；admin-ui / storefront 依赖清理（daisyui 已移除）
+
 ## v0.2.2（2026-08-11）— 后台界面迁移 Tailwind CSS + daisyUI
 
 ### 后台 UI

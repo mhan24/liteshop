@@ -1,29 +1,40 @@
 <template>
-  <transition name="modal-fade">
-    <div v-if="open" class="fixed inset-0 z-[80] flex items-center justify-center p-4">
-      <div class="fixed inset-0 bg-black/50" @click="close"></div>
-      <div class="modal-box relative z-10 w-full max-w-lg shadow-2xl" role="dialog" aria-modal="true">
-        <h3 v-if="title" class="mb-4 text-lg font-bold">{{ title }}</h3>
+  <Dialog :open="open" @update:open="onOpenChange">
+    <DialogScrollContent class="max-w-lg">
+      <DialogHeader v-if="title">
+        <DialogTitle>{{ title }}</DialogTitle>
+      </DialogHeader>
+      <div class="py-2">
         <slot />
-        <div v-if="showFooter" class="modal-action">
-          <slot name="footer">
-            <button class="btn btn-ghost" :disabled="loading" @click="close">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" :class="{ 'btn-disabled': loading }" @click="$emit('confirm')">
-              <span v-if="loading" class="loading loading-spinner loading-xs"></span>
-              {{ t('common.confirm') }}
-            </button>
-          </slot>
-        </div>
       </div>
-    </div>
-  </transition>
+      <DialogFooter v-if="showFooter">
+        <slot name="footer">
+          <Button variant="outline" :disabled="loading" @click="close">
+            {{ t('common.cancel') }}
+          </Button>
+          <Button :disabled="loading" @click="$emit('confirm')">
+            <Loader2 v-if="loading" class="animate-spin" />
+            {{ t('common.confirm') }}
+          </Button>
+        </slot>
+      </DialogFooter>
+    </DialogScrollContent>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
-import { watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Loader2 } from '@lucide/vue'
+import {
+  Dialog,
+  DialogFooter,
+  DialogHeader,
+  DialogScrollContent,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     open: boolean
     title?: string
@@ -45,33 +56,13 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+function onOpenChange(open: boolean) {
+  emit('update:open', open)
+  if (!open) emit('close')
+}
+
 function close() {
   emit('update:open', false)
   emit('close')
 }
-
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && props.open) close()
-}
-
-watch(
-  () => props.open,
-  (open) => {
-    if (open) document.addEventListener('keydown', onKeydown)
-    else document.removeEventListener('keydown', onKeydown)
-  },
-)
-
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 </script>
-
-<style scoped>
-.modal-fade-enter-active,
-.modal-fade-leave-active {
-  transition: opacity 0.15s ease;
-}
-.modal-fade-enter-from,
-.modal-fade-leave-to {
-  opacity: 0;
-}
-</style>

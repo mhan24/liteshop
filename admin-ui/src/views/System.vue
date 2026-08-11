@@ -1,41 +1,43 @@
 <template>
   <div class="space-y-4">
-    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-      <div class="card-body">
-        <h2 class="card-title text-lg">{{ t('system.backup') }}</h2>
-        <p class="text-sm opacity-70">{{ t('system.backupNote') }}</p>
-        <p class="text-sm font-medium text-warning">{{ t('system.backupWarning') }}</p>
+    <Card>
+      <CardHeader>
+        <CardTitle class="text-lg">{{ t('system.backup') }}</CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-3">
+        <p class="text-sm text-muted-foreground">{{ t('system.backupNote') }}</p>
+        <p class="text-sm font-medium text-amber-600">{{ t('system.backupWarning') }}</p>
         <div class="flex flex-wrap items-center gap-2">
-          <button class="btn btn-primary btn-sm" @click="download">{{ t('system.downloadBackup') }}</button>
-          <label class="btn btn-outline btn-sm cursor-pointer">
-            <span v-if="restoring" class="loading loading-spinner loading-xs"></span>
-            {{ t('system.restore') }}
-            <input type="file" class="hidden" accept=".json,application/json" @change="onFileChange" />
+          <Button size="sm" @click="download">{{ t('system.downloadBackup') }}</Button>
+          <label class="inline-flex">
+            <Button as-child variant="outline" size="sm">
+              <span class="inline-flex items-center gap-2">
+                <Loader2 v-if="restoring" class="animate-spin" />
+                {{ t('system.restore') }}
+              </span>
+              <input type="file" class="hidden" accept=".json,application/json" @change="onFileChange" />
+            </Button>
           </label>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
 
-    <div class="card border border-error/30 bg-base-100 shadow-sm ring-1 ring-error/20">
-      <div class="card-body">
-        <h2 class="card-title text-lg text-error">{{ t('system.danger') }}</h2>
-        <p class="text-sm opacity-70">{{ t('system.dangerNote') }}</p>
-        <input
+    <Card class="border-destructive/30">
+      <CardHeader>
+        <CardTitle class="text-lg text-destructive">{{ t('system.danger') }}</CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-3">
+        <p class="text-sm text-muted-foreground">{{ t('system.dangerNote') }}</p>
+        <Input
           v-model="confirmText"
-          class="input input-bordered input-sm max-w-60"
+          class="max-w-60"
           :placeholder="t('system.deleteConfirm')"
         />
-        <div>
-          <button
-            class="btn btn-error btn-sm"
-            :disabled="confirmText !== 'DELETE'"
-            @click="reset"
-          >
-            {{ t('system.reset') }}
-          </button>
-        </div>
-      </div>
-    </div>
+        <Button variant="destructive" size="sm" :disabled="confirmText !== 'DELETE'" @click="reset">
+          {{ t('system.reset') }}
+        </Button>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
@@ -43,7 +45,11 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { Loader2 } from '@lucide/vue'
 import { api } from '@/api'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { confirm } from '@/components/ui/confirm'
 import { toastError, toastSuccess } from '@/components/ui/toast'
 

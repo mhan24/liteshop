@@ -1,100 +1,98 @@
 <template>
   <PageCard :title="t('payment.title')" :loading="loading">
-    <div class="max-w-2xl space-y-4">
+    <div class="max-w-2xl space-y-5">
       <FormField :label="t('payment.gateway')">
         <div class="flex flex-wrap gap-6">
-          <label class="flex cursor-pointer items-center gap-2">
-            <input v-model="enabled.bepusdt" type="checkbox" class="checkbox checkbox-primary checkbox-sm" @change="syncGateway" />
-            <span class="text-sm">{{ t('payment.bepusdtEnabled') }}</span>
-          </label>
-          <label class="flex cursor-pointer items-center gap-2">
-            <input v-model="enabled.hashpay" type="checkbox" class="checkbox checkbox-primary checkbox-sm" @change="syncGateway" />
-            <span class="text-sm">{{ t('payment.hashpayEnabled') }}</span>
-          </label>
+          <div class="flex items-center gap-2">
+            <Checkbox id="gw-bepusdt" :checked="enabled.bepusdt" @update:checked="onGateway('bepusdt', $event)" />
+            <Label for="gw-bepusdt" class="text-sm">{{ t('payment.bepusdtEnabled') }}</Label>
+          </div>
+          <div class="flex items-center gap-2">
+            <Checkbox id="gw-hashpay" :checked="enabled.hashpay" @update:checked="onGateway('hashpay', $event)" />
+            <Label for="gw-hashpay" class="text-sm">{{ t('payment.hashpayEnabled') }}</Label>
+          </div>
         </div>
       </FormField>
 
-      <div class="divider">{{ t('payment.bepusdtSection') }}</div>
+      <Separator />
+      <h3 class="font-semibold">{{ t('payment.bepusdtSection') }}</h3>
       <template v-if="enabled.bepusdt">
         <FormField :label="t('payment.gatewayName')" :hint="t('payment.gatewayNamePlaceholder')">
-          <input v-model="form.gateway_bepusdt_name" maxlength="40" class="input input-bordered w-full" />
+          <Input v-model="form.gateway_bepusdt_name" maxlength="40" />
         </FormField>
         <FormField :label="t('payment.gatewayDesc')">
-          <textarea v-model="form.gateway_bepusdt_desc" class="textarea textarea-bordered w-full" rows="2" maxlength="200"></textarea>
+          <Textarea v-model="form.gateway_bepusdt_desc" rows="2" maxlength="200" />
         </FormField>
         <FormField :label="t('payment.gatewayPriority')">
-          <input v-model.number="form.gateway_bepusdt_priority" type="number" min="-1" max="99" class="input input-bordered w-full" />
+          <Input v-model.number="form.gateway_bepusdt_priority" type="number" min="-1" max="99" />
         </FormField>
         <FormField :label="t('payment.baseUrl')">
-          <input v-model="form.bepusdt_base_url" class="input input-bordered w-full" />
+          <Input v-model="form.bepusdt_base_url" />
         </FormField>
         <FormField :label="t('payment.apiToken')" :hint="t('payment.apiTokenPlaceholder')">
-          <input v-model="form.bepusdt_api_token" type="password" class="input input-bordered w-full" />
+          <Input v-model="form.bepusdt_api_token" type="password" />
         </FormField>
         <FormField :label="t('payment.fiat')">
-          <input v-model="form.fiat" class="input input-bordered w-full" />
+          <Input v-model="form.fiat" />
         </FormField>
         <FormField :label="t('payment.tradeTypes')">
-          <textarea v-model="form.trade_types" class="textarea textarea-bordered w-full" rows="3"></textarea>
+          <Textarea v-model="form.trade_types" rows="3" />
         </FormField>
         <FormField :label="t('payment.timeout')">
-          <input v-model.number="form.bepusdt_timeout_sec" type="number" min="1" class="input input-bordered w-full" />
+          <Input v-model.number="form.bepusdt_timeout_sec" type="number" min="1" />
         </FormField>
         <FormField :label="t('payment.notifyPath')" :hint="t('payment.notifyPathPlaceholder')">
-          <input v-model="form.bepusdt_notify_path" class="input input-bordered w-full" />
+          <Input v-model="form.bepusdt_notify_path" />
         </FormField>
         <FormField :label="t('payment.notifyUrl')">
-          <input v-model="form.bepusdt_notify_url" class="input input-bordered w-full" />
+          <Input v-model="form.bepusdt_notify_url" />
         </FormField>
       </template>
 
-      <div class="divider">{{ t('payment.hashpaySection') }}</div>
+      <Separator />
+      <h3 class="font-semibold">{{ t('payment.hashpaySection') }}</h3>
       <template v-if="enabled.hashpay">
-        <div class="alert alert-info text-sm">
-          <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="16" x2="12" y2="12" />
-            <line x1="12" y1="8" x2="12.01" y2="8" />
-          </svg>
-          {{ t('payment.hashpayHint') }}
-        </div>
+        <Alert>
+          <Info class="h-4 w-4" />
+          <AlertDescription>{{ t('payment.hashpayHint') }}</AlertDescription>
+        </Alert>
         <FormField :label="t('payment.gatewayName')" :hint="t('payment.gatewayNamePlaceholder')">
-          <input v-model="form.gateway_hashpay_name" maxlength="40" class="input input-bordered w-full" />
+          <Input v-model="form.gateway_hashpay_name" maxlength="40" />
         </FormField>
         <FormField :label="t('payment.gatewayDesc')">
-          <textarea v-model="form.gateway_hashpay_desc" class="textarea textarea-bordered w-full" rows="2" maxlength="200"></textarea>
+          <Textarea v-model="form.gateway_hashpay_desc" rows="2" maxlength="200" />
         </FormField>
         <FormField :label="t('payment.gatewayPriority')">
-          <input v-model.number="form.gateway_hashpay_priority" type="number" min="-1" max="99" class="input input-bordered w-full" />
+          <Input v-model.number="form.gateway_hashpay_priority" type="number" min="-1" max="99" />
         </FormField>
         <FormField :label="t('payment.hashpayBaseUrl')">
-          <input v-model="form.hashpay_base_url" class="input input-bordered w-full" />
+          <Input v-model="form.hashpay_base_url" />
         </FormField>
         <FormField :label="t('payment.hashpayMerchantId')">
-          <input v-model="form.hashpay_merchant_id" class="input input-bordered w-full" />
+          <Input v-model="form.hashpay_merchant_id" />
         </FormField>
         <FormField :label="t('payment.hashpayPrivateKey')" :hint="t('payment.hashpayPrivateKeyPlaceholder')">
-          <textarea v-model="form.hashpay_private_key" class="textarea textarea-bordered w-full font-mono" rows="5"></textarea>
+          <Textarea v-model="form.hashpay_private_key" class="font-mono" rows="5" />
         </FormField>
         <FormField :label="t('payment.hashpayCurrency')">
-          <input v-model="form.hashpay_currency" class="input input-bordered w-full" />
+          <Input v-model="form.hashpay_currency" />
         </FormField>
         <FormField :label="t('payment.notifyPath')" :hint="t('payment.hashpayNotifyPathPlaceholder')">
-          <input v-model="form.hashpay_notify_path" class="input input-bordered w-full" />
+          <Input v-model="form.hashpay_notify_path" />
         </FormField>
         <FormField :label="t('payment.notifyUrl')">
-          <input v-model="form.hashpay_notify_url" class="input input-bordered w-full" />
+          <Input v-model="form.hashpay_notify_url" />
         </FormField>
       </template>
 
       <FormField :label="t('payment.publicBaseUrl')">
-        <input v-model="form.shop_public_base_url" class="input input-bordered w-full" />
+        <Input v-model="form.shop_public_base_url" />
       </FormField>
 
-      <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="save">
-        <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+      <Button :disabled="saving" @click="save">
+        <Loader2 v-if="saving" class="animate-spin" />
         {{ t('common.save') }}
-      </button>
+      </Button>
     </div>
   </PageCard>
 </template>
@@ -102,8 +100,16 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Info, Loader2 } from '@lucide/vue'
 import { api } from '@/api'
 import PageCard from '@/components/PageCard.vue'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
+import { Textarea } from '@/components/ui/textarea'
 import FormField from '@/components/ui/FormField.vue'
 import { toastError, toastSuccess } from '@/components/ui/toast'
 
@@ -112,6 +118,11 @@ const loading = ref(false)
 const saving = ref(false)
 const form = ref<any>({})
 const enabled = reactive({ bepusdt: true, hashpay: false })
+
+function onGateway(name: 'bepusdt' | 'hashpay', v: boolean) {
+  enabled[name] = v
+  syncGateway()
+}
 
 function syncGateway() {
   const list: string[] = []

@@ -2,22 +2,22 @@
   <div>
     <div class="mb-4 flex items-center justify-between gap-3">
       <h2 class="text-xl font-bold">{{ t('audit.title') }}</h2>
-      <button class="btn btn-outline btn-sm" @click="load">{{ t('common.refresh') }}</button>
+      <Button variant="outline" size="sm" @click="load">{{ t('common.refresh') }}</Button>
     </div>
 
-    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-      <div class="card-body !p-0">
+    <Card>
+      <CardContent class="p-0">
         <DataTable :columns="columns" :rows="logs" :loading="loading" :empty-text="t('audit.empty')">
           <template #time="{ row }">{{ fmtDate(row.created_at) }}</template>
           <template #action="{ row }">
-            <span class="badge badge-sm badge-ghost">{{ actionText(row.action) }}</span>
+            <Badge variant="secondary">{{ actionText(row.action) }}</Badge>
           </template>
           <template #target="{ row }">{{ row.target_type }} {{ row.target_id }}</template>
           <template #before="{ row }"><span class="mono text-xs">{{ row.before || '-' }}</span></template>
           <template #after="{ row }"><span class="mono text-xs">{{ row.after || '-' }}</span></template>
         </DataTable>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
@@ -26,6 +26,9 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 import { fmtDate } from '@/utils/format'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
 
 const { t } = useI18n()

@@ -2,7 +2,7 @@
 
 English: [README.en.md](README.en.md) ｜ 更新日志：[CHANGELOG.md](CHANGELOG.md)
 
-**LiteShop v0.2.0（代号：月球 Moon）** —— 基于 **Go + SQLite** 的自动发卡系统，对接 [BEpusdt](https://github.com/v03413/BEpusdt) 与 [HashPay](https://github.com/TGDash/HashPay) 加密货币收单网关（**双网关并存，买家自主选择**）。买家前台使用 Nuxt 3 SSR + Tailwind；管理后台使用 Vue 3 + TypeScript + Tailwind CSS + daisyUI + Pinia；Go 提供 JSON API、支付回调、内嵌后台与后台任务。
+**LiteShop v0.2.0（代号：月球 Moon）** —— 基于 **Go + SQLite** 的自动发卡系统，对接 [BEpusdt](https://github.com/v03413/BEpusdt) 与 [HashPay](https://github.com/TGDash/HashPay) 加密货币收单网关（**双网关并存，买家自主选择**）。买家前台使用 Nuxt 3 SSR + Tailwind CSS 4；管理后台使用 Vue 3 + TypeScript + Tailwind CSS 4 + shadcn-vue + Pinia；Go 提供 JSON API、支付回调、内嵌后台与后台任务。
 
 > 版本沿革：v0.1.0 代号**地球（Earth）**；v0.2.0 代号**月球（Moon）**——分层、抽象、可观测性与稳定性全面升级，详见 [CHANGELOG](CHANGELOG.md)。
 >
@@ -76,7 +76,7 @@ Caddy (反向代理 :443)
 | --- | --- | --- |
 | Go API | Go 1.25.12+ + SQLite (modernc) | 8080 |
 | 前台 SSR | Nuxt 3 + Tailwind | 3001 |
-| 后台 SPA | Vue 3 + TS + Tailwind CSS + daisyUI + Pinia | 内嵌进 Go |
+| 后台 SPA | Vue 3 + TS + Tailwind CSS 4 + shadcn-vue + Pinia | 内嵌进 Go |
 
 ### 分层
 
@@ -134,8 +134,8 @@ HTTP handler (internal/api)
 
 | 层 | 技术 |
 | --- | --- |
-| 前台 | Nuxt 3 SSR + Tailwind CSS 4 + daisyUI 5 |
-| 后台 | Vue 3 + Vite + TypeScript + Tailwind CSS + daisyUI + Pinia + VueUse + @lucide/vue |
+| 前台 | Nuxt 3 SSR + Tailwind CSS 4 + shadcn-vue |
+| 后台 | Vue 3 + Vite + TypeScript + Tailwind CSS 4 + shadcn-vue + Pinia + VueUse + @lucide/vue |
 | 后台质量 | ESLint（flat config + typescript-eslint + eslint-plugin-vue）+ Prettier |
 | API 类型 | OpenAPI → TS 自动生成（`admin-ui npm run gen:api` → `src/api/types.ts`） |
 | 后端 | Go 1.25.12+（govulncheck 全绿） |
@@ -170,7 +170,7 @@ internal/version/       构建版本信息（-ldflags 注入）
 internal/config/        配置默认值
 internal/testutil/      集成测试设施：临时 SQLite 测试库 + MockGateway + NotifyRecorder
 internal/integration/   订单集成测试（支付回调 / 重复回调 / 取消 / 超时 / 并发压测）
-admin-ui/               Tailwind CSS + daisyUI 后台（src/api|views|stores|hooks|utils|components）
+admin-ui/               shadcn-vue 后台（src/api|views|stores|hooks|utils|components）
 storefront/             Nuxt 3 SSR 前台
 logs/                   运行日志（app.log / payment.log / security.log）
 CHANGELOG.md            更新日志（v0.1 地球 / v0.2 月球）

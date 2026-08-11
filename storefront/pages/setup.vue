@@ -1,53 +1,62 @@
 <template>
-  <div class="min-h-screen flex items-start justify-center py-12 px-4">
-    <div class="w-full max-w-lg card bg-base-100 shadow-sm">
-      <div class="card-body">
-      <h1 class="text-xl font-bold text-base-content mb-2">{{ t('setupTitle') }}</h1>
-      <p class="text-base-content/60 text-sm mb-4">{{ t('setupIntro') }}</p>
-      <div v-if="error" class="alert alert-error text-sm mb-3">{{ error }}</div>
-      <form class="grid gap-3" @submit.prevent="submit">
-        <div>
-          <label class="text-sm font-semibold text-base-content">{{ t('siteTitle') }}</label>
-          <input v-model="form.site_title" class="input input-bordered w-full mt-1" />
-        </div>
-        <div>
-          <label class="text-sm font-semibold text-base-content">{{ t('adminUsername') }}</label>
-          <input v-model="form.username" class="input input-bordered w-full mt-1" />
-        </div>
-        <div>
-          <label class="text-sm font-semibold text-base-content">{{ t('adminPassword') }}</label>
-          <input type="password" v-model="form.password" class="input input-bordered w-full mt-1" />
-        </div>
-        <div>
-          <label class="text-sm font-semibold text-base-content">{{ t('confirmPassword') }}</label>
-          <input type="password" v-model="form.confirm" class="input input-bordered w-full mt-1" />
-        </div>
-        <div>
-          <label class="text-sm font-semibold text-base-content">{{ t('publicBaseUrl') }}</label>
-          <input v-model="form.public_base_url" class="input input-bordered w-full mt-1" />
-        </div>
-        <div>
-          <label class="text-sm font-semibold text-base-content">{{ t('bepusdtBaseUrl') }}</label>
-          <input v-model="form.bepusdt_base_url" class="input input-bordered w-full mt-1" />
-        </div>
-        <div>
-          <label class="text-sm font-semibold text-base-content">{{ t('bepusdtToken') }}</label>
-          <input v-model="form.bepusdt_api_token" class="input input-bordered w-full mt-1" />
-        </div>
-        <div>
-          <label class="text-sm font-semibold text-base-content">{{ t('tradeTypes') }}</label>
-          <input v-model="form.trade_types" class="input input-bordered w-full mt-1" />
-        </div>
-        <button type="submit" :disabled="loading" class="btn btn-primary normal-case disabled:opacity-60">
-          {{ loading ? t('processing') : t('completeSetup') }}
-        </button>
-      </form>
-      </div>
-    </div>
+  <div class="flex items-start justify-center px-4 py-12">
+    <Card class="w-full max-w-lg">
+      <CardContent>
+        <h1 class="mb-2 text-xl font-bold">{{ t('setupTitle') }}</h1>
+        <p class="mb-4 text-sm text-muted-foreground">{{ t('setupIntro') }}</p>
+        <Alert v-if="error" variant="destructive" class="mb-3">
+          <AlertDescription>{{ error }}</AlertDescription>
+        </Alert>
+        <form class="grid gap-3" @submit.prevent="submit">
+          <div>
+            <label class="text-sm font-semibold">{{ t('siteTitle') }}</label>
+            <Input v-model="form.site_title" class="mt-1" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">{{ t('adminUsername') }}</label>
+            <Input v-model="form.username" class="mt-1" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">{{ t('adminPassword') }}</label>
+            <Input v-model="form.password" type="password" class="mt-1" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">{{ t('confirmPassword') }}</label>
+            <Input v-model="form.confirm" type="password" class="mt-1" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">{{ t('publicBaseUrl') }}</label>
+            <Input v-model="form.public_base_url" class="mt-1" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">{{ t('bepusdtBaseUrl') }}</label>
+            <Input v-model="form.bepusdt_base_url" class="mt-1" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">{{ t('bepusdtToken') }}</label>
+            <Input v-model="form.bepusdt_api_token" class="mt-1" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">{{ t('tradeTypes') }}</label>
+            <Input v-model="form.trade_types" class="mt-1" />
+          </div>
+          <Button type="submit" :disabled="loading" class="w-fit">
+            <Loader2 v-if="loading" class="animate-spin" />
+            {{ loading ? t('processing') : t('completeSetup') }}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
+import { Loader2 } from '@lucide/vue'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+
 const { t } = useI18n()
 const api = useApi()
 const loading = ref(false)

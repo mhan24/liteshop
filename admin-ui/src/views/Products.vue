@@ -2,13 +2,11 @@
   <div>
     <div class="mb-4 flex items-center justify-between gap-3">
       <h2 class="text-xl font-bold">{{ t('products.title') }}</h2>
-      <button class="btn btn-primary btn-sm" @click="$router.push('/products/new')">
-        {{ t('products.new') }}
-      </button>
+      <Button size="sm" @click="$router.push('/products/new')">{{ t('products.new') }}</Button>
     </div>
 
-    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-      <div class="card-body !p-0">
+    <Card>
+      <CardContent class="p-0">
         <DataTable :columns="columns" :rows="pagedProducts" :loading="loading" :empty-text="t('audit.empty')">
           <template #image="{ row }">
             <div class="h-12 w-12">
@@ -17,29 +15,34 @@
           </template>
           <template #category="{ row }">{{ row.category || t('products.defaultCategory') }}</template>
           <template #delivery="{ row }">
-            <span class="badge badge-sm" :class="row.delivery_type === 'manual' ? 'badge-warning' : 'badge-success'">
+            <Badge
+              variant="secondary"
+              :class="row.delivery_type === 'manual' ? 'bg-amber-500/15 text-amber-700' : 'bg-emerald-500/15 text-emerald-700'"
+            >
               {{ row.delivery_type === 'manual' ? t('products.manualDelivery') : t('products.autoDelivery') }}
-            </span>
+            </Badge>
           </template>
           <template #price="{ row }">{{ (row.price_cents / 100).toFixed(2) }}</template>
           <template #actions="{ row }">
             <div class="flex items-center gap-1">
-              <button class="btn btn-ghost btn-xs" @click="$router.push('/products/' + row.id + '/edit')">
+              <Button variant="ghost" size="sm" class="h-7 px-2" @click="$router.push('/products/' + row.id + '/edit')">
                 {{ t('common.edit') }}
-              </button>
-              <button
-                class="btn btn-ghost btn-xs"
-                :class="{ 'btn-disabled': row.delivery_type === 'manual' }"
-                :data-tip="row.delivery_type === 'manual' ? t('products.cardsDisabledForManual') : ''"
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-7 px-2"
+                :disabled="row.delivery_type === 'manual'"
+                :title="row.delivery_type === 'manual' ? t('products.cardsDisabledForManual') : ''"
                 @click="$router.push('/products/' + row.id + '/cards')"
               >
                 {{ t('cards.title') }}
-              </button>
+              </Button>
             </div>
           </template>
         </DataTable>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
 
     <PaginationBar v-model:page="currentPage" :total="products.length" :page-size="pageSize" />
   </div>
@@ -49,6 +52,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ProductImage from '@/components/ui/ProductImage.vue'

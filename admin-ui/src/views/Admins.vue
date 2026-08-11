@@ -2,54 +2,78 @@
   <div>
     <div class="mb-4 flex items-center justify-between gap-3">
       <h2 class="text-xl font-bold">{{ t('admins.title') }}</h2>
-      <button class="btn btn-primary btn-sm" @click="dialog = true">{{ t('admins.add') }}</button>
+      <Button size="sm" @click="dialog = true">{{ t('admins.add') }}</Button>
     </div>
 
-    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-      <div class="card-body !p-0">
+    <Card>
+      <CardContent class="p-0">
         <DataTable :columns="columns" :rows="admins" :loading="loading" :empty-text="t('audit.empty')">
           <template #role="{ row }">
-            <span class="badge badge-sm" :class="roleBadgeClass(row.role)">{{ roleText(row.role) }}</span>
+            <Badge
+              :class="{
+                'bg-red-500/15 text-red-700': row.role === 'admin',
+                'bg-amber-500/15 text-amber-700': row.role === 'operator',
+                'bg-muted text-muted-foreground': row.role === 'viewer',
+              }"
+            >
+              {{ roleText(row.role) }}
+            </Badge>
           </template>
           <template #createdAt="{ row }">{{ fmtDate(row.created_at) }}</template>
           <template #actions="{ row }">
             <div class="flex items-center gap-2">
-              <select
-                :model-value="row.role"
-                class="select select-bordered select-xs w-28"
-                @change="(e: any) => setRole(row, e.target.value)"
+              <Select :model-value="row.role" @update:model-value="(v: string) => setRole(row, v)">
+                <SelectTrigger class="w-28 h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="(label, key) in roleOptions" :key="key" :value="key">
+                    {{ label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-8 px-2 text-destructive"
+                :disabled="row.id === currentId"
+                @click="remove(row)"
               >
-                <option v-for="(label, key) in roleOptions" :key="key" :value="key">{{ label }}</option>
-              </select>
-              <button class="btn btn-ghost btn-error btn-xs" :disabled="row.id === currentId" @click="remove(row)">
                 {{ t('admins.delete') }}
-              </button>
+              </Button>
             </div>
           </template>
         </DataTable>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
 
     <Modal :open="dialog" :title="t('admins.add')" @close="dialog = false">
       <div class="space-y-4">
         <FormField :label="t('admins.username')">
-          <input v-model="form.username" class="input input-bordered w-full" />
+          <Input v-model="form.username" />
         </FormField>
         <FormField :label="t('admins.password')">
-          <input v-model="form.password" type="password" class="input input-bordered w-full" />
+          <Input v-model="form.password" type="password" />
         </FormField>
         <FormField :label="t('admins.role')">
-          <select v-model="form.role" class="select select-bordered w-full">
-            <option v-for="(label, key) in roleOptions" :key="key" :value="key">{{ label }}</option>
-          </select>
+          <Select v-model="form.role">
+            <SelectTrigger class="w-full">
+              <SelectValue :placeholder="t('admins.role')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="(label, key) in roleOptions" :key="key" :value="key">
+                {{ label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </FormField>
       </div>
       <template #footer>
-        <button class="btn btn-ghost" @click="dialog = false">{{ t('common.cancel') }}</button>
-        <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="create">
-          <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+        <Button variant="outline" @click="dialog = false">{{ t('common.cancel') }}</Button>
+        <Button :disabled="saving" @click="create">
+          <Loader2 v-if="saving" class="animate-spin" />
           {{ t('common.confirm') }}
-        </button>
+        </Button>
       </template>
     </Modal>
   </div>
@@ -58,8 +82,14 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Loader2 } from '@lucide/vue'
 import { api } from '@/api'
 import { fmtDate } from '@/utils/format'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
 import Modal from '@/components/ui/Modal.vue'
 import FormField from '@/components/ui/FormField.vue'
@@ -90,9 +120,6 @@ const roleOptions = computed(() => ({
 function roleText(role: string) {
   const m: any = { admin: t('admins.roleAdmin'), operator: t('admins.roleOperator'), viewer: t('admins.roleViewer') }
   return m[role] || role
-}
-function roleBadgeClass(role: string) {
-  return { admin: 'badge-error', operator: 'badge-warning', viewer: 'badge-ghost' }[role] || 'badge-ghost'
 }
 async function load() {
   loading.value = true

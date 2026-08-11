@@ -1,85 +1,92 @@
 <template>
   <PageCard :title="t('notify.title')" :loading="loading">
-    <div class="max-w-3xl space-y-4">
+    <div class="max-w-3xl space-y-5">
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField :label="t('notify.smtpHost')">
-          <input v-model="form.smtp_host" class="input input-bordered w-full" />
+          <Input v-model="form.smtp_host" />
         </FormField>
         <FormField :label="t('notify.smtpPort')">
-          <input v-model.number="form.smtp_port" type="number" min="1" class="input input-bordered w-full" />
+          <Input v-model.number="form.smtp_port" type="number" min="1" />
         </FormField>
       </div>
       <FormField :label="t('notify.smtpUsername')" :hint="t('notify.smtpUsernamePlaceholder')">
-        <input v-model="form.smtp_username" class="input input-bordered w-full" />
+        <Input v-model="form.smtp_username" />
       </FormField>
       <FormField :label="t('notify.smtpPassword')" :hint="t('notify.smtpPasswordPlaceholder')">
-        <input v-model="form.smtp_password" type="password" class="input input-bordered w-full" />
+        <Input v-model="form.smtp_password" type="password" />
       </FormField>
       <FormField :label="t('notify.smtpFrom')">
-        <input v-model="form.smtp_from" class="input input-bordered w-full" />
+        <Input v-model="form.smtp_from" />
       </FormField>
-      <button class="btn btn-outline btn-sm" :class="{ 'btn-disabled': testing === 'email' }" @click="testEmail">
-        <span v-if="testing === 'email'" class="loading loading-spinner loading-xs"></span>
+      <Button variant="outline" size="sm" :disabled="testing === 'email'" @click="testEmail">
+        <Loader2 v-if="testing === 'email'" class="animate-spin" />
         {{ t('notify.testEmail') }}
-      </button>
+      </Button>
 
       <FormField :label="t('notify.telegramChatId')">
-        <input v-model="form.telegram_chat_id" class="input input-bordered w-full" />
+        <Input v-model="form.telegram_chat_id" />
       </FormField>
       <FormField :label="t('notify.telegramToken')" :hint="t('notify.telegramTokenPlaceholder')">
-        <input v-model="form.telegram_bot_token" type="password" class="input input-bordered w-full" />
+        <Input v-model="form.telegram_bot_token" type="password" />
       </FormField>
-      <button class="btn btn-outline btn-sm" :class="{ 'btn-disabled': testing === 'telegram' }" @click="testTelegram">
-        <span v-if="testing === 'telegram'" class="loading loading-spinner loading-xs"></span>
+      <Button variant="outline" size="sm" :disabled="testing === 'telegram'" @click="testTelegram">
+        <Loader2 v-if="testing === 'telegram'" class="animate-spin" />
         {{ t('notify.testTelegram') }}
-      </button>
+      </Button>
 
       <FormField :label="t('notify.webhookUrl')" :hint="t('notify.webhookPlaceholder')">
-        <input v-model="form.webhook_url" class="input input-bordered w-full" />
+        <Input v-model="form.webhook_url" />
       </FormField>
       <FormField :label="t('notify.webhookSecret')" :hint="t('notify.webhookSecretPlaceholder')">
-        <input v-model="form.webhook_secret" type="password" class="input input-bordered w-full" />
+        <Input v-model="form.webhook_secret" type="password" />
       </FormField>
 
       <FormField :label="t('notify.events')">
         <div class="flex flex-wrap gap-x-6 gap-y-2">
-          <label v-for="ev in eventList" :key="ev.key" class="flex cursor-pointer items-center gap-2">
-            <input v-model="events" type="checkbox" class="checkbox checkbox-primary checkbox-sm" :value="ev.key" />
-            <span class="text-sm">{{ ev.label }}</span>
-          </label>
+          <div v-for="ev in eventList" :key="ev.key" class="flex items-center gap-2">
+            <Checkbox
+              :id="'ev-' + ev.key"
+              :checked="events.includes(ev.key)"
+              @update:checked="toggleEvent(ev.key, $event)"
+            />
+            <Label :for="'ev-' + ev.key" class="text-sm">{{ ev.label }}</Label>
+          </div>
         </div>
       </FormField>
 
-      <div class="divider">{{ t('notify.eventTemplates') }}</div>
+      <Separator />
+      <h3 class="font-semibold">{{ t('notify.eventTemplates') }}</h3>
       <FormField :label="t('notify.adminEmail')" :hint="t('notify.adminEmailPlaceholder')">
-        <input v-model="form.notify_admin_email" class="input input-bordered w-full" />
+        <Input v-model="form.notify_admin_email" />
       </FormField>
 
-      <details v-for="ev in eventList" :key="ev.key" class="collapse collapse-arrow rounded-box bg-base-200/70">
-        <summary class="collapse-title text-sm font-medium">{{ ev.label }}</summary>
-        <div class="collapse-content space-y-4">
-          <FormField :label="t('notify.eventTelegram')">
-            <textarea v-model="form.event_templates[ev.key].telegram" class="textarea textarea-bordered w-full font-mono" rows="5"></textarea>
-          </FormField>
-          <template v-if="ev.key === 'order_created' || ev.key === 'delivered'">
-            <FormField :label="t('notify.eventMailSubject')">
-              <input v-model="form.event_templates[ev.key].mail_subject" class="input input-bordered w-full" />
+      <Accordion type="single" collapsible class="w-full">
+        <AccordionItem v-for="ev in eventList" :key="ev.key" :value="ev.key">
+          <AccordionTrigger>{{ ev.label }}</AccordionTrigger>
+          <AccordionContent class="space-y-4">
+            <FormField :label="t('notify.eventTelegram')">
+              <Textarea v-model="form.event_templates[ev.key].telegram" class="font-mono" rows="5" />
             </FormField>
-            <FormField :label="t('notify.eventMailBody')">
-              <textarea v-model="form.event_templates[ev.key].mail_body" class="textarea textarea-bordered w-full font-mono" rows="9"></textarea>
-            </FormField>
-          </template>
-          <button class="btn btn-outline btn-sm" :class="{ 'btn-disabled': testing === ev.key }" @click="testEvent(ev.key)">
-            <span v-if="testing === ev.key" class="loading loading-spinner loading-xs"></span>
-            {{ t('notify.test') }}
-          </button>
-        </div>
-      </details>
+            <template v-if="ev.key === 'order_created' || ev.key === 'delivered'">
+              <FormField :label="t('notify.eventMailSubject')">
+                <Input v-model="form.event_templates[ev.key].mail_subject" />
+              </FormField>
+              <FormField :label="t('notify.eventMailBody')">
+                <Textarea v-model="form.event_templates[ev.key].mail_body" class="font-mono" rows="9" />
+              </FormField>
+            </template>
+            <Button variant="outline" size="sm" :disabled="testing === ev.key" @click="testEvent(ev.key)">
+              <Loader2 v-if="testing === ev.key" class="animate-spin" />
+              {{ t('notify.test') }}
+            </Button>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
 
-      <button class="btn btn-primary" :class="{ 'btn-disabled': saving }" @click="save">
-        <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+      <Button :disabled="saving" @click="save">
+        <Loader2 v-if="saving" class="animate-spin" />
         {{ t('common.save') }}
-      </button>
+      </Button>
     </div>
   </PageCard>
 </template>
@@ -87,8 +94,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Loader2 } from '@lucide/vue'
 import { api } from '@/api'
 import PageCard from '@/components/PageCard.vue'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
+import { Textarea } from '@/components/ui/textarea'
 import FormField from '@/components/ui/FormField.vue'
 import { toastError, toastSuccess, toastWarning } from '@/components/ui/toast'
 
@@ -109,6 +124,12 @@ const eventList = computed(() => [
   { key: 'low_stock', label: t('notify.eventLowStock') },
   { key: 'system_error', label: t('notify.eventSystemError') },
 ])
+
+function toggleEvent(key: string, v: boolean) {
+  const idx = events.value.indexOf(key)
+  if (v && idx < 0) events.value.push(key)
+  if (!v && idx >= 0) events.value.splice(idx, 1)
+}
 
 onMounted(async () => {
   loading.value = true

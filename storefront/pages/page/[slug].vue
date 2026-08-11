@@ -1,13 +1,15 @@
 <template>
-  <div class="max-w-2xl card bg-base-100 shadow-sm">
-    <div class="card-body">
-      <h1 class="text-xl font-bold text-base-content mb-2">{{ title }}</h1>
-      <div class="md-body text-base-content/80" v-html="html"></div>
-    </div>
-  </div>
+  <Card class="w-full max-w-2xl">
+    <CardContent>
+      <h1 class="mb-2 text-xl font-bold">{{ title }}</h1>
+      <div class="md-body text-muted-foreground" v-html="html"></div>
+    </CardContent>
+  </Card>
 </template>
 
 <script setup lang="ts">
+import { Card, CardContent } from '@/components/ui/card'
+
 const route = useRoute()
 const { t } = useI18n()
 const api = useApi()

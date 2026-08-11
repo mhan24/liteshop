@@ -1,39 +1,50 @@
 <template>
-  <div v-if="maintenance" class="min-h-screen flex items-center justify-center px-4">
-    <div class="card w-full max-w-md bg-base-100 shadow-xl text-center">
-      <div class="card-body py-12">
-        <h1 class="text-2xl font-bold text-base-content">{{ t('maintenance') }}</h1>
-        <p class="text-base-content/60 mt-3">{{ maintenanceMessage || t('maintenanceMsg') }}</p>
-        <form class="mt-6 flex gap-2" @submit.prevent="unlock">
-          <input v-model="unlockPassword" type="password" :placeholder="t('unlockPassword')" class="input input-bordered flex-1" />
-          <button type="submit" :disabled="unlocking" class="btn btn-primary disabled:opacity-60">
+  <div v-if="maintenance" class="flex min-h-screen items-center justify-center px-4">
+    <Card class="w-full max-w-md">
+      <CardContent class="space-y-4 py-8 text-center">
+        <h1 class="text-2xl font-bold">{{ t('maintenance') }}</h1>
+        <p class="text-muted-foreground">{{ maintenanceMessage || t('maintenanceMsg') }}</p>
+        <form class="flex gap-2 text-left" @submit.prevent="unlock">
+          <Input v-model="unlockPassword" type="password" :placeholder="t('unlockPassword')" class="flex-1" />
+          <Button type="submit" :disabled="unlocking">
+            <Loader2 v-if="unlocking" class="animate-spin" />
             {{ unlocking ? t('unlocking') : t('unlock') }}
-          </button>
+          </Button>
         </form>
-        <p v-if="unlockError" class="text-error text-sm mt-2">{{ unlockError }}</p>
-      </div>
-    </div>
+        <p v-if="unlockError" class="text-sm text-destructive">{{ unlockError }}</p>
+      </CardContent>
+    </Card>
   </div>
-  <div v-else class="min-h-screen flex flex-col">
+  <div v-else class="flex min-h-screen flex-col">
     <SiteHeader :site="site" />
-    <main class="flex-1 max-w-6xl w-full mx-auto px-4 py-6">
+    <main class="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
       <NuxtPage />
     </main>
     <SiteFooter :site="site" />
 
-    <div v-if="showAnnouncement" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div class="modal-box max-w-md">
-        <h2 class="text-lg font-bold">{{ site?.title || 'LiteShop' }}</h2>
-        <div class="md-body text-base-content/70 mt-2 text-sm" v-html="renderMarkdown(site?.announcement)"></div>
-        <div class="modal-action">
-          <button type="button" class="btn btn-primary btn-sm" @click="dismissAnnouncement">{{ t('close') }}</button>
-        </div>
-      </div>
-    </div>
+    <Dialog :open="showAnnouncement" @update:open="showAnnouncement = $event">
+      <DialogContent class="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ site?.title || 'LiteShop' }}</DialogTitle>
+        </DialogHeader>
+        <div class="md-body text-sm text-muted-foreground" v-html="renderMarkdown(site?.announcement)"></div>
+        <DialogFooter>
+          <Button size="sm" @click="dismissAnnouncement">{{ t('close') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
+import { Loader2 } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import SiteFooter from '@/components/SiteFooter.vue'
+import SiteHeader from '@/components/SiteHeader.vue'
+
 const route = useRoute()
 const origin = useSiteOrigin()
 const { t } = useI18n()

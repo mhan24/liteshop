@@ -3,67 +3,72 @@
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h2 class="text-xl font-bold">{{ t('orders.title') }}</h2>
       <div class="flex items-center gap-2">
-        <button v-if="selected.length" class="btn btn-warning btn-sm" @click="batchResend">
+        <Button v-if="selected.length" variant="secondary" size="sm" @click="batchResend">
           {{ t('orders.batchResend') }} ({{ selected.length }})
-        </button>
-        <button class="btn btn-outline btn-sm" @click="exportCSV">{{ t('common.exportCsv') }}</button>
+        </Button>
+        <Button variant="outline" size="sm" @click="exportCSV">{{ t('common.exportCsv') }}</Button>
       </div>
     </div>
 
-    <div class="card mb-4 bg-base-100 shadow-sm ring-1 ring-base-300">
-      <div class="card-body">
-        <form class="flex flex-wrap items-end gap-3" @submit.prevent="search">
+    <Card class="mb-4">
+      <CardContent>
+        <form class="flex flex-wrap items-end gap-4" @submit.prevent="search">
           <FormField :label="t('orders.searchPlaceholder')">
-            <input
+            <Input
               v-model="filters.q"
-              class="input input-bordered input-sm w-56"
+              class="w-56"
               :placeholder="t('orders.searchPlaceholder')"
             />
           </FormField>
           <FormField :label="t('orders.allStatus')">
-            <select v-model="filters.status" class="select select-bordered select-sm w-40">
-              <option value="">{{ t('orders.allStatus') }}</option>
-              <option v-for="(label, key) in statusOptions" :key="key" :value="key">{{ label }}</option>
-            </select>
+            <Select v-model="statusFilter">
+              <SelectTrigger class="w-40">
+                <SelectValue :placeholder="t('orders.allStatus')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{{ t('orders.allStatus') }}</SelectItem>
+                <SelectItem v-for="(label, key) in statusOptions" :key="key" :value="key">
+                  {{ label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </FormField>
           <FormField :label="t('orders.startDate')">
-            <input v-model="rangeStart" type="datetime-local" class="input input-bordered input-sm w-52" />
+            <Input v-model="rangeStart" type="datetime-local" class="w-52" />
           </FormField>
           <FormField :label="t('orders.endDate')">
-            <input v-model="rangeEnd" type="datetime-local" class="input input-bordered input-sm w-52" />
+            <Input v-model="rangeEnd" type="datetime-local" class="w-52" />
           </FormField>
           <div class="flex items-center gap-2">
-            <button class="btn btn-primary btn-sm" type="submit">{{ t('orders.search') }}</button>
-            <button class="btn btn-ghost btn-sm" type="button" @click="reset">{{ t('orders.reset') }}</button>
+            <Button size="sm" type="submit">{{ t('orders.search') }}</Button>
+            <Button variant="ghost" size="sm" type="button" @click="reset">{{ t('orders.reset') }}</Button>
           </div>
         </form>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
 
-    <div class="card bg-base-100 shadow-sm ring-1 ring-base-300">
-      <div class="card-body !p-0">
+    <Card>
+      <CardContent class="p-0">
         <DataTable :columns="columns" :rows="pagedOrders" :loading="loading" :empty-text="t('audit.empty')">
           <template #select="{ row }">
-            <input
-              type="checkbox"
-              class="checkbox checkbox-primary checkbox-sm"
+            <Checkbox
               :checked="selected.includes(row.id)"
-              @change="toggleSelect(row.id)"
+              @update:checked="toggleSelect(row.id)"
             />
           </template>
           <template #amount="{ row }">{{ money(row.amount_cents) }} {{ row.fiat }}</template>
           <template #status="{ row }">
-            <span class="badge badge-sm" :class="statusBadgeClass(row.status)">{{ statusText(row.status) }}</span>
+            <Badge :class="statusBadgeClass(row.status)">{{ statusText(row.status) }}</Badge>
           </template>
           <template #createdAt="{ row }">{{ date(row.created_at) }}</template>
           <template #actions="{ row }">
-            <button class="btn btn-ghost btn-xs" @click="$router.push('/orders/' + row.id)">
+            <Button variant="ghost" size="sm" class="h-7 px-2" @click="$router.push('/orders/' + row.id)">
               {{ t('common.detail') }}
-            </button>
+            </Button>
           </template>
         </DataTable>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
 
     <PaginationBar v-model:page="currentPage" :total="orders.length" :page-size="pageSize" />
   </div>
@@ -76,6 +81,12 @@ import { useI18n } from 'vue-i18n'
 import { api } from '@/api'
 import { fmtDate } from '@/utils/format'
 import { statusBadgeClass } from '@/utils/status'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import DataTable, { type DataColumn } from '@/components/ui/DataTable.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import FormField from '@/components/ui/FormField.vue'
@@ -90,8 +101,12 @@ const pageSize = ref(20)
 const rangeStart = ref('')
 const rangeEnd = ref('')
 const filters = reactive({ q: '', status: '' })
+const statusFilter = ref('all')
 const route = useRoute()
-if (typeof route.query.status === 'string') filters.status = route.query.status
+if (typeof route.query.status === 'string') {
+  filters.status = route.query.status
+  statusFilter.value = route.query.status
+}
 
 const columns = computed<DataColumn[]>(() => [
   { slot: 'select', label: '', width: '45px' },
@@ -146,11 +161,13 @@ async function load() {
   }
 }
 function search() {
+  filters.status = statusFilter.value === 'all' ? '' : statusFilter.value
   load()
 }
 function reset() {
   filters.q = ''
   filters.status = ''
+  statusFilter.value = 'all'
   rangeStart.value = ''
   rangeEnd.value = ''
   load()
