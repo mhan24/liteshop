@@ -25,6 +25,7 @@
 
 - 前台（storefront）同步升级到 **Tailwind CSS 4 + daisyUI 5**（移除 Tailwind 3 / daisyUI 4 / autoprefixer / postcss 配置与 `tailwind.config.ts`），主题同样切换为 **Wise DESIGN.md** 配色与胶囊按钮风格
 - Nuxt 3 升级至最新 3.21.x，新增 `compatibilityDate`；`btn-group` 迁移为 daisyUI 5 的 `join`，清理写死的旧品牌色（含 favicon 与 md-body 渲染样式）
+- 安全：后台 CSP 对齐前台策略，放行 Cloudflare 边缘注入的 JS 检测内联脚本（内容含请求级 ray ID，无法用 hash 白名单）与 `static.cloudflareinsights.com` Web Analytics beacon，同步更新 `internal/api/security_test.go`
 
 ## v0.2.1（2026-08-11）— 新增 HashPay 支付网关
 

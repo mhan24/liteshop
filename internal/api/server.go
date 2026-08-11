@@ -321,8 +321,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	// 管理后台 SPA 的 CSP（/docs 依赖 CDN 脚本，不在此范围）。
 	if strings.HasPrefix(r.URL.Path, "/admin") {
-		// script-src 需 'unsafe-eval'：vue-i18n 消息编译在运行时使用 new Function。
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+		// script-src 需 'unsafe-eval'（vue-i18n 消息编译使用 new Function）与 'unsafe-inline'
+		// （站点位于 Cloudflare 之后，边缘会向 HTML 注入 JS 检测内联脚本，内容含每次请求
+		// 变化的 ray ID，无法用固定 hash 放行）；static.cloudflareinsights.com 为
+		// Cloudflare Web Analytics beacon（与前台策略保持一致）。
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://static.cloudflareinsights.com https://cloudflareinsights.com; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 	}
 	s.mux.ServeHTTP(rec, r.WithContext(ctx))
 	logging.App().Sugar().Infow("http request",

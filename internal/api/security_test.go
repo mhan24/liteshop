@@ -48,6 +48,14 @@ func TestSecurityHeaders(t *testing.T) {
 	if !strings.Contains(csp, "script-src 'self' 'unsafe-eval'") {
 		t.Fatalf("admin CSP missing script-src: %q", csp)
 	}
+	// 站点位于 Cloudflare 之后，边缘会注入 JS 检测内联脚本与 Web Analytics beacon，
+	// 后台 CSP 与前台一致放行内联与 beacon 域名（含 test.go 同步断言）。
+	if !strings.Contains(csp, "'unsafe-inline'") {
+		t.Fatalf("admin CSP missing unsafe-inline for Cloudflare edge scripts: %q", csp)
+	}
+	if !strings.Contains(csp, "https://static.cloudflareinsights.com") {
+		t.Fatalf("admin CSP missing Cloudflare Web Analytics beacon: %q", csp)
+	}
 }
 
 // TestHSTSWhenHTTPS 仅 HTTPS 请求下发 HSTS。
