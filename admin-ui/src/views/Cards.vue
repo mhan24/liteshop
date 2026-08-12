@@ -15,7 +15,7 @@
       <CardContent class="space-y-3">
         <Textarea v-model="cardsText" class="font-mono" rows="6" placeholder="CARD-001&#10;CARD-002" />
         <div class="flex items-center gap-2">
-          <Checkbox id="dedupe" :checked="dedupe" @update:checked="dedupe = $event" />
+          <Checkbox id="dedupe" :model-value="dedupe" @update:model-value="dedupe = $event === true" />
           <Label for="dedupe" class="text-sm">{{ t('cards.dedupe') }}</Label>
         </div>
         <Button size="sm" :disabled="importing" @click="importCards">
@@ -44,23 +44,23 @@
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" class="w-44">
-                <DropdownMenuItem v-if="row.status !== 'available'" @click="onAction(row, 'available')">
+                <DropdownMenuItem v-if="row.status !== 'available'" @select="onAction(row, 'available')">
                   {{ t('cards.markAvailable') }}
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="row.status !== 'locked'" @click="onAction(row, 'locked')">
+                <DropdownMenuItem v-if="row.status !== 'locked'" @select="onAction(row, 'locked')">
                   {{ t('cards.markLocked') }}
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="row.status !== 'sold'" @click="onAction(row, 'sold')">
+                <DropdownMenuItem v-if="row.status !== 'sold'" @select="onAction(row, 'sold')">
                   {{ t('cards.markSold') }}
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="row.status !== 'disabled'" @click="onAction(row, 'disabled')">
+                <DropdownMenuItem v-if="row.status !== 'disabled'" @select="onAction(row, 'disabled')">
                   {{ t('cards.markDisabled') }}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator v-if="row.status === 'available'" />
                 <DropdownMenuItem
                   v-if="row.status === 'available'"
                   class="text-destructive"
-                  @click="onAction(row, 'delete')"
+                  @select="onAction(row, 'delete')"
                 >
                   {{ t('common.delete') }}
                 </DropdownMenuItem>
