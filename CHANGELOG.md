@@ -1,5 +1,10 @@
 # 更新日志
 
+## v0.3.4（2026-08-12）— 修复确认框事件竞态（卡密删除/改状态无响应）
+
+- 修复 ConfirmHost 竞态：reka-ui 关闭弹窗触发的 `update:open(false)` 可能先于“确认”按钮事件执行，把结果解析为 false 导致删除/改状态被静默中止；按钮改用捕获阶段优先结算，close 不再覆盖结果
+- 卡密状态确认文案增加兜底（状态名缺失时回退状态键）
+
 ## v0.3.3（2026-08-12）— 修复 Checkbox/Switch 状态样式与下拉操作
 
 - 修复 reka-ui 与 shadcn 组件属性不匹配：reka-ui 只输出 `data-state`，组件样式改用 `data-[state=checked|unchecked|open|closed]` 变体（影响 Switch / Checkbox / RadioGroup / Dialog / DropdownMenu / Sheet / Select / AlertDialog / Accordion）
