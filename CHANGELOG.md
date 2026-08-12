@@ -1,5 +1,11 @@
 # 更新日志
 
+## v0.3.3（2026-08-12）— 修复 Checkbox/Switch 状态样式与下拉操作
+
+- 修复 reka-ui 与 shadcn 组件属性不匹配：reka-ui 只输出 `data-state`，组件样式改用 `data-[state=checked|unchecked|open|closed]` 变体（影响 Switch / Checkbox / RadioGroup / Dialog / DropdownMenu / Sheet / Select / AlertDialog / Accordion）
+- Checkbox/Switch 改用 `modelValue` + `update:modelValue`（原 `checked`/`update:checked` 无效导致勾选状态不显示）；值统一 `=== true` 归一化
+- DropdownMenuItem 操作事件改为 `select`（原 `click` 不触发，卡密删除/改状态不可用）
+
 ## v0.3.1（2026-08-12）— 质量门禁与发布工作流（P0）
 
 - storefront 补齐 ESLint / Prettier / TypeScript typecheck（`nuxt typecheck`），并修复既有 lint/type 问题（Turnstile 全局类型、markdown-it 15 validateLink、空 catch、未使用变量等）
