@@ -160,7 +160,11 @@
       <Separator />
       <h3 class="font-semibold">{{ t('site.maintenance') }}</h3>
       <div class="flex items-center gap-2">
-        <Switch id="maintenance" :checked="maintenanceEnabled" @update:checked="maintenanceEnabled = $event" />
+        <Switch
+          id="maintenance"
+          :model-value="maintenanceEnabled"
+          @update:model-value="maintenanceEnabled = $event === true"
+        />
         <Label for="maintenance" class="text-sm">{{ t('site.maintenanceEnabled') }}</Label>
       </div>
       <FormField :label="t('site.maintenanceMessage')" :hint="t('site.maintenanceMessagePlaceholder')">

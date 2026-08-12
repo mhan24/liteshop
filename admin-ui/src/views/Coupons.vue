@@ -82,7 +82,7 @@
           <Input v-model="expiresLocal" type="datetime-local" />
         </FormField>
         <div class="flex items-center gap-2">
-          <Checkbox id="coupon-active" :checked="form.active" @update:checked="form.active = $event" />
+          <Checkbox id="coupon-active" :model-value="form.active" @update:model-value="form.active = $event === true" />
           <Label for="coupon-active" class="text-sm">{{ t('coupons.active') }}</Label>
         </div>
       </div>

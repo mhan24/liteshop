@@ -46,8 +46,8 @@
           <div v-for="ev in eventList" :key="ev.key" class="flex items-center gap-2">
             <Checkbox
               :id="'ev-' + ev.key"
-              :checked="events.includes(ev.key)"
-              @update:checked="toggleEvent(ev.key, $event)"
+              :model-value="events.includes(ev.key)"
+              @update:model-value="toggleEvent(ev.key, $event === true)"
             />
             <Label :for="'ev-' + ev.key" class="text-sm">{{ ev.label }}</Label>
           </div>

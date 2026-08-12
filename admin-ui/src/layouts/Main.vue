@@ -45,11 +45,11 @@
           <DropdownMenuContent align="end" class="w-44">
             <DropdownMenuLabel>{{ roleLabel }}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem @click="router.push('/account')">
+            <DropdownMenuItem @select="router.push('/account')">
               <User class="h-4 w-4" />
               {{ t('nav.account') }}
             </DropdownMenuItem>
-            <DropdownMenuItem @click="onLogout">
+            <DropdownMenuItem @select="onLogout">
               <LogOut class="h-4 w-4" />
               {{ t('nav.logout') }}
             </DropdownMenuItem>

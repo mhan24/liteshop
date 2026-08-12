@@ -87,11 +87,11 @@
 
       <div class="flex items-center gap-6">
         <div class="flex items-center gap-2">
-          <Checkbox id="pinned" :checked="pinned" @update:checked="pinned = $event" />
+          <Checkbox id="pinned" :model-value="pinned" @update:model-value="pinned = $event === true" />
           <Label for="pinned" class="text-sm">{{ t('products.pinned') }}</Label>
         </div>
         <div class="flex items-center gap-2">
-          <Checkbox id="active" :checked="active" @update:checked="active = $event" />
+          <Checkbox id="active" :model-value="active" @update:model-value="active = $event === true" />
           <Label for="active" class="text-sm">{{ t('products.onSale') }}</Label>
         </div>
       </div>

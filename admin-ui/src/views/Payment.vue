@@ -4,11 +4,19 @@
       <FormField :label="t('payment.gateway')">
         <div class="flex flex-wrap gap-6">
           <div class="flex items-center gap-2">
-            <Checkbox id="gw-bepusdt" :checked="enabled.bepusdt" @update:checked="onGateway('bepusdt', $event)" />
+            <Checkbox
+              id="gw-bepusdt"
+              :model-value="enabled.bepusdt"
+              @update:model-value="onGateway('bepusdt', $event === true)"
+            />
             <Label for="gw-bepusdt" class="text-sm">{{ t('payment.bepusdtEnabled') }}</Label>
           </div>
           <div class="flex items-center gap-2">
-            <Checkbox id="gw-hashpay" :checked="enabled.hashpay" @update:checked="onGateway('hashpay', $event)" />
+            <Checkbox
+              id="gw-hashpay"
+              :model-value="enabled.hashpay"
+              @update:model-value="onGateway('hashpay', $event === true)"
+            />
             <Label for="gw-hashpay" class="text-sm">{{ t('payment.hashpayEnabled') }}</Label>
           </div>
         </div>
