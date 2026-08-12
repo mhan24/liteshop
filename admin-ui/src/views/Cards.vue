@@ -160,7 +160,7 @@ async function onAction(row: any, cmd: string) {
   }
   const ok = await confirm({
     title: t('common.prompt'),
-    message: t('cards.statusConfirm').replace('{status}', statusText(cmd)),
+    message: t('cards.statusConfirm').replace('{status}', statusText(cmd) || cmd),
     danger: true,
   })
   if (!ok) return
