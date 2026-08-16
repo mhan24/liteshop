@@ -1,0 +1,76 @@
+package application
+
+import (
+	"errors"
+	"time"
+
+	"shop/internal/platform/logging"
+
+	"go.uber.org/zap"
+)
+
+// ErrCallbackInvalid 回调验签失败（网关应重试投递其他渠道）。
+var ErrCallbackInvalid = errors.New("payment callback invalid")
+
+// HandlePaymentCallback 处理支付网关回调：验签 → 按状态流转订单。
+// 网关适配器由组合根经 GatewayProvider 注入；本方法即"业务用例"，
+// handler 只做 HTTP 适配，不接触支付 SDK。
+func (s *OrderService) HandlePaymentCallback(gateway, requestID string, body []byte) error {
+	gw := s.gatewayProvider(gateway)
+	if gw == nil {
+		return ErrGatewayNotConfigured
+	}
+	cb, err := gw.VerifyCallback(body)
+	if err != nil {
+		logging.Payment().Warn(gateway+" callback verify failed",
+			zap.String("request_id", requestID),
+			zap.Int("body_bytes", len(body)),
+			zap.String("result", "verify_failed"),
+			zap.Error(err),
+		)
+		return ErrCallbackInvalid
+	}
+	logging.Payment().Info(gateway+" callback",
+		zap.String("request_id", requestID),
+		zap.String("order_no", cb.OrderID),
+		zap.String("trade_id", cb.TradeID),
+		zap.String("trace_id", cb.TradeID),
+		zap.String("block_transaction_id", cb.BlockTransactionID),
+		zap.String("status", string(cb.Status)),
+		zap.Time("callback_time", time.Now()),
+	)
+	// 只认归一化状态：适配器负责把 "2"/"paid"/"expired" 等原始值映射为内部枚举。
+	switch cb.Status {
+	case PaymentTxPaid:
+		return s.applyPaidCallback(gateway, requestID, cb)
+	case PaymentTxClosed:
+		s.HandleGatewayCancel(cb.OrderID)
+	}
+	return nil
+}
+
+// applyPaidCallback 支付成功：确认支付并发卡（幂等由 processed_events + 条件状态迁移兜底）。
+func (s *OrderService) applyPaidCallback(gateway, requestID string, cb PaymentCallback) error {
+	order, _, changed, err := s.MarkPaidAndDeliver(cb.OrderID, gateway, cb.TradeID, cb.BlockTransactionID)
+	if err != nil {
+		logging.Payment().Error("payment callback error",
+			zap.String("request_id", requestID),
+			zap.String("order_no", cb.OrderID),
+			zap.String("result", "error"),
+			zap.Error(err),
+		)
+		if s.SystemError != nil {
+			s.SystemError("支付回调处理异常 order=" + cb.OrderID + ": " + err.Error())
+		}
+		return err
+	}
+	logging.Payment().Info("payment delivered",
+		zap.String("request_id", requestID),
+		zap.String("order_no", order.OrderNo),
+		zap.Int64("amount_cents", order.AmountCents),
+		zap.String("trade_id", order.TradeID),
+		zap.String("trace_id", order.TradeID),
+		zap.String("result", map[bool]string{true: "ok", false: "noop"}[changed]),
+	)
+	return nil
+}

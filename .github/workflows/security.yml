@@ -1,0 +1,45 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # 每周一 03:17 UTC
+    - cron: '17 3 * * 1'
+
+jobs:
+  go-vulns:
+    name: Go 依赖漏洞
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 安装 govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: govulncheck ./...
+        run: govulncheck ./...
+
+  node-vulns:
+    name: Node 依赖漏洞
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 后台依赖审计
+        run: bash scripts/node-audit.sh web/admin
+      - name: 前台依赖审计
+        run: bash scripts/node-audit.sh web/storefront
+
+  secrets-config:
+    name: 密钥泄露与危险配置
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 密钥与危险配置扫描
+        run: bash scripts/security-scan.sh

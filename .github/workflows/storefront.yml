@@ -1,0 +1,28 @@
+name: storefront
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/storefront/**
+      - .github/workflows/storefront.yml
+  pull_request:
+    paths:
+      - web/storefront/**
+      - .github/workflows/storefront.yml
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/storefront/package-lock.json
+      - name: 安装依赖（npm ci）
+        working-directory: web/storefront
+        run: npm ci
+      - name: 统一命令（格式 / ESLint / TypeScript / 单元测试 / SSR 构建）
+        run: make check-storefront

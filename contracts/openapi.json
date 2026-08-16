@@ -1,0 +1,929 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "LiteShop API",
+    "description": "LiteShop 自动发卡系统 API。公共端点无需认证；管理端点需先登录获取会话 Cookie（角色要求：admin / operator / viewer）。支付回调路径可在后台配置（默认 /notify/bepusdt、/notify/hashpay）。",
+    "version": "0.1.0",
+    "contact": { "name": "LiteShop", "url": "https://github.com/mhan24/liteshop" }
+  },
+  "servers": [{ "url": "/" }],
+  "tags": [
+    { "name": "public", "description": "公开端点（前台）" },
+    { "name": "admin", "description": "管理端点（需登录，按角色分级）" },
+    { "name": "webhook", "description": "支付网关回调" }
+  ],
+  "security": [],
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": { "type": "apiKey", "in": "cookie", "name": "shop_session", "description": "登录后由服务端设置的会话 Cookie" }
+    },
+    "schemas": {
+      "Error": { "type": "object", "properties": { "error": { "type": "string" } } },
+      "Ok": { "type": "object", "properties": { "ok": { "type": "boolean" } } },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "description": { "type": "string" },
+          "image_url": { "type": "string" },
+          "price_cents": { "type": "integer" },
+          "status": { "type": "string", "enum": ["active", "disabled"] },
+          "category": { "type": "string" },
+          "sort_order": { "type": "integer" },
+          "is_pinned": { "type": "boolean" },
+          "faq": { "type": "array", "items": { "type": "object", "properties": { "q": { "type": "string" }, "a": { "type": "string" } } } },
+          "wholesale": { "type": "array", "items": { "type": "object", "properties": { "min_qty": { "type": "integer" }, "discount": { "type": "integer" } } } },
+          "min_qty": { "type": "integer" },
+          "max_qty": { "type": "integer" },
+          "cost_cents": { "type": "integer", "description": "仅管理端返回" },
+          "delivery_type": { "type": "string", "description": "交付方式：auto（卡密自动发货）/ manual（人工手动交付）" },
+          "created_at": { "type": "integer" },
+          "updated_at": { "type": "integer" }
+        }
+      },
+      "ProductView": {
+        "type": "object",
+        "properties": {
+          "product": { "$ref": "#/components/schemas/Product" },
+          "available": { "type": "integer" },
+          "reserved": { "type": "integer" },
+          "sold": { "type": "integer" }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "order_no": { "type": "string" },
+          "product_id": { "type": "integer" },
+          "product_name": { "type": "string" },
+          "qty": { "type": "integer" },
+          "amount_cents": { "type": "integer" },
+          "fiat": { "type": "string" },
+          "trade_type": { "type": "string" },
+          "buyer_contact": { "type": "string" },
+          "status": { "type": "string" },
+          "payment_status": { "type": "string", "description": "支付生命周期（created / pending / confirmed / failed / cancelled），与订单状态解耦" },
+          "trade_id": { "type": "string" },
+          "payment_url": { "type": "string" },
+          "block_transaction_id": { "type": "string" },
+          "delivery_type": { "type": "string", "description": "交付方式快照：auto / manual" },
+          "delivery_content": { "type": "string", "description": "人工手动交付内容（发货时填写）" },
+          "created_at": { "type": "integer" },
+          "updated_at": { "type": "integer" },
+          "paid_at": { "type": "integer" }
+        }
+      },
+      "Card": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "product_id": { "type": "integer" },
+          "reserved_order": { "type": "integer" },
+          "sold_order": { "type": "integer" },
+          "content": { "type": "string" },
+          "status": { "type": "string" },
+          "created_at": { "type": "integer" },
+          "updated_at": { "type": "integer" },
+          "sold_at": { "type": "integer" }
+        }
+      },
+      "Coupon": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "code": { "type": "string" },
+          "type": { "type": "string", "enum": ["fixed", "percent"] },
+          "value_cents": { "type": "integer" },
+          "percent": { "type": "integer" },
+          "min_amount_cents": { "type": "integer" },
+          "max_uses": { "type": "integer" },
+          "used_count": { "type": "integer" },
+          "product_id": { "type": "integer" },
+          "active": { "type": "boolean" },
+          "expires_at": { "type": "integer" },
+          "created_at": { "type": "integer" }
+        }
+      },
+      "AuditLog": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "admin_id": { "type": "integer" },
+          "username": { "type": "string" },
+          "action": { "type": "string" },
+          "target_type": { "type": "string" },
+          "target_id": { "type": "string" },
+          "before": { "type": "string" },
+          "after": { "type": "string" },
+          "created_at": { "type": "integer" }
+        }
+      },
+      "Admin": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "username": { "type": "string" },
+          "role": { "type": "string", "enum": ["admin", "operator", "viewer"] },
+          "created_at": { "type": "integer" }
+        }
+      },
+      "JobRun": {
+        "type": "object",
+        "properties": {
+          "job_name": { "type": "string" },
+          "status": { "type": "string", "enum": ["running", "ok", "error"] },
+          "started_at": { "type": "integer" },
+          "finished_at": { "type": "integer" },
+          "error": { "type": "string" }
+        }
+      },
+      "SiteInfo": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "subtitle": { "type": "string" },
+          "public_base_url": { "type": "string" },
+          "announcement": { "type": "string" },
+          "seo_description": { "type": "string" },
+          "seo_keywords": { "type": "string" },
+          "links": { "type": "array", "items": { "type": "object" } },
+          "copyright": { "type": "string" },
+          "lang": { "type": "string" },
+          "locale": { "type": "string" },
+          "currency": { "type": "string" },
+          "currency_symbol": { "type": "string" },
+          "timezone": { "type": "string" },
+          "stock_display_mode": { "type": "string" },
+          "home_view_mode": { "type": "string" },
+          "default_product_image": { "type": "string" },
+          "turnstile_site_key": { "type": "string" },
+          "logo_url": { "type": "string" },
+          "favicon_url": { "type": "string" },
+          "payment_gateway": { "type": "string", "description": "主支付网关（启用列表首位）" },
+          "payment_gateways": { "type": "array", "items": { "type": "string", "enum": ["bepusdt", "hashpay"] }, "description": "启用的支付网关列表" },
+          "payment_gateway_meta": { "type": "object", "additionalProperties": { "type": "object", "properties": { "name": { "type": "string" }, "description": { "type": "string" } } }, "description": "网关自定义显示名称与简介（后台可配置，空值由前台回退默认文案）" },
+          "maintenance": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "message": { "type": "string" } } }
+        }
+      },
+      "OrderCreateRequest": {
+        "type": "object",
+        "required": ["product_id", "contact", "cf-turnstile-response"],
+        "properties": {
+          "product_id": { "type": "integer" },
+          "qty": { "type": "integer", "default": 1 },
+          "contact": { "type": "string", "format": "email" },
+          "trade_type": { "type": "string" },
+          "gateway": { "type": "string", "enum": ["bepusdt", "hashpay"], "description": "用户选择的支付网关（默认主网关）" },
+          "coupon_code": { "type": "string" },
+          "cf-turnstile-response": { "type": "string" }
+        }
+      },
+      "OrderCreateResponse": {
+        "type": "object",
+        "properties": {
+          "order_no": { "type": "string" },
+          "payment_url": { "type": "string" },
+          "token": { "type": "string", "description": "查看令牌（邮件同步下发）" }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string" },
+          "password": { "type": "string" },
+          "otp": { "type": "string", "description": "TOTP 验证码（已启用双因素时）" }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean" },
+          "totp_required": { "type": "boolean" },
+          "token": { "type": "string", "description": "TOTP 待验证令牌" }
+        }
+      },
+      "SetupRequest": {
+        "type": "object",
+        "properties": {
+          "site_title": { "type": "string" },
+          "username": { "type": "string" },
+          "password": { "type": "string" },
+          "confirm": { "type": "string" },
+          "public_base_url": { "type": "string" },
+          "bepusdt_base_url": { "type": "string" },
+          "bepusdt_api_token": { "type": "string" },
+          "trade_types": { "type": "string" },
+          "fiat": { "type": "string" },
+          "turnstile_site_key": { "type": "string" },
+          "turnstile_secret": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["public"],
+        "summary": "健康检查",
+        "description": "返回应用名、版本、运行时长与组件状态（database / payment）；数据库故障时返回 503。",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "app": { "type": "string" }, "version": { "type": "string" }, "build": { "type": "string" }, "config_version": { "type": "integer", "description": "settings 配置版本" }, "uptime_sec": { "type": "integer" }, "database": { "type": "object", "properties": { "status": { "type": "string" }, "size_bytes": { "type": "integer" }, "migration_version": { "type": "integer" }, "last_backup": { "type": "object", "properties": { "file": { "type": "string" }, "modified": { "type": "integer" } } }, "integrity": { "type": "string", "enum": ["ok", "error"] } } }, "jobs": { "type": "object", "properties": { "mail_queue_size": { "type": "integer" }, "last_success": { "type": "integer" } } }, "payment": { "type": "string" } } } } }
+          },
+          "503": { "description": "数据库故障" }
+        }
+      }
+    },
+    "/api/v1/site": {
+      "get": {
+        "tags": ["public"],
+        "summary": "站点信息",
+        "description": "站点标题/副标题/公告/语言/货币/时区/维护状态/公开地址等前台配置。",
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SiteInfo" } } } } }
+      }
+    },
+    "/api/v1/products": {
+      "get": {
+        "tags": ["public"],
+        "summary": "商品列表（分类分组）",
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" }, "description": "关键词（名称/描述）" },
+          { "name": "category", "in": "query", "schema": { "type": "string" } },
+          { "name": "min_price", "in": "query", "schema": { "type": "number" } },
+          { "name": "max_price", "in": "query", "schema": { "type": "number" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "分类商品列表",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "categories": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "default_key": { "type": "string" }, "products": { "type": "array", "items": { "$ref": "#/components/schemas/ProductView" } } } } }, "categories_all": { "type": "array", "items": { "type": "string" } } } } } }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}": {
+      "get": {
+        "tags": ["public"],
+        "summary": "商品详情",
+        "description": "按 id 或 slug 查找上架商品，含库存/收款类型/当前支付网关/Turnstile 站点密钥。",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "product": { "type": "object" },
+                    "available": { "type": "integer" },
+                    "trade_types": { "type": "array", "items": { "type": "string" } },
+                    "payment_gateway": { "type": "string", "enum": ["bepusdt", "hashpay"] },
+                    "payment_gateways": { "type": "array", "items": { "type": "string", "enum": ["bepusdt", "hashpay"] } },
+                    "payment_gateway_meta": { "type": "object", "additionalProperties": { "type": "object", "properties": { "name": { "type": "string" }, "description": { "type": "string" } } } },
+                    "turnstile_site_key": { "type": "string" },
+                    "default_product_image": { "type": "string" },
+                    "site_title": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "not found" }
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "post": {
+        "tags": ["public"],
+        "summary": "创建订单",
+        "description": "需 Turnstile 验证。创建订单并生成支付交易；100% 折扣券订单直接完成并发卡。",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderCreateRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderCreateResponse" } } } },
+          "400": { "description": "参数错误 / 库存不足", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Turnstile 验证失败" }
+        }
+      },
+      "get": {
+        "tags": ["public"],
+        "summary": "按邮箱查询订单（模糊响应）",
+        "description": "返回订单号（供勾选/单个重发查看链接），不返回查看令牌；待支付订单含 payment_url。需 Turnstile（已配置时）。",
+        "parameters": [{ "name": "contact", "in": "query", "required": true, "schema": { "type": "string", "format": "email" } }],
+        "responses": { "200": { "description": "订单列表" } }
+      }
+    },
+    "/api/v1/orders/links": {
+      "post": {
+        "tags": ["public"],
+        "summary": "发送查看链接到邮箱",
+        "description": "仅传邮箱：发送该邮箱下全部有效订单的查看链接；邮箱+order_no：仅重发该订单链接（严格校验归属）；邮箱+order_nos：批量发送选中订单（归属/状态过滤）。冷却 5 分钟。需 Turnstile（已配置时）。",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["contact"], "properties": { "contact": { "type": "string", "format": "email" }, "order_no": { "type": "string", "description": "可选：指定重发的单个订单号" }, "order_nos": { "type": "array", "items": { "type": "string" }, "description": "可选：勾选批量重发的订单号列表（最多 10 个）" } } } } }
+        },
+        "responses": {
+          "200": { "description": "ok（全部订单模式返回 sent 发送条数）" },
+          "404": { "description": "订单不存在或邮箱不匹配（仅单订单模式）" },
+          "429": { "description": "发送过于频繁" }
+        }
+      }
+    },
+    "/api/v1/orders/{orderNo}": {
+      "get": {
+        "tags": ["public"],
+        "summary": "订单详情（凭查看令牌访问卡密）",
+        "description": "?token=<查看令牌> 为访问凭证；未校验归属时不返回邮箱/支付地址等敏感字段。",
+        "parameters": [
+          { "name": "orderNo", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "token", "in": "query", "schema": { "type": "string" }, "description": "查看令牌（邮件下发）" }
+        ],
+        "responses": { "200": { "description": "订单 + 卡密" }, "404": { "description": "not found" } }
+      }
+    },
+    "/api/v1/orders/{orderNo}/cancel": {
+      "post": {
+        "tags": ["public"],
+        "summary": "取消订单",
+        "description": "凭查看令牌操作；释放卡密并同步关闭支付交易。",
+        "parameters": [
+          { "name": "orderNo", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "token", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "ok" }, "400": { "description": "当前状态不可取消" }, "403": { "description": "令牌不匹配" } }
+      }
+    },
+    "/api/v1/pages/{slug}": {
+      "get": {
+        "tags": ["public"],
+        "summary": "静态页（privacy / terms）",
+        "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "页面内容" } }
+      }
+    },
+    "/api/v1/lang": {
+      "post": {
+        "tags": ["public"],
+        "summary": "设置语言 Cookie（zh / en）",
+        "parameters": [{ "name": "lang", "in": "query", "schema": { "type": "string", "enum": ["zh", "en"] } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/maintenance/unlock": {
+      "post": {
+        "tags": ["public"],
+        "summary": "维护模式解锁",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "password": { "type": "string" } } } } }
+        },
+        "responses": { "200": { "description": "ok" }, "403": { "description": "密码错误" } }
+      }
+    },
+    "/api/v1/setup": {
+      "get": {
+        "tags": ["public"],
+        "summary": "初始化状态检查",
+        "responses": { "200": { "description": "{ initialized, site_title }" } }
+      },
+      "post": {
+        "tags": ["public"],
+        "summary": "首次初始化（创建管理员 + 写入配置）",
+        "description": "敏感配置（支付 Token / Turnstile 密钥）加密存入 secrets 表。",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SetupRequest" } } }
+        },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "已初始化或参数错误" } }
+      }
+    },
+    "/notify/bepusdt": {
+      "post": {
+        "tags": ["webhook"],
+        "summary": "支付网关回调",
+        "description": "路径可在后台配置（默认 /notify/bepusdt）。MD5 验签后更新订单状态并发卡；status=2 支付成功，status=3 网关侧取消。",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "order_id": { "type": "string" }, "trade_id": { "type": "string" }, "block_transaction_id": { "type": "string" }, "status": { "type": "string" }, "signature": { "type": "string" } } } } }
+        },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "验签失败" } }
+      }
+    },
+    "/notify/hashpay": {
+      "post": {
+        "tags": ["webhook"],
+        "summary": "HashPay 支付回调",
+        "description": "路径可在后台配置（默认 /notify/hashpay）。请求体为 RSA-OAEP-256+A256GCM 加密信封（alg/key/iv/data 均为 Base64），用商户私钥解密后读取 {timestamp, payload}；payload.status=paid 时确认支付并发卡，expired/invalid 时关闭订单释放库存。",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "alg": { "type": "string" }, "key": { "type": "string" }, "iv": { "type": "string" }, "data": { "type": "string" } } } } }
+        },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "回调解密/验签失败" } }
+      }
+    },
+    "/api/v1/admin/login": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "管理员登录",
+        "description": "成功设置会话 Cookie；已启用 TOTP 且未提供 otp 时返回 totp_required=true 与待验证 token。连续失败 5 次锁定 10 分钟。",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginRequest" } } }
+        },
+        "responses": { "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginResponse" } } } }, "403": { "description": "凭据错误 / 已锁定" } }
+      }
+    },
+    "/api/v1/admin/login/verify": {
+      "post": {
+        "tags": ["admin"],
+        "security": [],
+        "summary": "TOTP 二次验证（登录第二步）",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["token", "otp"], "properties": { "token": { "type": "string" }, "otp": { "type": "string" } } } } }
+        },
+        "responses": { "200": { "description": "ok" }, "401": { "description": "token 失效" }, "403": { "description": "otp 错误" } }
+      }
+    },
+    "/api/v1/admin/logout": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "退出登录（吊销会话）",
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/session": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "当前会话（用户名 + 角色）",
+        "responses": { "200": { "description": "ok", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "username": { "type": "string" }, "role": { "type": "string" } } } } } }, "401": { "description": "未登录" } }
+      }
+    },
+    "/api/v1/admin/dashboard": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "运营仪表盘",
+        "description": "今日订单/收入/毛利/发卡、库存统计、低库存、最近交易、系统状态（Go 版本/DB 大小/运行时长）。",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/v1/admin/sales-report": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "销售报表",
+        "description": "近 N 日营收曲线 + 商品销售占比 + 成本来源统计。",
+        "parameters": [{ "name": "days", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 90, "default": 14 } }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/v1/admin/products": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "商品列表（含库存，全部状态）",
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "products": { "type": "array", "items": { "$ref": "#/components/schemas/ProductView" } } } } } } } }
+      },
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "新建商品（需 operator+）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/products/{id}": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "商品详情（管理端）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "404": { "description": "not found" } }
+      }
+    },
+    "/api/v1/admin/products/{id}/edit": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "编辑商品（需 operator+）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/products/{id}/cards": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "卡密列表",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "cards": { "type": "array", "items": { "$ref": "#/components/schemas/Card" } } } } } } } }
+      },
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "导入卡密（需 operator+，支持去重）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "cards": { "type": "string", "description": "每行一条卡密" }, "dedupe": { "type": "boolean" } } } } } },
+        "responses": { "200": { "description": "{ ok, added, skipped }" } }
+      }
+    },
+    "/api/v1/admin/products/{id}/cards/export": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "卡密 CSV 导出",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "CSV 文件", "content": { "text/csv": { "schema": { "type": "string" } } } } }
+      }
+    },
+    "/api/v1/admin/cards/{id}/delete": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "删除可用卡密（需 operator+）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/cards/{id}/status": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "手动设置卡密状态（需 operator+，available/locked/sold/disabled）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "status": { "type": "string", "description": "available/locked/sold/disabled" } } }
+            }
+          }
+        },
+        "responses": { "200": { "description": "ok" }, "409": { "description": "卡密不存在或已绑定订单" } }
+      }
+    },
+    "/api/v1/admin/orders": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "订单列表",
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" }, "description": "订单号/商品名/邮箱模糊搜索" },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "start", "in": "query", "schema": { "type": "integer" }, "description": "创建时间 >= (unix)" },
+          { "name": "end", "in": "query", "schema": { "type": "integer" }, "description": "创建时间 <= (unix)" }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "orders": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } } } } }
+      }
+    },
+    "/api/v1/admin/orders/export": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "订单 CSV 导出（最多 5000 条）",
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "start", "in": "query", "schema": { "type": "integer" } },
+          { "name": "end", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "CSV 文件" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "订单详情（含卡密 + 事件日志）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "order + cards + logs" }, "404": { "description": "not found" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}/expire": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "标记过期（需 operator+，同步关闭支付交易）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}/cancel": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "取消订单（需 operator+，同步关闭支付交易）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}/status": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "修改订单状态（需 operator+，状态机内合法迁移）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" }, "message": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "非法迁移" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}/resend": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "重发发卡通知（需 operator+）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/orders/batch-resend": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "批量重发发卡通知（需 operator+，最多 100 单）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "ids": { "type": "array", "items": { "type": "integer" } } } } } } },
+        "responses": { "200": { "description": "{ ok, sent }" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}/redeliver": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "补发卡密（需 operator+，从库存补扣）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/orders/{id}/deliver": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "人工发货（需 operator+，人工手动交付订单：待发货 → 已发货并通知买家）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "content": { "type": "string", "description": "发货内容（卡密 / 交付说明）" } } }
+            }
+          }
+        },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/settings": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "支付设置读取（Token 仅返回是否已配置）",
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "支付设置保存（需 admin）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "payment_gateway": { "type": "string", "description": "启用的支付网关列表（逗号分隔，如 bepusdt,hashpay）" }, "bepusdt_base_url": { "type": "string" }, "bepusdt_api_token": { "type": "string" }, "fiat": { "type": "string" }, "trade_types": { "type": "string" }, "bepusdt_timeout_sec": { "type": "integer" }, "shop_public_base_url": { "type": "string" }, "bepusdt_notify_url": { "type": "string" }, "bepusdt_notify_path": { "type": "string" }, "hashpay_base_url": { "type": "string" }, "hashpay_merchant_id": { "type": "string" }, "hashpay_private_key": { "type": "string", "description": "HashPay 商户私钥 PEM（留空保持不变）" }, "hashpay_currency": { "type": "string" }, "hashpay_notify_url": { "type": "string" }, "hashpay_notify_path": { "type": "string" }, "gateway_bepusdt_name": { "type": "string", "description": "BEpusdt 前台显示名称（留空回退默认）" }, "gateway_bepusdt_desc": { "type": "string", "description": "BEpusdt 前台简介（留空回退默认）" }, "gateway_bepusdt_priority": { "type": "integer", "minimum": -1, "maximum": 99, "description": "BEpusdt 优先级（默认 0，-1 最高）" }, "gateway_hashpay_name": { "type": "string", "description": "HashPay 前台显示名称（留空回退默认）" }, "gateway_hashpay_desc": { "type": "string", "description": "HashPay 前台简介（留空回退默认）" }, "gateway_hashpay_priority": { "type": "integer", "minimum": -1, "maximum": 99, "description": "HashPay 优先级（默认 1）" } } } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "参数错误" } }
+      }
+    },
+    "/api/v1/admin/notify": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "通知设置读取（需 operator+）",
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "通知设置保存（需 admin，含事件模板）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "smtp_host": { "type": "string" }, "smtp_port": { "type": "string" }, "smtp_username": { "type": "string" }, "smtp_password": { "type": "string" }, "smtp_from": { "type": "string" }, "telegram_bot_token": { "type": "string" }, "telegram_chat_id": { "type": "string" }, "webhook_url": { "type": "string" }, "webhook_secret": { "type": "string" }, "notify_events": { "type": "string" }, "notify_admin_email": { "type": "string" }, "event_templates": { "type": "object" } } } } } },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/notify/test-email": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "发送测试邮件（需 operator+）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "test_email": { "type": "string", "format": "email" } } } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "发送失败" } }
+      }
+    },
+    "/api/v1/admin/notify/test-telegram": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "发送测试 Telegram（需 operator+）",
+        "responses": { "200": { "description": "ok" }, "400": { "description": "发送失败" } }
+      }
+    },
+    "/api/v1/admin/notify/test-event": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "发送指定事件测试通知（需 operator+，channel: telegram/mail/空=自动）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "event": { "type": "string", "enum": ["order_created", "payment_success", "delivered", "low_stock", "system_error"] }, "channel": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "发送失败" } }
+      }
+    },
+    "/api/v1/admin/site": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "站点设置读取",
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "站点设置保存（需 admin，含维护模式/密钥）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "参数错误" } }
+      }
+    },
+    "/api/v1/admin/account": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "当前账号信息",
+        "responses": { "200": { "description": "{ username }" } }
+      },
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "修改用户名/密码（需 operator+，需当前密码）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "username": { "type": "string" }, "current_password": { "type": "string" }, "new_password": { "type": "string" }, "confirm_password": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "当前密码错误等" } }
+      }
+    },
+    "/api/v1/admin/totp": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "TOTP 状态（未启用且已有密钥时返回明文用于扫码）",
+        "responses": { "200": { "description": "{ enabled, issuer, secret? }" } }
+      }
+    },
+    "/api/v1/admin/totp/generate": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "生成新 TOTP 密钥（未启用时）",
+        "responses": { "200": { "description": "{ secret, issuer }" }, "400": { "description": "已启用" } }
+      }
+    },
+    "/api/v1/admin/totp/enable": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "校验并启用 TOTP",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "secret": { "type": "string" }, "otp": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "ok" }, "403": { "description": "otp 错误" } }
+      }
+    },
+    "/api/v1/admin/totp/disable": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "校验并关闭 TOTP",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "otp": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "ok" }, "403": { "description": "otp 错误" } }
+      }
+    },
+    "/api/v1/admin/system/backup": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "配置备份（需 admin，不含密钥类配置）",
+        "responses": { "200": { "description": "{ app, settings }" } }
+      }
+    },
+    "/api/v1/admin/system/restore": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "配置恢复（需 admin，multipart 上传 backup_file；密钥类不覆盖；吊销全部会话）",
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "type": "object", "properties": { "backup_file": { "type": "string", "format": "binary" } } } } } },
+        "responses": { "200": { "description": "{ ok, count }" }, "400": { "description": "上传/解析错误" } }
+      }
+    },
+    "/api/v1/admin/system/reset": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "清空并重新初始化（需 admin，confirm=DELETE）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "confirm": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "confirm 必须为 DELETE" } }
+      }
+    },
+    "/api/v1/admin/version": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "版本与构建信息",
+        "responses": { "200": { "description": "{ version, build, commit, date, config_version, repo }" } }
+      }
+    },
+    "/api/v1/admin/admins": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "管理员列表（需 admin）",
+        "responses": { "200": { "description": "{ admins: [Admin] }" } }
+      },
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "创建管理员（需 admin）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "username": { "type": "string" }, "password": { "type": "string" }, "role": { "type": "string", "enum": ["admin", "operator", "viewer"] } } } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "用户名已存在" } }
+      }
+    },
+    "/api/v1/admin/admins/{id}/role": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "修改角色（需 admin；最后一个 admin 不可降级）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "role": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "不可降级最后一个 admin" }, "404": { "description": "admin not found" } }
+      }
+    },
+    "/api/v1/admin/admins/{id}/delete": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "删除管理员（需 admin，吊销其全部会话；不可删除自己/最后一个 admin）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "ok" }, "400": { "description": "不可删除" } }
+      }
+    },
+    "/api/v1/admin/audit-logs": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "审计日志（需 admin，最近 200 条）",
+        "responses": { "200": { "description": "{ logs: [AuditLog] }" } }
+      }
+    },
+    "/api/v1/admin/jobs": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "后台任务执行记录（每个任务最近一次）+ 邮件队列积压数",
+        "responses": {
+          "200": {
+            "description": "{ jobs: [JobRun], mail_queue_pending }",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "jobs": { "type": "array", "items": { "$ref": "#/components/schemas/JobRun" } }, "mail_queue_pending": { "type": "integer" }, "dead_events": { "type": "integer", "description": "outbox 死信事件数" } } } } }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/coupons": {
+      "get": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "优惠券列表（需 operator+）",
+        "responses": { "200": { "description": "{ coupons: [Coupon] }" } }
+      },
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "创建优惠券（需 operator+）",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Coupon" } } } },
+        "responses": { "200": { "description": "ok" }, "400": { "description": "券码已存在或参数错误" } }
+      }
+    },
+    "/api/v1/admin/coupons/{id}/edit": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "编辑优惠券（需 operator+）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Coupon" } } } },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/api/v1/admin/coupons/{id}/delete": {
+      "post": {
+        "tags": ["admin"],
+        "security": [{ "sessionCookie": [] }],
+        "summary": "删除优惠券（需 operator+）",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  }
+}

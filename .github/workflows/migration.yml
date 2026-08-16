@@ -1,0 +1,32 @@
+name: migration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - migrations/**
+      - internal/platform/database/sqlite/**
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/migration.yml
+  pull_request:
+    paths:
+      - migrations/**
+      - internal/platform/database/sqlite/**
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/migration.yml
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 迁移门禁（空库迁移 / 旧库升级 / integrity_check / 关键索引 / 基本查询）
+        run: make check-migration

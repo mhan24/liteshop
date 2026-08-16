@@ -1,0 +1,30 @@
+name: admin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/admin/**
+      - contracts/**
+      - .github/workflows/admin.yml
+  pull_request:
+    paths:
+      - web/admin/**
+      - contracts/**
+      - .github/workflows/admin.yml
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+      - name: 安装依赖（npm ci）
+        working-directory: web/admin
+        run: npm ci
+      - name: 统一命令（格式 / ESLint / TypeScript / 单元测试 / 生产构建）
+        run: make check-admin

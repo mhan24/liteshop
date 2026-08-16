@@ -1,0 +1,30 @@
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.go'
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/backend.yml
+  pull_request:
+    paths:
+      - '**.go'
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/backend.yml
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 统一命令（gofmt / vet / 静态分析 / 单元测试 / 构建）
+        run: make check-backend

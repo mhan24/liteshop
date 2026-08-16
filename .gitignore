@@ -7,10 +7,9 @@ data/
 /shop-linux-arm64
 /liteshop
 /cardshop
-/admin-ui/node_modules
-/admin-ui/dist
-/internal/api/admin-ui
-/storefront/node_modules
-/storefront/.nuxt
-/storefront/.output
+/web/admin/node_modules
+/web/admin/dist
+/web/storefront/node_modules
+/web/storefront/.nuxt
+/web/storefront/.output
 .DS_Store

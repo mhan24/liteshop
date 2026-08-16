@@ -1,65 +1,75 @@
-name: Release
+name: release
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
-  quality:
-    name: Quality gates
-    uses: ./.github/workflows/quality.yml
-
-  release:
-    name: Build release artifact
-    needs: [quality]
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version-file: go.mod
           cache: true
-
-      - name: Build admin-ui
-        working-directory: admin-ui
-        run: |
-          npm ci
-          npm run build
-
-      - name: Build storefront
-        working-directory: storefront
-        run: |
-          npm ci
-          npm run build
-
-      - name: Build Go binary (version from tag)
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          COMMIT="${GITHUB_SHA:0:7}"
-          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-            -ldflags "-X shop/internal/version.Version=${VERSION} -X shop/internal/version.Commit=${COMMIT} -X shop/internal/version.Date=${DATE}" \
-            -o shop ./cmd/shop
-
-      - name: Package tgz + checksum
-        run: |
-          mkdir -p dist/storefront
-          cp shop dist/
-          cp -r storefront/.output dist/storefront/
-          tar -czf liteshop-release.tgz -C dist .
-          sha256sum liteshop-release.tgz > liteshop-release.tgz.sha256
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/setup-node@v4
         with:
-          files: |
-            liteshop-release.tgz
-            liteshop-release.tgz.sha256
-          generate_release_notes: true
+          node-version: 22
+
+      - name: 构建前台（Nuxt SSR）
+        working-directory: web/storefront
+        run: |
+          npm ci
+          npm run build
+
+      - name: 构建后台（Vite 生产构建）
+        working-directory: web/admin
+        run: |
+          npm ci
+          npm run build
+
+      - name: 构建后端二进制
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          CGO_ENABLED=0 go build -tags production -trimpath \
+            -ldflags "-s -w \
+              -X shop/internal/platform/version.Version=${tag} \
+              -X shop/internal/platform/version.Commit=${GITHUB_SHA::8} \
+              -X shop/internal/platform/version.Date=$(date -u +%Y-%m-%d)" \
+            -o dist/liteshop ./cmd/liteshop
+
+      - name: 生成版本信息
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          printf 'liteshop %s\ncommit %s\nbuilt %s\n' \
+            "${tag}" "${GITHUB_SHA}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > dist/version.txt
+
+      - name: 打包部署文件
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          mkdir -p dist/storefront dist/admin dist/migrations
+          cp -R web/storefront/.output/. dist/storefront/
+          cp -R web/admin/dist/. dist/admin/
+          cp migrations/*.sql dist/migrations/
+          tar -czf dist/liteshop-${tag}.tgz -C dist \
+            liteshop version.txt storefront admin migrations
+          cd dist
+          sha256sum liteshop-${tag}.tgz > liteshop-${tag}.tgz.sha256
+          sha256sum liteshop > liteshop.sha256
+
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release create "${tag}" \
+            dist/liteshop-${tag#v}.tgz \
+            dist/liteshop-${tag#v}.tgz.sha256 \
+            --title "${tag}" \
+            --generate-notes
