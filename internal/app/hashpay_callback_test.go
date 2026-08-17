@@ -113,8 +113,8 @@ func hashPayPaidPayload(t *testing.T, orderNo, tradeID string, status string) []
 		"payload": map[string]any{
 			"orderId":    tradeID,
 			"merchantNo": orderNo,
-			"amount":     12.34,
-			"currency":   "USD",
+			"amount":     10.00,
+			"currency":   "CNY",
 			"status":     status,
 			"payment": map[string]any{
 				"driver": "trc20",

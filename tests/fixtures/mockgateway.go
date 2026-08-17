@@ -58,6 +58,7 @@ func (m *MockGateway) VerifyCallback(body []byte) (orderapp.PaymentCallback, err
 	}
 	return orderapp.PaymentCallback{
 		OrderID: params["order_id"], TradeID: params["trade_id"], Status: status,
+		Amount: params["amount"], Currency: params["fiat"],
 	}, nil
 }
 

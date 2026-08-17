@@ -69,7 +69,7 @@ func TestPaymentCallbackHTTP(t *testing.T) {
 	orderNo := fixtures.SeedOrder(t, d, pid, orderdomain.OrderWaitingPayment, "T1")
 
 	payload := signedCallbackPayload(t, "test-token", map[string]string{
-		"order_id": orderNo, "trade_id": "T1", "block_transaction_id": "B1", "status": "2",
+		"order_id": orderNo, "trade_id": "T1", "block_transaction_id": "B1", "status": "2", "amount": "10.00", "fiat": "CNY",
 	})
 	if rec := postCallback(t, s, payload); rec.Code != http.StatusOK {
 		t.Fatalf("callback status = %d, want 200", rec.Code)
@@ -119,7 +119,7 @@ func TestPaymentCallbackCancelHTTP(t *testing.T) {
 	orderNo := fixtures.SeedOrder(t, d, pid, orderdomain.OrderWaitingPayment, "T2")
 
 	payload := signedCallbackPayload(t, "test-token", map[string]string{
-		"order_id": orderNo, "trade_id": "T2", "status": "3",
+		"order_id": orderNo, "trade_id": "T2", "status": "3", "amount": "10.00", "fiat": "CNY",
 	})
 	if rec := postCallback(t, s, payload); rec.Code != http.StatusOK {
 		t.Fatalf("cancel callback status = %d, want 200", rec.Code)
@@ -166,7 +166,7 @@ func TestNotifyPathRuntimeChange(t *testing.T) {
 	pid := fixtures.SeedProductWithCards(t, d, 1)
 	orderNo := fixtures.SeedOrder(t, d, pid, orderdomain.OrderWaitingPayment, "TRC")
 	payload := signedCallbackPayload(t, "test-token", map[string]string{
-		"order_id": orderNo, "trade_id": "TRC", "status": "2",
+		"order_id": orderNo, "trade_id": "TRC", "status": "2", "amount": "10.00", "fiat": "CNY",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/cb/custom", bytes.NewReader(payload))
 	rec := httptest.NewRecorder()
