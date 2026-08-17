@@ -525,7 +525,7 @@
       "get": {
         "tags": ["admin"],
         "security": [{ "sessionCookie": [] }],
-        "summary": "卡密列表",
+        "summary": "卡密列表（需 operator+）",
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
         "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "cards": { "type": "array", "items": { "$ref": "#/components/schemas/Card" } } } } } } } }
       },
@@ -542,7 +542,7 @@
       "get": {
         "tags": ["admin"],
         "security": [{ "sessionCookie": [] }],
-        "summary": "卡密 CSV 导出",
+        "summary": "卡密 CSV 导出（需 operator+）",
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
         "responses": { "200": { "description": "CSV 文件", "content": { "text/csv": { "schema": { "type": "string" } } } } }
       }
@@ -605,7 +605,7 @@
       "get": {
         "tags": ["admin"],
         "security": [{ "sessionCookie": [] }],
-        "summary": "订单详情（含卡密 + 事件日志）",
+        "summary": "订单详情（含卡密 + 事件日志，需 operator+）",
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
         "responses": { "200": { "description": "order + cards + logs" }, "404": { "description": "not found" } }
       }

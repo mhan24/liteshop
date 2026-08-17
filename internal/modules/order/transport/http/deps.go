@@ -49,7 +49,7 @@ func Register(reg Registrar, h *Handlers) {
 
 	reg.Admin("GET", "/api/v1/admin/orders", "viewer", h.AdminOrders)
 	reg.Admin("GET", "/api/v1/admin/orders/export", "viewer", h.AdminOrdersExport)
-	reg.Admin("GET", "/api/v1/admin/orders/{id}", "viewer", h.AdminOrder)
+	reg.Admin("GET", "/api/v1/admin/orders/{id}", "operator", h.AdminOrder)
 	reg.Admin("POST", "/api/v1/admin/orders/{id}/expire", "operator", h.AdminOrderExpire)
 	reg.Admin("POST", "/api/v1/admin/orders/{id}/cancel", "operator", h.AdminOrderCancel)
 	reg.Admin("POST", "/api/v1/admin/orders/{id}/status", "operator", h.AdminOrderSetStatus)

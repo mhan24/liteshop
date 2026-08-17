@@ -1029,7 +1029,7 @@ paths:
       - admin
       security:
       - sessionCookie: []
-      summary: 卡密列表
+      summary: 卡密列表（需 operator+）
       parameters:
       - name: id
         in: path
@@ -1081,7 +1081,7 @@ paths:
       - admin
       security:
       - sessionCookie: []
-      summary: 卡密 CSV 导出
+      summary: 卡密 CSV 导出（需 operator+）
       parameters:
       - name: id
         in: path
@@ -1211,7 +1211,7 @@ paths:
       - admin
       security:
       - sessionCookie: []
-      summary: 订单详情（含卡密 + 事件日志）
+      summary: 订单详情（含卡密 + 事件日志，需 operator+）
       parameters:
       - name: id
         in: path

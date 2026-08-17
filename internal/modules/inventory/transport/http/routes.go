@@ -30,8 +30,8 @@ var (
 )
 
 func Register(reg Registrar, h *Handlers) {
-	reg.Admin("GET", "/api/v1/admin/products/{id}/cards", "viewer", h.AdminCards)
-	reg.Admin("GET", "/api/v1/admin/products/{id}/cards/export", "viewer", h.AdminCardsExport)
+	reg.Admin("GET", "/api/v1/admin/products/{id}/cards", "operator", h.AdminCards)
+	reg.Admin("GET", "/api/v1/admin/products/{id}/cards/export", "operator", h.AdminCardsExport)
 	reg.Admin("POST", "/api/v1/admin/products/{id}/cards", "operator", h.AdminCardsImport)
 	reg.Admin("POST", "/api/v1/admin/cards/{id}/delete", "operator", h.AdminCardDelete)
 	reg.Admin("POST", "/api/v1/admin/cards/{id}/status", "operator", h.AdminCardStatus)
