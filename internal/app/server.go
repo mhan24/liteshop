@@ -138,7 +138,7 @@ func (s *Server) registerModuleRoutes(mux *http.ServeMux) {
 		Audit: s.recordAudit, ClientIP: clientIP,
 	}))
 	producthttp.Register(reg, producthttp.NewHandlers(producthttp.Deps{
-		Products: s.products, Settings: s.settings,
+		Products: s.products, Settings: s.settings, Audit: s.recordAudit,
 	}))
 	inventoryhttp.Register(reg, inventoryhttp.NewHandlers(inventoryhttp.Deps{
 		Inventory: s.inventory, Products: s.products, Audit: s.recordAudit,
@@ -148,6 +148,7 @@ func (s *Server) registerModuleRoutes(mux *http.ServeMux) {
 	}))
 	settingshttp.Register(reg, settingshttp.NewHandlers(settingshttp.Deps{
 		Settings: s.settings, Admin: s.admin, Notify: s.notifySvc, Audit: s.recordAudit,
+		ResetLimiters: s.resetLimiters,
 	}))
 	adminhttp.Register(reg, adminhttp.NewHandlers(adminhttp.Deps{
 		Admin: s.admin, AuditService: s.audit, Stats: s.stats, Jobs: s.jobsSvc,
@@ -157,6 +158,8 @@ func (s *Server) registerModuleRoutes(mux *http.ServeMux) {
 		CurrentAdminID:   s.currentAdminID,
 		CurrentAdminName: s.currentAdminName,
 		StartSession:     s.startSession,
+		DBPath:           s.dbPath,
+		StartTime:        s.startTime,
 	}))
 	audithttp.Register(reg, audithttp.NewHandlers(audithttp.Deps{
 		AuditService: s.audit,

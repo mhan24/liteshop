@@ -78,3 +78,10 @@ func (s *Server) cleanupLimiters() {
 		rl.Cleanup()
 	}
 }
+
+// resetLimiters 清空全部限流器（配置恢复后调用，避免旧 IP 限制残留）。
+func (s *Server) resetLimiters() {
+	s.limitersMu.Lock()
+	defer s.limitersMu.Unlock()
+	s.limiters = make(map[string]*RateLimiter)
+}
