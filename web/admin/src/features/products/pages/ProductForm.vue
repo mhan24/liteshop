@@ -105,11 +105,12 @@
       </div>
     </div>
   </PageCard>
+  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Loader2 } from '@lucide/vue'
 import { MdEditor } from 'md-editor-v3'
@@ -125,10 +126,13 @@ import { Textarea } from '@/shared/components/ui/textarea'
 import FormField from '@/shared/components/FormField.vue'
 import ProductImage from '@/shared/components/ProductImage.vue'
 import { currencyLabel } from '@/shared/formatting/format'
-import { toastError, toastSuccess, toastWarning } from '@/shared/components/toast'
+import { toastWarning } from '@/shared/components/toast'
+import { useResult } from '@/shared/composables/useResult'
+import ResultModal from '@/shared/components/ResultModal.vue'
+
+const result = useResult()
 
 const route = useRoute()
-const router = useRouter()
 const { t, locale } = useI18n()
 const editorLang = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'))
 const priceLabel = computed(() => `${t('products.price')} (${currencyLabel()})`)
@@ -207,10 +211,9 @@ async function save() {
     delete payload.cost
     if (isEdit.value) await api.post('/admin/products/' + route.params.id + '/edit', payload)
     else await api.post('/admin/products', payload)
-    toastSuccess(t('products.saveSuccess'))
-    router.push('/products')
+    result.success(t('products.saveSuccess'))
   } catch (e: any) {
-    toastError(e.message)
+    result.error(e.message)
   } finally {
     saving.value = false
   }

@@ -58,6 +58,7 @@
       </div>
     </PageCard>
   </div>
+  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
@@ -72,8 +73,11 @@ import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
 import FormField from '@/shared/components/FormField.vue'
-import { toastError, toastSuccess, toastWarning } from '@/shared/components/toast'
+import { toastWarning } from '@/shared/components/toast'
+import { useResult } from '@/shared/composables/useResult'
+import ResultModal from '@/shared/components/ResultModal.vue'
 
+const result = useResult()
 const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
@@ -132,7 +136,7 @@ async function generateTotp() {
     totp.value.secret = data.secret
     totp.value.issuer = data.issuer || 'LiteShop'
   } catch (e: any) {
-    toastError(e.message)
+    result.error(e.message)
   } finally {
     totpLoading.value = false
   }
@@ -141,10 +145,10 @@ async function enableTotp() {
   totpSaving.value = true
   try {
     await api.post('/admin/totp/enable', { secret: totp.value.secret, otp: totpCode.value })
-    toastSuccess(t('account.totpDone'))
+    result.success(t('account.totpDone'))
     await loadTotp()
   } catch (e: any) {
-    toastError(e.message)
+    result.error(e.message)
   } finally {
     totpSaving.value = false
   }
@@ -153,10 +157,10 @@ async function disableTotp() {
   totpSaving.value = true
   try {
     await api.post('/admin/totp/disable', { otp: disableCode.value })
-    toastSuccess(t('account.totpDisabled'))
+    result.success(t('account.totpDisabled'))
     await loadTotp()
   } catch (e: any) {
-    toastError(e.message)
+    result.error(e.message)
   } finally {
     totpSaving.value = false
   }
@@ -174,12 +178,12 @@ async function save() {
   saving.value = true
   try {
     await api.post('/admin/account', form)
-    toastSuccess(t('account.saved'))
+    result.success(t('account.saved'))
     form.current_password = ''
     form.new_password = ''
     form.confirm_password = ''
   } catch (e: any) {
-    toastError(e.message)
+    result.error(e.message)
   } finally {
     saving.value = false
   }

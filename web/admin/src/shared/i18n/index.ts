@@ -431,6 +431,7 @@ const messages = {
       dangerNote: '清空所有数据并重新初始化，不可恢复。',
       deleteConfirm: 'DELETE',
       reset: '清空所有数据并重新初始化',
+      resetDone: '系统已重置，即将跳转登录页',
     },
   },
   en: {
@@ -865,6 +866,7 @@ const messages = {
       dangerNote: 'Reset all data and re-initialize. This cannot be undone.',
       deleteConfirm: 'DELETE',
       reset: 'Reset all data and re-initialize',
+      resetDone: 'System reset. Redirecting to login…',
     },
   },
 }
