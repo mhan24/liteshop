@@ -105,7 +105,6 @@
       </div>
     </div>
   </PageCard>
-  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
@@ -126,11 +125,7 @@ import { Textarea } from '@/shared/components/ui/textarea'
 import FormField from '@/shared/components/FormField.vue'
 import ProductImage from '@/shared/components/ProductImage.vue'
 import { currencyLabel } from '@/shared/formatting/format'
-import { toastWarning } from '@/shared/components/toast'
-import { useResult } from '@/shared/composables/useResult'
-import ResultModal from '@/shared/components/ResultModal.vue'
-
-const result = useResult()
+import { toastError, toastSuccess, toastWarning } from '@/shared/components/toast'
 
 const route = useRoute()
 const { t, locale } = useI18n()
@@ -211,9 +206,9 @@ async function save() {
     delete payload.cost
     if (isEdit.value) await api.post('/admin/products/' + route.params.id + '/edit', payload)
     else await api.post('/admin/products', payload)
-    result.success(t('products.saveSuccess'))
+    toastSuccess(t('products.saveSuccess'))
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   } finally {
     saving.value = false
   }

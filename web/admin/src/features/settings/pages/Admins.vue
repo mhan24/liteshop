@@ -77,8 +77,6 @@
       </template>
     </Modal>
   </div>
-
-  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
@@ -96,10 +94,7 @@ import DataTable, { type DataColumn } from '@/shared/components/DataTable.vue'
 import Modal from '@/shared/components/Modal.vue'
 import FormField from '@/shared/components/FormField.vue'
 import { confirm } from '@/shared/components/confirm'
-import { useResult } from '@/shared/composables/useResult'
-import ResultModal from '@/shared/components/ResultModal.vue'
-
-const result = useResult()
+import { toastError, toastSuccess } from '@/shared/components/toast'
 import { useSessionStore } from '@/stores/session'
 
 const { t } = useI18n()
@@ -140,14 +135,14 @@ async function create() {
   saving.value = true
   try {
     await api.post('/admin/admins', form)
-    result.success(t('admins.added'))
+    toastSuccess(t('admins.added'))
     dialog.value = false
     form.username = ''
     form.password = ''
     form.role = 'operator'
     await load()
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   } finally {
     saving.value = false
   }
@@ -156,10 +151,10 @@ async function setRole(row: any, role: string) {
   if (role === row.role) return
   try {
     await api.post('/admin/admins/' + row.id + '/role', { role })
-    result.success(t('admins.roleChanged'))
+    toastSuccess(t('admins.roleChanged'))
     await load()
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
     await load()
   }
 }
@@ -168,10 +163,10 @@ async function remove(row: any) {
   if (!ok) return
   try {
     await api.post('/admin/admins/' + row.id + '/delete', {})
-    result.success(t('admins.deleted'))
+    toastSuccess(t('admins.deleted'))
     await load()
   } catch (e: any) {
-    result.error(e.message || '')
+    toastError(e.message || '')
   }
 }
 onMounted(load)

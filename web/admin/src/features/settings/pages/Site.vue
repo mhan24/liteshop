@@ -180,8 +180,6 @@
       </Button>
     </div>
   </PageCard>
-
-  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
@@ -202,10 +200,7 @@ import { Switch } from '@/shared/components/ui/switch'
 import { Textarea } from '@/shared/components/ui/textarea'
 import FormField from '@/shared/components/FormField.vue'
 import ProductImage from '@/shared/components/ProductImage.vue'
-import { useResult } from '@/shared/composables/useResult'
-import ResultModal from '@/shared/components/ResultModal.vue'
-
-const result = useResult()
+import { toastError, toastSuccess } from '@/shared/components/toast'
 
 const { t, locale } = useI18n()
 const editorLang = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'))
@@ -237,9 +232,9 @@ async function save() {
   saving.value = true
   try {
     await api.post('/admin/site', { ...form.value, maintenance_enabled: maintenanceEnabled.value ? '1' : '' })
-    result.success(t('site.saved'))
+    toastSuccess(t('site.saved'))
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   } finally {
     saving.value = false
   }

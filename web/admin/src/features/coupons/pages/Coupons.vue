@@ -95,8 +95,6 @@
       </template>
     </Modal>
   </div>
-
-  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
@@ -116,10 +114,7 @@ import DataTable, { type DataColumn } from '@/shared/components/DataTable.vue'
 import Modal from '@/shared/components/Modal.vue'
 import FormField from '@/shared/components/FormField.vue'
 import { confirm } from '@/shared/components/confirm'
-import { useResult } from '@/shared/composables/useResult'
-import ResultModal from '@/shared/components/ResultModal.vue'
-
-const result = useResult()
+import { toastError, toastSuccess } from '@/shared/components/toast'
 
 const { t } = useI18n()
 const loading = ref(false)
@@ -224,11 +219,11 @@ async function save() {
     }
     if (editing.value) await api.post('/admin/coupons/' + editing.value + '/edit', payload)
     else await api.post('/admin/coupons', payload)
-    result.success(t('common.save'))
+    toastSuccess(t('common.save'))
     dialog.value = false
     await load()
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   } finally {
     saving.value = false
   }
@@ -240,7 +235,7 @@ async function remove(row: any) {
     await api.post('/admin/coupons/' + row.id + '/delete', {})
     await load()
   } catch (e: any) {
-    result.error(e.message || '')
+    toastError(e.message || '')
   }
 }
 onMounted(load)

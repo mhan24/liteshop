@@ -72,8 +72,6 @@
       </CardContent>
     </Card>
   </div>
-
-  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
@@ -98,10 +96,7 @@ import { Textarea } from '@/shared/components/ui/textarea'
 import DataTable, { type DataColumn } from '@/shared/components/DataTable.vue'
 import { statusBadgeClass } from '@/shared/formatting/status'
 import { confirm } from '@/shared/components/confirm'
-import { useResult } from '@/shared/composables/useResult'
-import ResultModal from '@/shared/components/ResultModal.vue'
-
-const result = useResult()
+import { toastError, toastSuccess } from '@/shared/components/toast'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -140,11 +135,11 @@ async function importCards() {
     const msg = dedupe.value
       ? `${t('cards.added')}: ${res.added}, ${t('cards.skipped')}: ${res.skipped}`
       : `${t('cards.imported')}: ${res.added}`
-    result.success(msg)
+    toastSuccess(msg)
     cardsText.value = ''
     await load()
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   } finally {
     importing.value = false
   }
@@ -171,10 +166,10 @@ async function onAction(row: any, cmd: string) {
   if (!ok) return
   try {
     await api.post('/admin/cards/' + row.id + '/status', { status: cmd })
-    result.success(t('cards.statusSaved'))
+    toastSuccess(t('cards.statusSaved'))
     await load()
   } catch (e: any) {
-    result.error(e.message || t('cards.statusFail'))
+    toastError(e.message || t('cards.statusFail'))
   }
 }
 function canManage(row: any) {

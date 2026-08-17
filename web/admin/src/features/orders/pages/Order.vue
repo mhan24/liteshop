@@ -199,8 +199,6 @@
       </Modal>
     </template>
   </div>
-
-  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
@@ -220,11 +218,7 @@ import { Textarea } from '@/shared/components/ui/textarea'
 import Modal from '@/shared/components/Modal.vue'
 import FormField from '@/shared/components/FormField.vue'
 import { confirm } from '@/shared/components/confirm'
-import { toastWarning } from '@/shared/components/toast'
-import { useResult } from '@/shared/composables/useResult'
-import ResultModal from '@/shared/components/ResultModal.vue'
-
-const result = useResult()
+import { toastError, toastSuccess, toastWarning } from '@/shared/components/toast'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -268,16 +262,16 @@ async function load() {
 }
 async function resend() {
   await api.post('/admin/orders/' + route.params.id + '/resend', {})
-  result.success(t('orders.resendSent'))
+  toastSuccess(t('orders.resendSent'))
   await load()
 }
 async function redeliver() {
   try {
     await api.post('/admin/orders/' + route.params.id + '/redeliver', {})
-    result.success(t('orders.redeliverSent'))
+    toastSuccess(t('orders.redeliverSent'))
     await load()
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   }
 }
 async function manualDeliver() {
@@ -288,12 +282,12 @@ async function manualDeliver() {
   delivering.value = true
   try {
     await api.post('/admin/orders/' + route.params.id + '/deliver', { content: deliverContent.value })
-    result.success(t('orders.manualDeliverSent'))
+    toastSuccess(t('orders.manualDeliverSent'))
     deliverDialog.value = false
     deliverContent.value = ''
     await load()
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   } finally {
     delivering.value = false
   }
@@ -303,10 +297,10 @@ async function cancelOrder() {
   if (!ok) return
   try {
     await api.post('/admin/orders/' + route.params.id + '/cancel', {})
-    result.success(t('orders.cancelledMsg'))
+    toastSuccess(t('orders.cancelledMsg'))
     await load()
   } catch (e: any) {
-    result.error(e.message || '')
+    toastError(e.message || '')
   }
 }
 async function changeStatus() {
@@ -320,13 +314,13 @@ async function changeStatus() {
       status: newStatus.value,
       message: statusMessage.value,
     })
-    result.success(t('orders.statusChanged'))
+    toastSuccess(t('orders.statusChanged'))
     statusDialog.value = false
     newStatus.value = ''
     statusMessage.value = ''
     await load()
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   } finally {
     savingStatus.value = false
   }

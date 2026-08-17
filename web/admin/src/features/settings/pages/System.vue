@@ -35,8 +35,6 @@
       </CardContent>
     </Card>
   </div>
-
-  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
@@ -49,10 +47,7 @@ import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card'
 import { Input } from '@/shared/components/ui/input'
 import { confirm } from '@/shared/components/confirm'
-import { useResult } from '@/shared/composables/useResult'
-import ResultModal from '@/shared/components/ResultModal.vue'
-
-const result = useResult()
+import { toastError, toastSuccess } from '@/shared/components/toast'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -72,9 +67,9 @@ async function onFileChange(e: Event) {
   restoring.value = true
   try {
     await api.post('/admin/system/restore', fd)
-    result.success(t('system.restored'))
+    toastSuccess(t('system.restored'))
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   } finally {
     restoring.value = false
   }
@@ -89,11 +84,11 @@ async function reset() {
   if (!ok) return
   try {
     await api.post('/admin/system/reset', { confirm: 'DELETE' })
-    result.success(t('system.resetDone'))
+    toastSuccess(t('system.resetDone'))
     // 重置后所有数据与 session 被清空，必须重新登录；延迟跳转让用户看到结果提示
     setTimeout(() => router.push('/login'), 1500)
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   }
 }
 </script>

@@ -152,8 +152,6 @@
       </div>
     </div>
   </PageCard>
-
-  <ResultModal v-model:open="result.modal.open" :type="result.modal.type" :title="result.modal.title" :message="result.modal.message" />
 </template>
 
 <script setup lang="ts">
@@ -169,10 +167,7 @@ import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
 import { Textarea } from '@/shared/components/ui/textarea'
 import FormField from '@/shared/components/FormField.vue'
-import { useResult } from '@/shared/composables/useResult'
-import ResultModal from '@/shared/components/ResultModal.vue'
-
-const result = useResult()
+import { toastError, toastSuccess } from '@/shared/components/toast'
 
 const { t } = useI18n()
 const loading = ref(false)
@@ -224,9 +219,9 @@ async function save() {
   saving.value = true
   try {
     await api.post('/admin/settings', form.value)
-    result.success(t('payment.saved'))
+    toastSuccess(t('payment.saved'))
   } catch (e: any) {
-    result.error(e.message)
+    toastError(e.message)
   } finally {
     saving.value = false
   }
