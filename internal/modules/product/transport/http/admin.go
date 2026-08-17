@@ -20,7 +20,7 @@ func (h *Handlers) AdminProducts(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []map[string]any{}
 	for _, v := range views {
-		item := productJSON(v.Product)
+		item := productJSONForRole(v.Product, h.currentRole(r))
 		item["available"] = v.Available
 		item["reserved"] = v.Reserved
 		item["sold"] = v.Sold
@@ -40,7 +40,14 @@ func (h *Handlers) AdminProduct(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteError(w, 404, "not found")
 		return
 	}
-	httpserver.WriteJSON(w, 200, map[string]any{"product": productJSON(v.Product), "available": v.Available})
+	httpserver.WriteJSON(w, 200, map[string]any{"product": productJSONForRole(v.Product, h.currentRole(r)), "available": v.Available})
+}
+
+func (h *Handlers) currentRole(r *http.Request) string {
+	if h.deps.CurrentRole == nil {
+		return "admin"
+	}
+	return h.deps.CurrentRole(r)
 }
 
 // centsFromYuan 元字符串 → 分（金额换算属商品模块传输层）。

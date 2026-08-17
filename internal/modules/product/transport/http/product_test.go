@@ -39,3 +39,15 @@ func TestProductFromJSONDeliveryType(t *testing.T) {
 		}
 	}
 }
+
+func TestProductJSONForRoleHidesCostFromViewer(t *testing.T) {
+	p := productdomain.Product{ID: 1, Name: "商品", PriceCents: 1000, CostCents: 400}
+	viewer := productJSONForRole(p, "viewer")
+	if _, ok := viewer["cost_cents"]; ok {
+		t.Fatal("viewer product response must not include cost_cents")
+	}
+	operator := productJSONForRole(p, "operator")
+	if operator["cost_cents"] != int64(400) {
+		t.Fatalf("operator cost_cents = %#v, want 400", operator["cost_cents"])
+	}
+}

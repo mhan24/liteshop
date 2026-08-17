@@ -13,6 +13,7 @@ type Deps struct {
 	Products *productapp.ProductService
 	Settings *settingsapp.SettingsService
 	Audit    func(r *http.Request, action, targetType, targetID, before, after string)
+	CurrentRole func(r *http.Request) string
 }
 
 // Registrar 路由注册器（组合根实现，携带鉴权/限流中间件）。

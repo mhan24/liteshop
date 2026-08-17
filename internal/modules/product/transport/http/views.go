@@ -30,3 +30,11 @@ func productJSONPublic(p domain.Product) map[string]any {
 	delete(out, "cost_cents")
 	return out
 }
+
+func productJSONForRole(p domain.Product, role string) map[string]any {
+	out := productJSON(p)
+	if role == "viewer" {
+		delete(out, "cost_cents")
+	}
+	return out
+}

@@ -139,6 +139,10 @@ func (s *Server) registerModuleRoutes(mux *http.ServeMux) {
 	}))
 	producthttp.Register(reg, producthttp.NewHandlers(producthttp.Deps{
 		Products: s.products, Settings: s.settings, Audit: s.recordAudit,
+		CurrentRole: func(r *http.Request) string {
+			_, role, _ := s.currentSession(r)
+			return role
+		},
 	}))
 	inventoryhttp.Register(reg, inventoryhttp.NewHandlers(inventoryhttp.Deps{
 		Inventory: s.inventory, Products: s.products, Audit: s.recordAudit,
