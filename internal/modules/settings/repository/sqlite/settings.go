@@ -14,6 +14,7 @@ import (
 // SecretSettingKeys 敏感配置键（存 secrets 表，AES-GCM 加密）。
 var SecretSettingKeys = []string{
 	"bepusdt_api_token",
+	"hashpay_private_key",
 	"smtp_password",
 	"telegram_bot_token",
 	"webhook_secret",
