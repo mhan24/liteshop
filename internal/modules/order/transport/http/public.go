@@ -283,5 +283,10 @@ func (h *Handlers) Order(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) orderOwned(r *http.Request, o orderdomain.Order) bool {
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
-	return token != "" && hmacEqual(token, o.ViewToken)
+	if token != "" {
+		return hmacEqual(token, o.ViewToken)
+	}
+	// 存量订单兼容路径：邮箱 + 订单号可查看订单，但新链接始终优先使用 token。
+	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
+	return contact != "" && strings.EqualFold(contact, strings.TrimSpace(o.BuyerContact))
 }

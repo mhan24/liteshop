@@ -82,6 +82,17 @@ func TestSendViewLinkOwnership(t *testing.T) {
 	if err != nil || ok {
 		t.Fatalf("missing order: ok=%v err=%v, want (false, nil)", ok, err)
 	}
+
+	// 取消订单不应再发送查看链接
+	svc.repo = &stubOrderRepo{
+		byNo: func(string) (models.Order, error) {
+			return newLinkOrder("S1", "buyer@test.com", models.OrderCancelled), nil
+		},
+	}
+	ok, err = svc.SendViewLink("buyer@test.com", "S1")
+	if err != nil || ok {
+		t.Fatalf("terminal order: ok=%v err=%v, want (false, nil)", ok, err)
+	}
 }
 
 // TestSendViewLinksFiltersTerminal 全部链接只发送有效订单，取消/过期/支付失败不发送。

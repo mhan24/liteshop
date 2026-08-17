@@ -62,6 +62,9 @@ func (s *OrderService) SendViewLink(contact, orderNo string) (bool, error) {
 	if !strings.EqualFold(strings.TrimSpace(o.BuyerContact), strings.TrimSpace(contact)) {
 		return false, nil
 	}
+	if !linkableOrderStatus(o) {
+		return false, nil
+	}
 	if s.SendLinks == nil {
 		return false, errors.New("邮件发送未配置")
 	}
