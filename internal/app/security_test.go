@@ -149,4 +149,16 @@ func TestSameOrigin(t *testing.T) {
 	if sameOrigin(bad) {
 		t.Fatal("cross-origin request must be rejected")
 	}
+	scheme := httptest.NewRequest(http.MethodPost, "/", nil)
+	scheme.Host = "shop.3737.de"
+	scheme.Header.Set("Origin", "javascript://shop.3737.de")
+	if sameOrigin(scheme) {
+		t.Fatal("non-http origin must be rejected")
+	}
+	port := httptest.NewRequest(http.MethodPost, "/", nil)
+	port.Host = "shop.3737.de:8080"
+	port.Header.Set("Origin", "https://shop.3737.de")
+	if !sameOrigin(port) {
+		t.Fatal("same host with forwarded application port should be allowed")
+	}
 }

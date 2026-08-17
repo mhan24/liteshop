@@ -581,14 +581,14 @@ func sameOrigin(r *http.Request) bool {
 		return true
 	}
 	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return false
 	}
 	host := r.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	return strings.EqualFold(u.Host, host)
+	return strings.EqualFold(u.Hostname(), host)
 }
 
 // audit 记录一条管理员审计日志（记录谁/何时/改了什么/前后值）。
