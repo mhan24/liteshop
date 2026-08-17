@@ -267,7 +267,11 @@ func (h *Handlers) Order(w http.ResponseWriter, r *http.Request) {
 	if owned {
 		switch order.Status {
 		case orderdomain.OrderPaid, orderdomain.OrderProcessing, orderdomain.OrderDelivered, orderdomain.OrderCompleted:
-			cards, _ := h.deps.Orders.GetOrderCards(order.ID)
+			cards, err := h.deps.Orders.GetOrderCards(order.ID)
+			if err != nil {
+				httpserver.WriteInternalError(w, err)
+				return
+			}
 			list := []cardResponse{}
 			for _, c := range cards {
 				list = append(list, toCardResponse(c))

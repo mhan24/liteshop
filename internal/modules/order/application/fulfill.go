@@ -23,8 +23,11 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, gateway, tradeID, blockTx str
 	}
 	switch o.Status {
 	case models.OrderPaid, models.OrderProcessing, models.OrderPendingDelivery, models.OrderDelivered, models.OrderCompleted:
-		cards, _ := s.inventory.CardsForOrder(context.Background(), o.ID)
-		return o, cards, false, nil
+		if s.inventory == nil {
+			return o, nil, false, fmt.Errorf("库存服务未注入")
+		}
+		cards, err := s.inventory.CardsForOrder(context.Background(), o.ID)
+		return o, cards, false, err
 	case models.OrderWaitingPayment:
 		// 继续
 	default:
@@ -59,7 +62,13 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, gateway, tradeID, blockTx str
 	o.BlockTransactionID = blockTx
 	o.PaidAt = now
 	_ = s.repo.AddLog(o.ID, "payment_success", "支付成功", models.OrderWaitingPayment, models.OrderPaid, 0)
-	cards, _ := s.inventory.CardsForOrder(context.Background(), o.ID)
+	if s.inventory == nil {
+		return o, nil, false, fmt.Errorf("库存服务未注入")
+	}
+	cards, err := s.inventory.CardsForOrder(context.Background(), o.ID)
+	if err != nil {
+		return o, nil, false, err
+	}
 	if delivered == 0 || len(cards) == 0 {
 		if err := s.repo.SetOrderStatus(o.ID, models.OrderDeliveryFailed); err != nil {
 			// 状态落库失败需要让调用方感知，避免"已扣款但状态未知"。
@@ -69,7 +78,9 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, gateway, tradeID, blockTx str
 		s.fireDeliveryFailed(o, "无可用卡密")
 		return o, nil, false, models.ErrNoCards
 	}
-	_ = s.repo.SetOrderStatus(o.ID, models.OrderDelivered)
+	if err := s.repo.SetOrderStatus(o.ID, models.OrderDelivered); err != nil {
+		return o, cards, false, err
+	}
 	_ = s.repo.AddLog(o.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
 	// OrderPaid/OrderDelivered 事件已由支付事务写入 outbox，由 outbox worker 发布。
 	return o, cards, true, nil
@@ -135,7 +146,13 @@ func (s *OrderService) Resend(orderID int64) error {
 		_ = s.repo.AddLog(o.ID, "resend", "管理员重新发送人工发货内容", o.Status, o.Status, 0)
 		return nil
 	}
-	cards, _ := s.inventory.CardsForOrder(context.Background(), o.ID)
+	if s.inventory == nil {
+		return fmt.Errorf("库存服务未注入")
+	}
+	cards, err := s.inventory.CardsForOrder(context.Background(), o.ID)
+	if err != nil {
+		return err
+	}
 	if len(cards) == 0 {
 		return nil
 	}
@@ -149,9 +166,15 @@ func (s *OrderService) Resend(orderID int64) error {
 // BatchResend 批量重发（已支付且有卡密的订单）。
 func (s *OrderService) BatchResend(ids []int64) (int, error) {
 	sent := 0
+	if s.inventory == nil {
+		return 0, fmt.Errorf("库存服务未注入")
+	}
 	for _, id := range ids {
 		o, err := s.repo.GetOrderByID(id)
-		if err != nil || !resendableStatus(o.Status) {
+		if err != nil {
+			continue
+		}
+		if !resendableStatus(o.Status) {
 			continue
 		}
 		if o.DeliveryType == productdomain.DeliveryTypeManual {
@@ -165,7 +188,10 @@ func (s *OrderService) BatchResend(ids []int64) (int, error) {
 			sent++
 			continue
 		}
-		cards, _ := s.inventory.CardsForOrder(context.Background(), o.ID)
+		cards, err := s.inventory.CardsForOrder(context.Background(), o.ID)
+		if err != nil {
+			return sent, err
+		}
 		if len(cards) == 0 {
 			continue
 		}
@@ -191,10 +217,18 @@ func (s *OrderService) Redeliver(orderID int64) error {
 	default:
 		return fmt.Errorf("订单状态 %s 不允许补发卡密", o.Status)
 	}
-	cards, _ := s.inventory.CardsForOrder(context.Background(), o.ID)
+	if s.inventory == nil {
+		return fmt.Errorf("库存服务未注入")
+	}
+	cards, err := s.inventory.CardsForOrder(context.Background(), o.ID)
+	if err != nil {
+		return err
+	}
 	if len(cards) > 0 {
 		if o.Status != models.OrderDelivered && o.Status != models.OrderCompleted {
-			_ = s.repo.SetOrderStatus(o.ID, models.OrderDelivered)
+			if err := s.repo.SetOrderStatus(o.ID, models.OrderDelivered); err != nil {
+				return err
+			}
 			_ = s.repo.AddLog(o.ID, "delivered", "管理员手动确认发卡", o.Status, models.OrderDelivered, 0)
 		}
 		if s.SendPaid != nil {
@@ -210,7 +244,9 @@ func (s *OrderService) Redeliver(orderID int64) error {
 		return fmt.Errorf("订单缺少商品信息")
 	}
 	// 幂等释放旧锁定，避免残留 reserved_order 造成库存超扣/孤儿锁定
-	_ = s.inventory.ReleaseReservation(context.Background(), o.ID)
+	if err := s.inventory.ReleaseReservation(context.Background(), o.ID); err != nil {
+		return err
+	}
 	err = s.inventory.ReserveFromStock(context.Background(), o.ID, o.ProductID, o.Qty)
 	if err != nil {
 		return err
@@ -219,8 +255,13 @@ func (s *OrderService) Redeliver(orderID int64) error {
 		return err
 	}
 
-	cards, _ = s.inventory.CardsForOrder(context.Background(), o.ID)
-	_ = s.repo.SetOrderStatus(o.ID, models.OrderDelivered)
+	cards, err = s.inventory.CardsForOrder(context.Background(), o.ID)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.SetOrderStatus(o.ID, models.OrderDelivered); err != nil {
+		return err
+	}
 	_ = s.repo.AddLog(o.ID, "delivered", "管理员补发卡密", o.Status, models.OrderDelivered, 0)
 	if s.SendPaid != nil {
 		go s.SendPaid(o, cards)
