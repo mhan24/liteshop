@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	inventorydomain "shop/internal/modules/inventory/domain"
 	orderdomain "shop/internal/modules/order/domain"
@@ -52,7 +53,10 @@ var (
 
 func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.Handler, error) {
 	bus := jobs.NewBus(1024)
-	sessionSecret := settingssqlite.EnsureSessionSecret(database)
+	sessionSecret, err := settingssqlite.EnsureSessionSecretWithError(database)
+	if err != nil {
+		return nil, fmt.Errorf("ensure session secret: %w", err)
+	}
 	cipher := security.NewCipher(sessionSecret)
 	settingsStore := settingssqlite.NewStore(database)
 	notifier := notify.New(cfg, database, bus,

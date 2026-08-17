@@ -63,15 +63,24 @@ func SettingsVersion(d *sql.DB) int {
 	return v
 }
 
-// EnsureSessionSecret 返回会话主密钥（缺失时生成并写入 settings）。
-// 该密钥用于派生 secrets/TOTP 的 AES 密钥，明文保存在 settings 表。
+// EnsureSessionSecret 返回会话主密钥（兼容旧调用方）。
+// 新启动路径应使用 EnsureSessionSecretWithError，确保密钥成功持久化。
 func EnsureSessionSecret(d *sql.DB) string {
+	secret, _ := EnsureSessionSecretWithError(d)
+	return secret
+}
+
+// EnsureSessionSecretWithError 返回并持久化会话主密钥。
+// 密钥无法读取或写入时返回错误，避免服务使用重启后失效的临时密钥。
+func EnsureSessionSecretWithError(d *sql.DB) (string, error) {
 	if v, err := GetSetting(d, "session_secret"); err == nil && strings.TrimSpace(v) != "" {
-		return strings.TrimSpace(v)
+		return strings.TrimSpace(v), nil
 	}
 	secret := idgen.RandomToken(32)
-	_ = SetSetting(d, "session_secret", secret)
-	return secret
+	if err := SetSetting(d, "session_secret", secret); err != nil {
+		return "", err
+	}
+	return secret, nil
 }
 
 // GetSecret 读取并解密敏感配置；无记录返回空串。

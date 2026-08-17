@@ -44,7 +44,10 @@ func (h *Handlers) AdminSystemRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.deps.Admin.ClearPendingTotps()
-	_ = h.deps.Admin.DeleteAllSessions()
+	if err := h.deps.Admin.DeleteAllSessions(); err != nil {
+		httpserver.WriteInternalError(w, err)
+		return
+	}
 	// 配置恢复后清空限流器，避免旧 IP 限制残留影响管理员操作
 	h.deps.ResetLimiters()
 	h.deps.Audit(r, "system_restore", "settings", "system", "", fmt.Sprintf("restored %d settings", count))
@@ -55,7 +58,10 @@ func (h *Handlers) AdminSystemReset(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Confirm string `json:"confirm"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		httpserver.WriteError(w, 400, "bad json")
+		return
+	}
 	if strings.TrimSpace(input.Confirm) != "DELETE" {
 		httpserver.WriteError(w, 400, "confirm required")
 		return
@@ -65,7 +71,10 @@ func (h *Handlers) AdminSystemReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.deps.Admin.ClearPendingTotps()
-	_ = h.deps.Admin.DeleteAllSessions()
+	if err := h.deps.Admin.DeleteAllSessions(); err != nil {
+		httpserver.WriteInternalError(w, err)
+		return
+	}
 	h.deps.Audit(r, "system_reset", "system", "all", "all data", "reset")
 	httpserver.WriteJSON(w, 200, map[string]any{"ok": true})
 }

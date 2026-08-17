@@ -132,7 +132,10 @@ func (h *Handlers) AdminTotpDisable(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Otp string `json:"otp"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		httpserver.WriteError(w, 400, "bad json")
+		return
+	}
 	if err := h.deps.Admin.DisableTotp(id, input.Otp); err != nil {
 		if errors.Is(err, adminapp.ErrInvalidOtp) {
 			httpserver.WriteError(w, 403, "invalid otp")
@@ -204,7 +207,10 @@ func (h *Handlers) AdminSetRole(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Role string `json:"role"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		httpserver.WriteError(w, 400, "bad json")
+		return
+	}
 	role := strings.TrimSpace(input.Role)
 	if role != admindomain.RoleAdmin && role != admindomain.RoleOperator && role != admindomain.RoleViewer {
 		httpserver.WriteError(w, 400, "invalid role")

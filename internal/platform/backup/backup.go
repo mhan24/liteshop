@@ -51,7 +51,10 @@ func (s *Service) Run() error {
 		logging.App().Sugar().Errorf("job backup verify failed, removed: %s: %v", target, err)
 		return err
 	}
-	_ = os.Chmod(target, 0o600)
+	if err := os.Chmod(target, 0o600); err != nil {
+		_ = os.Remove(target)
+		return fmt.Errorf("backup chmod: %w", err)
+	}
 	pruneOldBackups(dir, s.Keep)
 	logging.App().Sugar().Infof("job backup: %s (verified)", target)
 	return nil

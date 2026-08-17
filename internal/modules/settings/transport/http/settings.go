@@ -122,7 +122,10 @@ func (h *Handlers) AdminNotifyTestEmail(w http.ResponseWriter, r *http.Request) 
 	var input struct {
 		Email string `json:"test_email"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input)
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&input); err != nil {
+		httpserver.WriteError(w, 400, "bad json")
+		return
+	}
 	if !httpserver.ValidEmail(strings.TrimSpace(input.Email)) {
 		httpserver.WriteError(w, 400, "invalid email")
 		return
