@@ -14,9 +14,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"shop/internal/models"
 	admindomain "shop/internal/modules/admin/domain"
 	productdomain "shop/internal/modules/product/domain"
+	"shop/internal/shared/idgen"
 	"strconv"
 	"strings"
 	"sync"
@@ -377,7 +377,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 	}
 	// 关联 ID：一次请求一个 request_id，贯穿 app/payment/security 日志与响应头。
-	requestID := models.RandomToken(16)
+	requestID := idgen.RandomToken(16)
 	w.Header().Set("X-Request-ID", requestID)
 	ctx := logging.WithRequestID(r.Context(), requestID)
 	rec := httpserver.NewStatusRecorder(w)
@@ -600,7 +600,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, adminID in
 	// 生产部署由 Caddy/Cloudflare 终止 TLS，Go 侧 r.TLS 恒为 nil，
 	// 需根据 X-Forwarded-Proto 判断客户端是否为 HTTPS，否则 Cookie 不带 Secure。
 	secure := requestIsHTTPS(r)
-	id := models.RandomToken(24)
+	id := idgen.RandomToken(24)
 	expiry := time.Now().Add(12 * time.Hour)
 	// 会话持久化到数据库，服务重启不丢登录态。
 	if err := s.admin.CreateSession(id, adminID, expiry.Unix()); err != nil {

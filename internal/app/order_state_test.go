@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	bepusdt "shop/internal/integrations/payment/bepusdt"
-	"shop/internal/models"
 	coupondomain "shop/internal/modules/coupon/domain"
 	inventorysqlite "shop/internal/modules/inventory/repository/sqlite"
 	orderapp "shop/internal/modules/order/application"
@@ -17,6 +16,8 @@ import (
 	couponsqlite "shop/internal/modules/coupon/repository/sqlite"
 	settingsdomain "shop/internal/modules/settings/domain"
 	db "shop/internal/platform/database/sqlite"
+	"shop/internal/shared/clock"
+	"shop/internal/shared/idgen"
 	fixtures "shop/tests/fixtures"
 )
 
@@ -28,7 +29,7 @@ func TestOrderStateMachineFlow(t *testing.T) {
 	}
 	defer d.Close()
 
-	now := models.Now()
+	now := clock.Now()
 	if _, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('test', '', 100, 'active', ?, ?)`, now, now); err != nil {
 		t.Fatalf("insert product: %v", err)
 	}
@@ -43,7 +44,7 @@ func TestOrderStateMachineFlow(t *testing.T) {
 	repo := fixtures.NewOrderRepository(d)
 
 	orderRec := orderdomain.Order{
-		OrderNo:      models.NewOrderNo(),
+		OrderNo:      idgen.NewOrderNo(),
 		ProductID:    productID,
 		ProductName:  "test",
 		Qty:          2,
@@ -75,7 +76,7 @@ func TestOrderStateMachineFlow(t *testing.T) {
 	}
 
 	// 模拟支付回调 + 发卡（绕过真实支付 client）
-	if err := repo.MarkPaid(o.ID, "T1", "B1", models.Now()); err != nil {
+	if err := repo.MarkPaid(o.ID, "T1", "B1", clock.Now()); err != nil {
 		t.Fatalf("mark paid: %v", err)
 	}
 	if _, err := inventorysqlite.NewInventoryRepository(d).ConfirmReservation(context.Background(), o.ID); err != nil {
@@ -123,7 +124,7 @@ func TestOrderCancelFreesCards(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	_, _ = d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('t','',100,'active',?,?)`, now, now)
 	var productID int64
 	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&productID)
@@ -134,7 +135,7 @@ func TestOrderCancelFreesCards(t *testing.T) {
 	svc := orderapp.NewOrderService(repo, func(string) orderapp.PaymentGateway { return nil }, nil)
 	svc.SetCouponStore(couponRepo)
 
-	orderRec := orderdomain.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: orderdomain.OrderCreated, CreatedAt: now, UpdatedAt: now}
+	orderRec := orderdomain.Order{OrderNo: idgen.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: orderdomain.OrderCreated, CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreatePendingOrder(&orderRec); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestFreeOrderWith100PercentCoupon(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	_, _ = d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('t','',100,'active',?,?)`, now, now)
 	var productID int64
 	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&productID)
@@ -214,7 +215,7 @@ func TestRedeliverFromStock(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	_, _ = d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('t','',100,'active',?,?)`, now, now)
 	var productID int64
 	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&productID)
@@ -230,7 +231,7 @@ func TestRedeliverFromStock(t *testing.T) {
 	svc.SetInventory(inventorysqlite.NewInventoryRepository(d))
 
 	// 创建订单占用 1 张（模拟：直接建订单 + 锁定一张）
-	orderRec := orderdomain.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: orderdomain.OrderCreated, CreatedAt: now, UpdatedAt: now}
+	orderRec := orderdomain.Order{OrderNo: idgen.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: orderdomain.OrderCreated, CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreatePendingOrder(&orderRec); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -268,7 +269,7 @@ func TestRedeliverIdempotent(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	_, _ = d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('t','',100,'active',?,?)`, now, now)
 	var productID int64
 	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&productID)
@@ -280,7 +281,7 @@ func TestRedeliverIdempotent(t *testing.T) {
 	svc := orderapp.NewOrderService(repo, func(string) orderapp.PaymentGateway { return nil }, nil)
 	svc.SetCouponStore(couponRepo)
 	svc.SetInventory(inventorysqlite.NewInventoryRepository(d))
-	orderRec := orderdomain.Order{OrderNo: models.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: orderdomain.OrderCreated, CreatedAt: now, UpdatedAt: now}
+	orderRec := orderdomain.Order{OrderNo: idgen.NewOrderNo(), ProductID: productID, ProductName: "t", Qty: 1, AmountCents: 100, Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com", Status: orderdomain.OrderCreated, CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreatePendingOrder(&orderRec); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -322,7 +323,7 @@ func TestOrderCountsWithTimezone(t *testing.T) {
 	}
 	var pid int64
 	_ = d.QueryRow(`SELECT id FROM products LIMIT 1`).Scan(&pid)
-	if _, err := d.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, created_at, updated_at, paid_at) VALUES(?,?,?,?,?,?,?,?,'paid',?,?,?)`, models.NewOrderNo(), pid, "t", 1, 100, "CNY", "usdt-trc20", "a@b.com", now.Unix(), now.Unix(), now.Unix()); err != nil {
+	if _, err := d.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, status, created_at, updated_at, paid_at) VALUES(?,?,?,?,?,?,?,?,'paid',?,?,?)`, idgen.NewOrderNo(), pid, "t", 1, 100, "CNY", "usdt-trc20", "a@b.com", now.Unix(), now.Unix(), now.Unix()); err != nil {
 		t.Fatalf("order: %v", err)
 	}
 	today, sales, _, _, _, _, err := repo.OrderCounts()
@@ -341,7 +342,7 @@ func TestCouponAndWholesale(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	if _, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, created_at, updated_at) VALUES('t','',100,'active',2,10,'[{"min_qty":2,"discount":90}]',?,?)`, now, now); err != nil {
 		t.Fatalf("insert product: %v", err)
 	}
@@ -460,7 +461,7 @@ func TestOrderCostSnapshot(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	if _, err := d.Exec(`INSERT INTO products(name, description, price_cents, cost_cents, status, min_qty, max_qty, wholesale, created_at, updated_at) VALUES('t','',100,40,'active',1,100,'[]',?,?)`, now, now); err != nil {
 		t.Fatalf("insert product: %v", err)
 	}
@@ -471,7 +472,7 @@ func TestOrderCostSnapshot(t *testing.T) {
 	}
 	repo := fixtures.NewOrderRepository(d)
 
-	now = models.Now()
+	now = clock.Now()
 	if err := repo.CreatePendingOrder(&orderdomain.Order{
 		OrderNo: "SNAP1", ProductID: pid, ProductName: "t", Qty: 2, AmountCents: 200, CostCents: 40,
 		Fiat: "CNY", TradeType: "usdt-trc20", BuyerContact: "a@b.com",

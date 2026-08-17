@@ -24,7 +24,7 @@ check "创建订单流程"              "internal/modules/order/application/crea
 check "订单状态常量"              "internal/modules/order/domain/status.go"
 check "订单状态转换"              "internal/modules/order/domain/transition.go"
 check "订单 Repository 接口"      "internal/modules/order/application/ports.go"
-check "订单 SQLite 实现"          "internal/modules/order/repository/sqlite/order_repository.go"
+check "订单 SQLite 实现"          "internal/modules/order/repository/sqlite/repository.go"
 check "schema/order.go 业务字段"   "internal/modules/order/domain/order.go"
 check "schema/order.go DB 字段"    "internal/modules/order/repository/sqlite/model.go"
 check "schema/order.go 映射"       "internal/modules/order/repository/sqlite/mapper.go"

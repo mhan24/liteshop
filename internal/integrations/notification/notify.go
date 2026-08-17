@@ -12,12 +12,12 @@ import (
 	"time"
 
 	smtp "shop/internal/integrations/notification/smtp"
-	"shop/internal/models"
 	inventorydomain "shop/internal/modules/inventory/domain"
 	orderdomain "shop/internal/modules/order/domain"
 	"shop/internal/platform/config"
 	mailqueue "shop/internal/platform/mailqueue"
 	"shop/internal/platform/scheduler/jobs"
+	"shop/internal/shared/clock"
 
 	"shop/internal/platform/logging"
 )
@@ -170,7 +170,7 @@ func (n *Notifier) sendPaidJob(order orderdomain.Order, cards []inventorydomain.
 	}
 	paidAt := order.PaidAt
 	if paidAt <= 0 {
-		paidAt = models.Now()
+		paidAt = clock.Now()
 	}
 	data := map[string]string{
 		"order_no":     order.OrderNo,
@@ -180,7 +180,7 @@ func (n *Notifier) sendPaidJob(order orderdomain.Order, cards []inventorydomain.
 		"fiat":         order.Fiat,
 		"trade_type":   order.TradeType,
 		"contact":      order.BuyerContact,
-		"paid_at":      models.FormatBeijing(paidAt),
+		"paid_at":      clock.FormatBeijing(paidAt),
 		"cards":        strings.Join(cardLines, "\n"),
 		"order_url":    orderURL(cfg.PublicBaseURL, order),
 		"site_title":   n.siteTitle(),

@@ -14,6 +14,32 @@
 
 模块互不通过内部实现耦合：跨模块协作一律走 application 层声明的端口（接口）。
 
+## 当前目录结构
+
+```text
+cmd/liteshop/                         程序入口
+internal/app/                         组合根、路由、中间件、生命周期
+internal/modules/<module>/
+  domain/                             领域模型、状态和规则
+  application/                        业务用例和端口
+  transport/http/                     请求解析、响应转换、路由
+  repository/sqlite/                  SQL、行模型、映射、事务持久化
+internal/integrations/
+  payment/{bepusdt,hashpay}/          支付网关适配器
+  notification/smtp/                  SMTP 传输适配器
+internal/platform/                    数据库、日志、安全、调度、Outbox、备份
+internal/shared/{clock,idgen,value}/  无业务语义的共享能力
+web/admin/                            管理端 Vue/Vite 应用
+web/storefront/                       前台 Nuxt 应用
+migrations/                           编号 SQL 迁移
+contracts/                            OpenAPI 契约
+tests/                                fixtures、integration、e2e
+```
+
+`internal/models` 兼容层已移除。时间、ID、密码等基础能力分别从
+`shared/clock`、`shared/idgen`、`platform/security` 引用；领域类型只归属
+各自模块，避免重新形成全局 schema。
+
 ## 依赖方向
 
 ```

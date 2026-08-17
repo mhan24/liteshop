@@ -89,8 +89,8 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans',
-    'PingFang SC', 'Microsoft YaHei', sans-serif;
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
 }
 
 @layer base {
@@ -219,4 +219,22 @@
   border: none;
   border-top: 1px solid var(--border);
   margin: 1em 0;
+}
+
+/* 后台全局通知固定在顶部，避免布局或移动端媒体规则将 Toast 推到底部。 */
+.admin-toaster {
+  top: 4.5rem !important;
+  right: 1rem !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: 2147483000 !important;
+}
+
+@media (max-width: 600px) {
+  .admin-toaster {
+    top: 4rem !important;
+    right: 0.75rem !important;
+    left: 0.75rem !important;
+    width: auto !important;
+  }
 }

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"shop/internal/models"
 	"shop/internal/platform/config"
+	"shop/internal/shared/idgen"
 )
 
 // Send 使用配置发送一封邮件（隐式 TLS 465 / STARTTLS / 明文）。
@@ -32,7 +32,7 @@ func Send(cfg config.Config, to, subject, body string) error {
 		"To: " + to,
 		"Subject: " + mime.BEncoding.Encode("utf-8", subject),
 		"Date: " + time.Now().Format(time.RFC1123Z),
-		"Message-ID: <" + models.RandomToken(12) + "@" + domain + ">",
+		"Message-ID: <" + idgen.RandomToken(12) + "@" + domain + ">",
 		"MIME-Version: 1.0",
 		"Content-Type: text/plain; charset=utf-8",
 	}

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"shop/internal/models"
+	"shop/internal/shared/clock"
 )
 
 // MaxOutboxAttempts 事件连续处理失败上限，超过进入死信。
@@ -24,7 +24,7 @@ type OutboxEvent struct {
 // enqueueOutboxTx 在既有事务内写入 outbox（与订单状态变更同事务，崩溃不丢事件）。
 func EnqueueOutboxTx(tx *sql.Tx, eventType, payload string) error {
 	_, err := tx.Exec(`INSERT INTO outbox_events(event_type, payload, created_at) VALUES(?, ?, ?)`,
-		eventType, payload, models.Now())
+		eventType, payload, clock.Now())
 	return err
 }
 
@@ -86,7 +86,7 @@ func MoveOutboxToDead(d *sql.DB, id int64, reason string) error {
 	defer tx.Rollback()
 	if _, err := tx.Exec(`INSERT INTO dead_events(event_type, payload, created_at, dead_at, reason)
 		SELECT event_type, payload, created_at, ?, ? FROM outbox_events WHERE id = ?`,
-		models.Now(), reason, id); err != nil {
+		clock.Now(), reason, id); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE outbox_events SET status = 'dead' WHERE id = ? AND status = 'pending'`, id); err != nil {

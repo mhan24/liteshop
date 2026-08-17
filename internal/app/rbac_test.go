@@ -1,13 +1,14 @@
 package app
 
 import (
-	"shop/internal/models"
 	admindomain "shop/internal/modules/admin/domain"
 	adminsqlite "shop/internal/modules/admin/repository/sqlite"
 	auditsqlite "shop/internal/modules/audit/repository/sqlite"
 	"testing"
 
 	db "shop/internal/platform/database/sqlite"
+	"shop/internal/platform/security"
+	"shop/internal/shared/clock"
 )
 
 func TestAdminRolesAndAudit(t *testing.T) {
@@ -28,11 +29,11 @@ func TestAdminRolesAndAudit(t *testing.T) {
 	}
 
 	// 创建 operator
-	if _, err := d.Exec(`INSERT INTO admins(username, password_hash, role, created_at) VALUES('op1', ?, 'operator', ?)`, models.HashPassword("password123"), models.Now()); err != nil {
+	if _, err := d.Exec(`INSERT INTO admins(username, password_hash, role, created_at) VALUES('op1', ?, 'operator', ?)`, security.HashPassword("password123"), clock.Now()); err != nil {
 		t.Fatalf("insert op: %v", err)
 	}
 	// 创建 viewer
-	if _, err := d.Exec(`INSERT INTO admins(username, password_hash, role, created_at) VALUES('view1', ?, 'viewer', ?)`, models.HashPassword("password123"), models.Now()); err != nil {
+	if _, err := d.Exec(`INSERT INTO admins(username, password_hash, role, created_at) VALUES('view1', ?, 'viewer', ?)`, security.HashPassword("password123"), clock.Now()); err != nil {
 		t.Fatalf("insert viewer: %v", err)
 	}
 

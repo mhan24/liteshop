@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"shop/internal/models"
 	orderdomain "shop/internal/modules/order/domain"
 	db "shop/internal/platform/database/sqlite"
+	"shop/internal/shared/clock"
+	"shop/internal/shared/idgen"
 )
 
 // testingTB 同时满足 *testing.T 与 *testing.B（基准测试复用同一套造数设施）。
@@ -33,7 +34,7 @@ func NewTestDB(t testingTB) *sql.DB {
 // SeedProductWithCards 建一个上架商品并插入 n 张可用卡密，返回商品 ID。
 func SeedProductWithCards(t testingTB, d *sql.DB, n int) int64 {
 	t.Helper()
-	now := models.Now()
+	now := clock.Now()
 	res, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, created_at, updated_at)
 		VALUES('集成测试商品','',1000,'active',1,10,'[]',?,?)`, now, now)
 	if err != nil {
@@ -54,11 +55,11 @@ func SeedProductWithCards(t testingTB, d *sql.DB, n int) int64 {
 // SeedOrder 直接写入一笔订单（集成测试用），返回订单号。
 func SeedOrder(t testingTB, d *sql.DB, productID int64, status orderdomain.Status, tradeID string) string {
 	t.Helper()
-	now := models.Now()
-	orderNo := models.NewOrderNo()
+	now := clock.Now()
+	orderNo := idgen.NewOrderNo()
 	res, err := d.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, cost_cents, cost_snapshot_source, fiat, trade_type, buyer_contact, view_token, status, trade_id, created_at, updated_at)
 		VALUES(?, ?, '集成测试商品', 1, 1000, 100, 'order_time', 'CNY', 'usdt.trc20', 'buyer@test.com', ?, ?, ?, ?, ?)`,
-		orderNo, productID, models.RandomToken(24), string(status), tradeID, now, now)
+		orderNo, productID, idgen.RandomToken(24), string(status), tradeID, now, now)
 	if err != nil {
 		t.Fatalf("insert order: %v", err)
 	}

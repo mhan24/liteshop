@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"shop/internal/models"
 	db "shop/internal/platform/database/sqlite"
+	"shop/internal/shared/clock"
 )
 
 // TestBackupRestoreDrill 备份恢复演练：备份 → 复制到新库 → 跑迁移 → 查询数据。
@@ -18,7 +18,7 @@ func TestBackupRestoreDrill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open source: %v", err)
 	}
-	now := models.Now()
+	now := clock.Now()
 	res, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, created_at, updated_at)
 		VALUES('恢复演练商品','',1000,'active',1,10,'[]',?,?)`, now, now)
 	if err != nil {

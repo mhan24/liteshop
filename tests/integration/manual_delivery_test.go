@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"shop/internal/models"
+	"shop/internal/shared/clock"
 )
 
 // manualOrderEnv 组装人工手动交付商品 + 完整订单服务（真实 SQLite + mock 网关）。
@@ -37,7 +37,7 @@ func manualOrderEnv(t *testing.T) (*orderapp.OrderService, *fixtures.MockGateway
 	rec.Wire(svc)
 	svc.SetInventory(inventorysqlite.NewInventoryRepository(d))
 	svc.SetCouponStore(couponsqlite.NewCouponRepository(d))
-	now := models.Now()
+	now := clock.Now()
 	res, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, delivery_type, created_at, updated_at)
 		VALUES('人工交付商品','',1000,'active',1,10,'[]','manual',?,?)`, now, now)
 	if err != nil {
@@ -134,7 +134,7 @@ func TestManualDeliveryFlow(t *testing.T) {
 // TestManualDeliveryFreeOrder 人工交付 + 100% 折扣券：零金额订单直接进入待发货。
 func TestManualDeliveryFreeOrder(t *testing.T) {
 	svc, _, _, d, pid := manualOrderEnv(t)
-	now := models.Now()
+	now := clock.Now()
 	if _, err := d.Exec(`INSERT INTO coupons(code, type, percent, min_amount_cents, product_id, active, created_at, updated_at)
 		VALUES('FREE100', 'percent', 100, 0, ?, 1, ?, ?)`, pid, now, now); err != nil {
 		t.Fatalf("insert coupon: %v", err)

@@ -8,7 +8,7 @@ import (
 	fixtures "shop/tests/fixtures"
 	"testing"
 
-	"shop/internal/models"
+	"shop/internal/shared/clock"
 )
 
 func benchService(b *testing.B, cards int) (*orderapp.OrderService, *fixtures.MockGateway, int64) {
@@ -57,7 +57,7 @@ func BenchmarkPaymentCallback(b *testing.B) {
 func BenchmarkRepositoryQuery(b *testing.B) {
 	d := fixtures.NewTestDB(b)
 	repo := fixtures.NewOrderRepository(d)
-	now := models.Now()
+	now := clock.Now()
 	res, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, created_at, updated_at)
 		VALUES('bench','',100,'active',1,10,'[]',?,?)`, now, now)
 	if err != nil {

@@ -14,11 +14,11 @@
 | 项 | 状态 | 位置 |
 |---|---|---|
 | 订单状态与错误（强类型状态机 + 领域错误） | ✅ | `order/domain` + `order/domain/order_test.go` |
-| 创建订单（库存校验 → 建单 → 支付交易，单事务锁卡） | ✅ | `order/application/order_create.go` + 仓储测试 |
+| 创建订单（库存校验 → 建单 → 支付交易，单事务锁卡） | ✅ | `order/application/create.go` + 仓储测试 |
 | 支付确认（验签 → 幂等台账 → 条件状态迁移） | ✅ | `order/application/callback.go` + `processed_events` |
-| 卡密发放（支付成功同事务售卡 / 补发） | ✅ | `order/application/order_deliver.go` + inventory 事务端口 |
-| 取消订单（释放卡密 + 回滚优惠券 + 网关取消） | ✅ | `order/application/order_cancel.go` |
-| 订单过期（释放卡密 + 回滚优惠券） | ✅ | `order/application/order_cancel.go` + `scheduler/jobs/order_expire.go` |
+| 卡密发放（支付成功同事务售卡 / 补发） | ✅ | `order/application/fulfill.go` + inventory 事务端口 |
+| 取消订单（释放卡密 + 回滚优惠券 + 网关取消） | ✅ | `order/application/cancel.go` |
+| 订单过期（释放卡密 + 回滚优惠券） | ✅ | `order/application/expire.go` + `scheduler/jobs/order_expire.go` |
 | 支付对账（卡在 `waiting_payment` 的订单主动查网关并对齐） | ⬜ | 无 reconcile 用例，待补 `order/application/reconcile.go` + 定时任务 |
 
 第一阶段剩余工作：**支付对账**。现状只有网关侧的

@@ -14,10 +14,10 @@ import (
 	"time"
 
 	smtp "shop/internal/integrations/notification/smtp"
-	"shop/internal/models"
 	inventorydomain "shop/internal/modules/inventory/domain"
 	orderdomain "shop/internal/modules/order/domain"
 	"shop/internal/platform/scheduler/jobs"
+	"shop/internal/shared/clock"
 
 	"shop/internal/platform/logging"
 )
@@ -301,7 +301,7 @@ func (n *Notifier) OrderPayload(event string, order orderdomain.Order, cards []i
 		"amount":       fmt.Sprintf("%.2f", float64(order.AmountCents)/100),
 		"fiat":         order.Fiat,
 		"contact":      order.BuyerContact,
-		"paid_at":      models.FormatBeijing(order.PaidAt),
+		"paid_at":      clock.FormatBeijing(order.PaidAt),
 		"cards":        strings.Join(cardLines, "\n"),
 		"order_url":    orderURL(n.CurrentConfig().PublicBaseURL, order),
 	}

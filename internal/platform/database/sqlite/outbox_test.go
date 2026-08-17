@@ -1,8 +1,8 @@
 package db
 
 import (
-	"shop/internal/models"
 	outbox "shop/internal/platform/outbox"
+	"shop/internal/shared/clock"
 	"testing"
 )
 
@@ -12,7 +12,7 @@ func TestDeleteOldOutboxEvents(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	// 已发布 40 天前（应删）、已发布 1 天前（保留）、未发布 40 天前（必须保留，待送达）
 	for _, row := range []struct {
 		publishedAt int64

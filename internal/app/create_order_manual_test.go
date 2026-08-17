@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"shop/internal/integrations/turnstile"
-	"shop/internal/models"
 	settingssqlite "shop/internal/modules/settings/repository/sqlite"
 	"shop/internal/platform/security"
+	"shop/internal/shared/clock"
 	fixtures "shop/tests/fixtures"
 )
 
@@ -59,7 +59,7 @@ func TestCreateOrderManualSkipsStockCheck(t *testing.T) {
 		t.Fatalf("set trade types: %v", err)
 	}
 
-	now := models.Now()
+	now := clock.Now()
 	res, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, delivery_type, created_at, updated_at)
 		VALUES('人工交付商品','',1000,'active',1,100,'[]','manual',?,?)`, now, now)
 	if err != nil {
@@ -153,7 +153,7 @@ func TestCreateOrderWithoutTurnstileConfig(t *testing.T) {
 		t.Fatalf("set trade types: %v", err)
 	}
 
-	now := models.Now()
+	now := clock.Now()
 	res, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, delivery_type, created_at, updated_at)
 		VALUES('无验证商品','',1000,'active',1,100,'[]','manual',?,?)`, now, now)
 	if err != nil {

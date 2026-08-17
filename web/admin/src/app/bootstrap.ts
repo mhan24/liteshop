@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import '../assets/main.css'
+import 'vue-sonner/style.css'
 import i18n from '@/shared/i18n'
 import App from './App.vue'
 import router from '../router'

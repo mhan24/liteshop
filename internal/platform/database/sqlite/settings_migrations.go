@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"shop/internal/models"
+	"shop/internal/shared/clock"
 )
 
 // settingsMigration 一个配置升级步骤。
@@ -36,7 +36,7 @@ func MigrateSettings(d *sql.DB) error {
 				return fmt.Errorf("settings migration %d: %w", m.Version, err)
 			}
 		}
-		if _, err := d.Exec(`INSERT INTO settings_version(version, applied_at) VALUES(?, ?)`, m.Version, models.Now()); err != nil {
+		if _, err := d.Exec(`INSERT INTO settings_version(version, applied_at) VALUES(?, ?)`, m.Version, clock.Now()); err != nil {
 			return err
 		}
 	}

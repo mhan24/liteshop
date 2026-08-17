@@ -6,8 +6,8 @@ import (
 	orderapp "shop/internal/modules/order/application"
 	"testing"
 
-	"shop/internal/models"
 	db "shop/internal/platform/database/sqlite"
+	"shop/internal/shared/clock"
 )
 
 // TestOutboxDeadLetter 连续失败进入死信：损坏载荷重试 5 次后置 dead，
@@ -18,7 +18,7 @@ func TestOutboxDeadLetter(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	if _, err := d.Exec(`INSERT INTO outbox_events(event_type, payload, created_at) VALUES('order.paid', 'not-json', ?)`, now); err != nil {
 		t.Fatalf("insert bad: %v", err)
 	}

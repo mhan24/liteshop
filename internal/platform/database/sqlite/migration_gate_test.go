@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"shop/internal/models"
 	"shop/internal/platform/database/sqlite/schema"
+	"shop/internal/shared/clock"
 )
 
 // keyIndexes 迁移门禁必须存在的关键索引（订单/卡密/日志/审计/事件/会话/券查询基线）。
@@ -60,7 +60,7 @@ func TestMigrationGateFreshDB(t *testing.T) {
 	}
 
 	// 迁移后基本查询：商品 + 卡密 + 订单 的联合查询正常。
-	now := models.Now()
+	now := clock.Now()
 	res, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, delivery_type, created_at, updated_at)
 		VALUES('迁移商品','',100,'active',1,100,'[]','auto',?,?)`, now, now)
 	if err != nil {
@@ -94,7 +94,7 @@ func TestMigrationGateIndexLookup(t *testing.T) {
 	}
 	defer d.Close()
 
-	now := models.Now()
+	now := clock.Now()
 	res, err := d.Exec(`INSERT INTO products(name, description, price_cents, status, min_qty, max_qty, wholesale, delivery_type, created_at, updated_at)
 		VALUES('p','',100,'active',1,100,'[]','auto',?,?)`, now, now)
 	if err != nil {

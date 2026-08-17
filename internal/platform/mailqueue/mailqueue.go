@@ -3,7 +3,7 @@ package mailqueue
 import (
 	"database/sql"
 
-	"shop/internal/models"
+	"shop/internal/shared/clock"
 )
 
 // MailItem 一条待发送/重试邮件。
@@ -20,7 +20,7 @@ type MailItem struct {
 // EnqueueMail 写入邮件队列（发送失败后重试）。
 func EnqueueMail(d *sql.DB, to, subject, body string, orderID int64, retryAt int64) error {
 	_, err := d.Exec(`INSERT INTO mail_queue(to_email, subject, body, order_id, attempts, next_retry_at, created_at)
-		VALUES(?, ?, ?, ?, 0, ?, ?)`, to, subject, body, orderID, retryAt, models.Now())
+		VALUES(?, ?, ?, ?, 0, ?, ?)`, to, subject, body, orderID, retryAt, clock.Now())
 	return err
 }
 

@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"shop/internal/models"
+	"shop/internal/shared/clock"
 )
 
 // MigrationsDir 迁移 SQL 文件所在目录（相对运行目录，可被 app 覆盖为绝对路径）。
@@ -66,7 +66,7 @@ func Migrate(db *sql.DB) error {
 				return fmt.Errorf("migration %s: %w", name, err)
 			}
 		}
-		if _, err := db.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`, name, models.Now()); err != nil {
+		if _, err := db.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`, name, clock.Now()); err != nil {
 			return err
 		}
 	}

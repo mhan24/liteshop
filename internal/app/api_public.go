@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"shop/internal/models"
 	adminsqlite "shop/internal/modules/admin/repository/sqlite"
 	settingsapp "shop/internal/modules/settings/application"
 	settingssqlite "shop/internal/modules/settings/repository/sqlite"
@@ -132,7 +131,7 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "用户名过长")
 		return
 	}
-	if err := models.ValidatePasswordStrength(input.Password); err != nil {
+	if err := security.ValidatePasswordStrength(input.Password); err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}

@@ -5,14 +5,14 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"shop/internal/models"
 	"shop/internal/platform/httpserver"
+	"shop/internal/shared/clock"
 	"strconv"
 	"time"
 )
 
 func (h *Handlers) Dashboard(w http.ResponseWriter, r *http.Request) {
-	dayStart := models.StartOfDayIn(models.Now(), models.LocationFromTimezone(h.deps.Settings.SiteSettings().Timezone))
+	dayStart := clock.StartOfDayIn(clock.Now(), clock.LocationFromTimezone(h.deps.Settings.SiteSettings().Timezone))
 	data, err := h.deps.Stats.Dashboard(dayStart, h.deps.Settings.LowStockThreshold())
 	if err != nil {
 		httpserver.WriteInternalError(w, err)

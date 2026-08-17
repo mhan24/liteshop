@@ -3,7 +3,7 @@ package db
 import (
 	"testing"
 
-	"shop/internal/models"
+	"shop/internal/shared/clock"
 )
 
 // TestMigration007Backfill 验证成本回填：正常商品订单回填、孤儿订单保持 0（不违反 NOT NULL）、幂等。
@@ -13,7 +13,7 @@ func TestMigration007Backfill(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	// 商品（成本 40 分）与两个订单：一个有商品、一个孤儿（商品已删）
 	if _, err := d.Exec(`INSERT INTO products(name, description, price_cents, cost_cents, status, min_qty, max_qty, wholesale, created_at, updated_at) VALUES('p','',100,40,'active',1,100,'[]',?,?)`, now, now); err != nil {
 		t.Fatalf("insert product: %v", err)
@@ -64,7 +64,7 @@ func TestMigration007Dedupe(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer d.Close()
-	now := models.Now()
+	now := clock.Now()
 	// 券 A：ORD1 3 条 + ORD2 2 条 + ORD3 1 条；券 B：ORD3 1 条（跨券共享 ORD3）；券 C：ORD4 2 条
 	if _, err := d.Exec(`INSERT INTO coupons(code, type, value_cents, percent, min_amount_cents, max_uses, used_count, product_id, active, expires_at, created_at, updated_at) VALUES('A','fixed',50,0,0,10,6,0,1,0,?,?)`, now, now); err != nil {
 		t.Fatalf("insert coupon A: %v", err)
@@ -157,7 +157,7 @@ func TestMigration007EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	now := models.Now()
+	now := clock.Now()
 	// 移除 007 记录以便重跑
 	if _, err := d.Exec(`DELETE FROM schema_migrations WHERE version LIKE '%007%'`); err != nil {
 		d.Close()
@@ -209,7 +209,7 @@ func TestMigrationReopenNoRerun(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	// 写入数据
-	now := models.Now()
+	now := clock.Now()
 	_, _ = d.Exec(`INSERT INTO products(name, description, price_cents, status, created_at, updated_at) VALUES('p','',100,'active',?,?)`, now, now)
 	var before int
 	if err := d.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&before); err != nil {

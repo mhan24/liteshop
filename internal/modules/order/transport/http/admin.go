@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"shop/internal/models"
 	orderdomain "shop/internal/modules/order/domain"
 	"shop/internal/platform/httpserver"
+	"shop/internal/shared/clock"
 	"strconv"
 	"strings"
 	"time"
@@ -47,7 +47,7 @@ func (h *Handlers) AdminOrdersExport(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteInternalError(w, err)
 		return
 	}
-	tz := models.LocationFromTimezone(h.deps.Settings.SiteSettings().Timezone)
+	tz := clock.LocationFromTimezone(h.deps.Settings.SiteSettings().Timezone)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")

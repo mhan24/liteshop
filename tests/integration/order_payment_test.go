@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"shop/internal/models"
+	"shop/internal/shared/clock"
 )
 
 // newOrderService 组装真实 SQLite + MockGateway + NotifyRecorder 的订单服务。
@@ -206,7 +206,7 @@ func TestExpireStaleClosesTimeoutOrders(t *testing.T) {
 		t.Fatalf("create order: %v", err)
 	}
 	// 把订单创建时间拨回 2 小时前，模拟超时未支付
-	if _, err := d.Exec(`UPDATE orders SET created_at = ? WHERE order_no = ?`, models.Now()-7200, orderNo); err != nil {
+	if _, err := d.Exec(`UPDATE orders SET created_at = ? WHERE order_no = ?`, clock.Now()-7200, orderNo); err != nil {
 		t.Fatalf("backdate order: %v", err)
 	}
 	n, err := svc.ExpireStale(1200)

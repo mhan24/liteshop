@@ -8,7 +8,7 @@
 
 - **后端**：Go 1.25，模块化分层架构（`web → app → modules → platform`），SQLite（modernc 纯 Go 驱动），全部配置存数据库，无 `.env`。
 - **前台**：Nuxt 3 SSR（`web/storefront`），Vue 3 + Tailwind CSS，中英双语。
-- **后台**：Vue 3 + Element Plus / shadcn-vue + ECharts（`web/admin`），由 Go 二进制内嵌（`-tags production`）。
+- **后台**：Vue 3 + shadcn-vue + ECharts（`web/admin`），由 Go 二进制内嵌（`-tags production`）。
 - **支付**：BEpusdt / HashPay，USDT 与多币种，回调路径可自定义防扫描。
 - **部署**：Linux ARM64 + systemd + Caddy TLS，Cloudflare 代理。
 
@@ -40,6 +40,7 @@ web/
   admin/              管理端 SPA（Vue 3 + Vite）
   storefront/         前台 Nuxt 3
   embed.go            生产构建内嵌 admin（//go:build production）
+  embed_dev.go        开发/测试占位页（//go:build !production）
 docs/                 架构说明、订单状态机、迁移路线、运维手册
 tests/integration/    端到端集成测试
 ```
@@ -82,15 +83,11 @@ go test -race ./...
 
 迁移系统带版本追踪（`schema_migrations` 表），支持旧库完整升级；`migrations/006–008` 已改为条件 ALTER，幂等可全量重跑。
 
-## 部署
+## 发布
 
-仓库提供 `install.sh` 与 systemd unit 示例；典型流程：
-
-1. 构建前端 + `-tags production` 二进制。
-2. 上传二进制与 `storefront/.output` tgz 至服务器。
-3. `deploy-storefront.sh <tgz>` 部署前台，`systemctl restart cardshop liteshop-storefront`。
-
-生产环境 SQLite 每日自动备份；关键操作（订单/卡密/券）均为参数化 SQL + 事务边界。
+发布构建由 `.github/workflows/release.yml` 负责：构建前后台、注入版本信息、
+生成 SHA256 校验值并打包发布文件。生产环境 SQLite 每日自动备份；关键操作
+（订单/卡密/券）均为参数化 SQL + 事务边界。
 
 ## 文档
 

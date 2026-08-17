@@ -4,9 +4,9 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"shop/internal/models"
 	orderdomain "shop/internal/modules/order/domain"
 	"shop/internal/platform/database/sqlite/schema"
+	"shop/internal/shared/clock"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -30,7 +30,7 @@ func TestLegacyDBUpgradeKeepsData(t *testing.T) {
 	if _, err := d.Exec(string(initSQL)); err != nil {
 		t.Fatalf("exec 001: %v", err)
 	}
-	now := models.Now()
+	now := clock.Now()
 	// 2) 写入旧数据（旧状态值 pending、无 payment_status/view_token 列）
 	if _, err := d.Exec(`INSERT INTO admins(id, username, password_hash, role, created_at) VALUES(1, 'legacy', 'x', 'admin', ?)`, now); err != nil {
 		t.Fatalf("legacy admin: %v", err)

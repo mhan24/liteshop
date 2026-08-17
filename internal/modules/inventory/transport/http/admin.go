@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"shop/internal/models"
 	inventorydomain "shop/internal/modules/inventory/domain"
 	productdomain "shop/internal/modules/product/domain"
 	"shop/internal/platform/httpserver"
+	"shop/internal/shared/clock"
 	"strings"
 )
 
@@ -86,7 +86,7 @@ func (h *Handlers) AdminCardsExport(w http.ResponseWriter, r *http.Request) {
 	for _, c := range cards {
 		ts := "-"
 		if c.SoldAt > 0 {
-			ts = models.FormatBeijing(c.SoldAt)
+			ts = clock.FormatBeijing(c.SoldAt)
 		}
 		fmt.Fprintf(w, "%d,%s,%s,%s\n", c.ID, csvSafe(c.Content), c.Status, ts)
 	}

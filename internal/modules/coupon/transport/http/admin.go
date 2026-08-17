@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"shop/internal/models"
 	coupondomain "shop/internal/modules/coupon/domain"
 	"shop/internal/platform/httpserver"
+	"shop/internal/shared/clock"
 	"strconv"
 	"strings"
 )
@@ -59,7 +59,7 @@ func couponFromJSON(input map[string]any) (coupondomain.Coupon, error) {
 	if maxUses < 0 {
 		return coupondomain.Coupon{}, errString("max_uses 不能为负数")
 	}
-	if expiresAt != 0 && expiresAt <= models.Now() {
+	if expiresAt != 0 && expiresAt <= clock.Now() {
 		return coupondomain.Coupon{}, errString("expires_at 必须是未来的时间")
 	}
 	return coupondomain.Coupon{
