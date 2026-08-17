@@ -161,4 +161,16 @@ func TestSameOrigin(t *testing.T) {
 	if !sameOrigin(port) {
 		t.Fatal("same host with forwarded application port should be allowed")
 	}
+	explicitPort := httptest.NewRequest(http.MethodPost, "/", nil)
+	explicitPort.Host = "shop.3737.de:8443"
+	explicitPort.Header.Set("Origin", "https://shop.3737.de:9443")
+	if sameOrigin(explicitPort) {
+		t.Fatal("different explicit ports must be rejected")
+	}
+	missingPort := httptest.NewRequest(http.MethodPost, "/", nil)
+	missingPort.Host = "shop.3737.de"
+	missingPort.Header.Set("Origin", "https://shop.3737.de:443")
+	if sameOrigin(missingPort) {
+		t.Fatal("explicit origin port without matching request port must be rejected")
+	}
 }

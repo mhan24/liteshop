@@ -585,10 +585,19 @@ func sameOrigin(r *http.Request) bool {
 		return false
 	}
 	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+	requestHost, requestPort, requestHasPort := host, "", false
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		requestHost, requestPort, requestHasPort = h, p, true
 	}
-	return strings.EqualFold(u.Hostname(), host)
+	if !requestHasPort {
+		requestHost = host
+	}
+	if originPort := u.Port(); originPort != "" {
+		if !requestHasPort || originPort != requestPort {
+			return false
+		}
+	}
+	return strings.EqualFold(u.Hostname(), requestHost)
 }
 
 // audit 记录一条管理员审计日志（记录谁/何时/改了什么/前后值）。
