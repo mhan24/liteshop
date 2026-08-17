@@ -21,13 +21,17 @@ func (s *OrderService) ExpireStale(timeoutSec int) (int, error) {
 		return 0, err
 	}
 	expired := 0
+	var firstErr error
 	for _, o := range orders {
 		if err := s.Expire(o.ID); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		expired++
 	}
-	return expired, nil
+	return expired, firstErr
 }
 
 // Expire 过期订单（释放卡密）。

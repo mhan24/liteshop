@@ -30,13 +30,13 @@ func (s *OrderService) CancelWithGateway(orderID int64) error {
 }
 
 // HandleGatewayCancel 处理网关侧取消回调（BEpusdt status=3）。
-func (s *OrderService) HandleGatewayCancel(orderNo string) {
+func (s *OrderService) HandleGatewayCancel(orderNo string) error {
 	o, err := s.repo.GetOrderByNo(orderNo)
 	if err != nil {
-		return
+		return nil
 	}
 	s.cancelGatewayTx(o.ID)
-	_ = s.Expire(o.ID)
+	return s.Expire(o.ID)
 }
 
 func (s *OrderService) cancelGatewayTx(orderID int64) {

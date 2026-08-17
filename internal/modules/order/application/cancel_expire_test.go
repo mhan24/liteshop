@@ -172,3 +172,16 @@ func TestExpireStale(t *testing.T) {
 		t.Fatalf("expired = %d, want 2", n)
 	}
 }
+
+func TestExpireStalePropagatesFailure(t *testing.T) {
+	repo := &fakeOrderRepo{
+		list: []models.Order{{ID: 1, OrderNo: "S1", Status: models.OrderWaitingPayment}},
+		order: models.Order{ID: 1, OrderNo: "S1", Status: models.OrderWaitingPayment},
+		orderNo: "S1",
+		expireErr: errors.New("expire persistence failed"),
+	}
+	svc, _ := newCancelExpireSvc(repo)
+	if _, err := svc.ExpireStale(60); err == nil || err.Error() != "expire persistence failed" {
+		t.Fatalf("expire stale err = %v, want persistence failure", err)
+	}
+}

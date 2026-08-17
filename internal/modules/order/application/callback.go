@@ -54,7 +54,7 @@ func (s *OrderService) HandlePaymentCallback(gateway, requestID string, body []b
 	case PaymentTxPaid:
 		return s.applyPaidCallback(gateway, requestID, cb)
 	case PaymentTxClosed:
-		s.HandleGatewayCancel(cb.OrderID)
+		return s.HandleGatewayCancel(cb.OrderID)
 	}
 	return nil
 }
