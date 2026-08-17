@@ -81,11 +81,14 @@ func (s *Server) apiMaintenanceUnlock(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiPage(w http.ResponseWriter, r *http.Request) {
 	st := s.settings.SiteSettings()
 	slug := r.PathValue("slug")
-	if slug == "privacy" {
+	switch slug {
+	case "privacy":
 		writeJSON(w, 200, map[string]any{"content": st.Privacy})
-		return
+	case "terms":
+		writeJSON(w, 200, map[string]any{"content": st.Terms})
+	default:
+		writeError(w, http.StatusNotFound, "page not found")
 	}
-	writeJSON(w, 200, map[string]any{"content": st.Terms})
 }
 
 func (s *Server) apiSetLang(w http.ResponseWriter, r *http.Request) {

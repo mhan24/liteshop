@@ -14,7 +14,10 @@ import { usePage } from '@/features/catalog/composables/useCatalog'
 const route = useRoute()
 const { t } = useI18n()
 const origin = useSiteOrigin()
-const slug = computed(() => (route.params.slug === 'privacy' ? 'privacy' : 'terms'))
+const slug = computed(() => String(route.params.slug))
+if (slug.value !== 'privacy' && slug.value !== 'terms') {
+  throw createError({ statusCode: 404, statusMessage: 'Page not found' })
+}
 const title = computed(() => (slug.value === 'privacy' ? t('privacy') : t('terms')))
 const { data } = usePage(slug.value)
 const content = computed(() => (data.value as any)?.content || '')
