@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	inventoryapp "shop/internal/modules/inventory/application"
@@ -50,7 +51,11 @@ func (s *stubInventory) StockCountsBatch(context.Context, []int64) (map[int64]in
 // createStubRepo 下单用例所需的仓储桩。
 type createStubRepo struct {
 	OrderRepository
-	order *domain.Order
+	order                *domain.Order
+	markPaymentFailedErr error
+	setTradeInfoErr      error
+	setOrderStatusErr    error
+	paymentFailedCalls   int
 }
 
 func (r *createStubRepo) CreatePendingOrder(o *domain.Order) error {
@@ -61,12 +66,19 @@ func (r *createStubRepo) CreatePendingOrder(o *domain.Order) error {
 func (r *createStubRepo) AddLog(int64, string, string, domain.Status, domain.Status, int64) error {
 	return nil
 }
-func (r *createStubRepo) SetTradeInfo(int64, string, string) error { return nil }
+func (r *createStubRepo) SetTradeInfo(int64, string, string) error { return r.setTradeInfoErr }
 func (r *createStubRepo) SetOrderStatus(int64, domain.Status) error {
+	if r.setOrderStatusErr != nil {
+		return r.setOrderStatusErr
+	}
 	if r.order != nil {
 		r.order.Status = domain.OrderWaitingPayment
 	}
 	return nil
+}
+func (r *createStubRepo) MarkPaymentFailed(int64) error {
+	r.paymentFailedCalls++
+	return r.markPaymentFailedErr
 }
 func (r *createStubRepo) GetOrderByNo(no string) (domain.Order, error) {
 	if r.order != nil && r.order.OrderNo == no {
@@ -82,6 +94,16 @@ func (g *stubGateway) CreateTransaction(in CreateInput) (string, string, error) 
 }
 func (g *stubGateway) CancelTransaction(string) error { return nil }
 func (g *stubGateway) VerifyCallback([]byte) (PaymentCallback, error) {
+	return PaymentCallback{}, nil
+}
+
+type failingGateway struct{}
+
+func (g *failingGateway) CreateTransaction(CreateInput) (string, string, error) {
+	return "", "", errors.New("gateway unavailable")
+}
+func (g *failingGateway) CancelTransaction(string) error { return nil }
+func (g *failingGateway) VerifyCallback([]byte) (PaymentCallback, error) {
 	return PaymentCallback{}, nil
 }
 
@@ -146,5 +168,25 @@ func TestCreateUseCaseAutoChecksStock(t *testing.T) {
 	}
 	if _, err := svc.Create(CreateCommand{ProductID: 1, Qty: 2, Contact: "a@b.com", TradeType: "usdt.trc20", Gateway: "bepusdt"}); err != nil {
 		t.Fatalf("qty <= available should pass: %v", err)
+	}
+}
+
+// TestCreatePaymentFailurePropagatesCleanupError 支付创建失败时，释放锁定库存失败不能被静默吞掉。
+func TestCreatePaymentFailurePropagatesCleanupError(t *testing.T) {
+	repo := &createStubRepo{markPaymentFailedErr: errors.New("cleanup failed")}
+	svc := &OrderService{
+		productReader: &stubProductReader{view: productdomain.ProductView{
+			Product: productdomain.Product{ID: 1, PriceCents: 1000, MinQty: 1, MaxQty: 10, DeliveryType: productdomain.DeliveryTypeManual},
+		}},
+		inventory: &stubInventory{available: 1},
+		repo:      repo,
+	}
+	svc.payFn = func(string) PaymentGateway { return &failingGateway{} }
+	_, err := svc.Create(CreateCommand{ProductID: 1, Qty: 1, Contact: "a@b.com", TradeType: "usdt.trc20", Gateway: "bepusdt"})
+	if err == nil || !strings.Contains(err.Error(), "cleanup failed") {
+		t.Fatalf("error = %v, want cleanup failure", err)
+	}
+	if repo.paymentFailedCalls != 1 {
+		t.Fatalf("MarkPaymentFailed calls = %d, want 1", repo.paymentFailedCalls)
 	}
 }

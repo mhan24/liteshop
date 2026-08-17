@@ -1,6 +1,7 @@
 package application
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -10,9 +11,11 @@ import (
 
 // stubSettingsStore 内存版 SettingsStore，验证 service 可脱离 SQLite 独立测试。
 type stubSettingsStore struct {
-	settings map[string]string
-	secrets  map[string]string
-	keys     []string
+	settings  map[string]string
+	secrets   map[string]string
+	keys      []string
+	setErr    error
+	secretErr error
 }
 
 func newStubSettingsStore() *stubSettingsStore {
@@ -23,13 +26,22 @@ func newStubSettingsStore() *stubSettingsStore {
 	}
 }
 
-func (s *stubSettingsStore) GetSetting(key string) (string, error)   { return s.settings[key], nil }
-func (s *stubSettingsStore) SetSetting(key, value string) error      { s.settings[key] = value; return nil }
+func (s *stubSettingsStore) GetSetting(key string) (string, error) { return s.settings[key], nil }
+func (s *stubSettingsStore) SetSetting(key, value string) error {
+	if s.setErr != nil {
+		return s.setErr
+	}
+	s.settings[key] = value
+	return nil
+}
 func (s *stubSettingsStore) AllSettings() (map[string]string, error) { return s.settings, nil }
 func (s *stubSettingsStore) GetSecret(key string, _ *security.Cipher) (string, error) {
 	return s.secrets[key], nil
 }
 func (s *stubSettingsStore) SetSecret(key, value string, _ *security.Cipher) error {
+	if s.secretErr != nil {
+		return s.secretErr
+	}
 	s.secrets[key] = value
 	return nil
 }
@@ -83,6 +95,30 @@ func TestSettingsServiceSavePaymentInvalid(t *testing.T) {
 	}
 	if len(st.settings) != 0 {
 		t.Fatalf("invalid input must not write anything: %v", st.settings)
+	}
+}
+
+// TestSettingsSavePropagatesStoreErrors 配置落库失败不能被静默吞掉，否则后台会提示保存成功但实际未保存。
+func TestSettingsSavePropagatesStoreErrors(t *testing.T) {
+	storeErr := errors.New("settings store unavailable")
+	st := newStubSettingsStore()
+	st.setErr = storeErr
+	svc := NewSettingsService(st, security.NewCipher("test-secret"), config.Config{})
+
+	if err := svc.SavePayment(map[string]any{"gateway_bepusdt_name": "USDT"}); !errors.Is(err, storeErr) {
+		t.Fatalf("payment save err = %v, want %v", err, storeErr)
+	}
+	if err := svc.SaveSite(map[string]any{"site_title": "LiteShop"}); !errors.Is(err, storeErr) {
+		t.Fatalf("site save err = %v, want %v", err, storeErr)
+	}
+	if err := svc.SaveNotify(map[string]any{"smtp_host": "smtp.example.com"}); !errors.Is(err, storeErr) {
+		t.Fatalf("notify save err = %v, want %v", err, storeErr)
+	}
+
+	st.setErr = nil
+	st.secretErr = storeErr
+	if err := svc.SavePayment(map[string]any{"bepusdt_api_token": "token"}); !errors.Is(err, storeErr) {
+		t.Fatalf("payment secret save err = %v, want %v", err, storeErr)
 	}
 }
 

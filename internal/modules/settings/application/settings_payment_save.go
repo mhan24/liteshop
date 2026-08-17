@@ -42,16 +42,27 @@ func (s *SettingsService) HashPayNotifyPath() string {
 }
 
 // SavePayment 保存支付配置（网关选择 + BEpusdt / HashPay 各自配置）。
-func (s *SettingsService) SavePayment(input map[string]any) error {
+func (s *SettingsService) SavePayment(input map[string]any) (err error) {
+	var writeErr error
+	write := func(key, value string) {
+		if writeErr == nil {
+			writeErr = s.Set(key, value)
+		}
+	}
+	writeSecret := func(key, value string) {
+		if writeErr == nil {
+			writeErr = s.SetSecret(key, value)
+		}
+	}
 	set := func(key, field string) {
 		if v, ok := input[field]; ok {
-			_ = s.Set(key, strings.TrimSpace(str(v)))
+			write(key, strings.TrimSpace(str(v)))
 		}
 	}
 	// 网关启用列表（逗号分隔，可多选）；至少保留一个有效网关。
 	if v := strings.TrimSpace(str(input["payment_gateway"])); v != "" {
 		enabled := EnabledGatewaysFrom(v)
-		_ = s.Set("payment_gateway", strings.Join(enabled, ","))
+		write("payment_gateway", strings.Join(enabled, ","))
 	}
 	set("bepusdt_timeout_sec", "bepusdt_timeout_sec")
 	if v, ok := input["bepusdt_base_url"]; ok {
@@ -59,7 +70,7 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 		if err != nil {
 			return err
 		}
-		_ = s.Set("bepusdt_base_url", u)
+		write("bepusdt_base_url", u)
 	}
 	if v, ok := input["fiat"]; ok {
 		f, err := normalizeFiat(strings.TrimSpace(str(v)))
@@ -67,14 +78,14 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 			return err
 		}
 		// 注意键名为 bepusdt_fiat（读取方），旧代码误写 "fiat" 导致配置不生效。
-		_ = s.Set("bepusdt_fiat", f)
+		write("bepusdt_fiat", f)
 	}
 	if v, ok := input["trade_types"]; ok {
 		tt, err := normalizeTradeTypes(strings.TrimSpace(str(v)))
 		if err != nil {
 			return err
 		}
-		_ = s.Set("bepusdt_trade_types", tt)
+		write("bepusdt_trade_types", tt)
 	}
 	for _, field := range []string{"shop_public_base_url", "bepusdt_notify_url"} {
 		if v, ok := input[field]; ok {
@@ -82,7 +93,7 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 			if err != nil {
 				return err
 			}
-			_ = s.Set(field, u)
+			write(field, u)
 		}
 	}
 	// 回调路径需字符校验且不得与已有路由冲突，非法值回退默认（不保存）
@@ -91,23 +102,23 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 			v = "/" + v
 		}
 		if reNotifyPath.MatchString(v) && !notifyPathConflicts(v) {
-			_ = s.Set("bepusdt_notify_path", v)
+			write("bepusdt_notify_path", v)
 		}
 	}
 	if v := strings.TrimSpace(str(input["bepusdt_api_token"])); v != "" {
-		_ = s.SetSecret("bepusdt_api_token", v)
+		writeSecret("bepusdt_api_token", v)
 	}
 	if v, ok := input["hashpay_base_url"]; ok {
 		u, err := normalizeHTTPURL(strings.TrimSpace(str(v)), false)
 		if err != nil {
 			return err
 		}
-		_ = s.Set("hashpay_base_url", u)
+		write("hashpay_base_url", u)
 	}
 	set("hashpay_merchant_id", "hashpay_merchant_id")
 	if v := strings.ToUpper(strings.TrimSpace(str(input["hashpay_currency"]))); v != "" {
 		if _, err := normalizeFiat(v); err == nil {
-			_ = s.Set("hashpay_currency", v)
+			write("hashpay_currency", v)
 		}
 	}
 	for _, field := range []string{"hashpay_notify_url"} {
@@ -116,7 +127,7 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 			if err != nil {
 				return err
 			}
-			_ = s.Set(field, u)
+			write(field, u)
 		}
 	}
 	if v := strings.TrimSpace(str(input["hashpay_notify_path"])); v != "" {
@@ -124,7 +135,7 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 			v = "/" + v
 		}
 		if reNotifyPath.MatchString(v) && !notifyPathConflicts(v) {
-			_ = s.Set("hashpay_notify_path", v)
+			write("hashpay_notify_path", v)
 		}
 	}
 	if v := strings.TrimSpace(str(input["hashpay_private_key"])); v != "" {
@@ -133,7 +144,7 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 		if !strings.Contains(v, "-----BEGIN PRIVATE KEY-----") && !strings.Contains(v, "-----BEGIN RSA PRIVATE KEY-----") {
 			return errors.New("HashPay 私钥格式错误：请粘贴 -----BEGIN PRIVATE KEY----- 开头的商户私钥（不是公钥）")
 		}
-		_ = s.SetSecret("hashpay_private_key", v)
+		writeSecret("hashpay_private_key", v)
 	}
 	// 网关显示名称 / 简介（前台支付方式选择与订单展示使用，留空回退默认文案）。
 	for _, field := range []string{
@@ -149,16 +160,16 @@ func (s *SettingsService) SavePayment(input map[string]any) error {
 			} else if len([]rune(cleaned)) > 200 {
 				cleaned = string([]rune(cleaned)[:200])
 			}
-			_ = s.Set(field, cleaned)
+			write(field, cleaned)
 		}
 	}
 	// 网关优先级（越小越靠前；-1 最高，0 为常规第一，默认 bepusdt=0 / hashpay=1）。
 	for _, field := range []string{"gateway_bepusdt_priority", "gateway_hashpay_priority"} {
 		if v, ok := input[field]; ok {
 			if n, err := strconv.Atoi(strings.TrimSpace(str(v))); err == nil && n >= -1 && n <= 99 {
-				_ = s.Set(field, strconv.Itoa(n))
+				write(field, strconv.Itoa(n))
 			}
 		}
 	}
-	return nil
+	return writeErr
 }

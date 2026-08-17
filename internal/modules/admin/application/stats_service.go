@@ -64,22 +64,37 @@ func (s *StatsService) Dashboard(dayStart int64, threshold int) (DashboardData, 
 	out.PendingOrders = pending
 	out.PaymentFailed = paymentFailed
 	out.DeliveryFailed = deliveryFailed
-	out.TodayPaidCards, _ = s.keys.SoldCountSince(dayStart)
-	out.TodayCost, _ = s.orders.CostSince(dayStart)
+	out.TodayPaidCards, err = s.keys.SoldCountSince(dayStart)
+	if err != nil {
+		return out, err
+	}
+	out.TodayCost, err = s.orders.CostSince(dayStart)
+	if err != nil {
+		return out, err
+	}
 	out.TodayProfit = out.TodayRevenue - out.TodayCost
 	available, sold, locked, err := s.keys.StockStats()
 	if err != nil {
 		return out, err
 	}
-	out.Products, _ = s.products.Count()
+	out.Products, err = s.products.Count()
+	if err != nil {
+		return out, err
+	}
 	out.AvailableCards = available
 	out.SoldCards = sold
 	out.LockedCards = locked
-	lowViews, _ := s.products.LowStock(threshold)
+	lowViews, err := s.products.LowStock(threshold)
+	if err != nil {
+		return out, err
+	}
 	for _, v := range lowViews {
 		out.LowStock = append(out.LowStock, LowStockItem{Product: v.Product, Available: v.Available})
 	}
-	out.RecentOrders, _ = s.orders.RecentOrders(8)
+	out.RecentOrders, err = s.orders.RecentOrders(8)
+	if err != nil {
+		return out, err
+	}
 	return out, nil
 }
 

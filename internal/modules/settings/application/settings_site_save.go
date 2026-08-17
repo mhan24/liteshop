@@ -6,10 +6,21 @@ import (
 )
 
 // SaveSite 保存站点配置（含图片/维护模式/密钥）。
-func (s *SettingsService) SaveSite(input map[string]any) error {
+func (s *SettingsService) SaveSite(input map[string]any) (err error) {
+	var writeErr error
+	write := func(key, value string) {
+		if writeErr == nil {
+			writeErr = s.Set(key, value)
+		}
+	}
+	writeSecret := func(key, value string) {
+		if writeErr == nil {
+			writeErr = s.SetSecret(key, value)
+		}
+	}
 	set := func(key, field string) {
 		if v, ok := input[field]; ok {
-			_ = s.Set(key, strings.TrimSpace(str(v)))
+			write(key, strings.TrimSpace(str(v)))
 		}
 	}
 	for key, field := range map[string]string{
@@ -29,7 +40,7 @@ func (s *SettingsService) SaveSite(input map[string]any) error {
 		if vm != "list" {
 			vm = "grid"
 		}
-		_ = s.Set("home_view_mode", vm)
+		write("home_view_mode", vm)
 	}
 	// 站点公开地址（订单/通知链接使用）。
 	if v, ok := input["shop_public_base_url"]; ok {
@@ -37,7 +48,7 @@ func (s *SettingsService) SaveSite(input map[string]any) error {
 		if err != nil {
 			return err
 		}
-		_ = s.Set("shop_public_base_url", u)
+		write("shop_public_base_url", u)
 	}
 	// 图片类 URL 仅接受 http/https 绝对地址（空值表示使用默认占位图）。
 	for _, f := range []string{"default_product_image", "site_logo", "site_favicon"} {
@@ -46,7 +57,7 @@ func (s *SettingsService) SaveSite(input map[string]any) error {
 			if err != nil {
 				return err
 			}
-			_ = s.Set(f, u)
+			write(f, u)
 		}
 	}
 	if v, ok := input["site_links"]; ok {
@@ -71,7 +82,7 @@ func (s *SettingsService) SaveSite(input map[string]any) error {
 				clean = clean[:50]
 			}
 			if raw, err := json.Marshal(clean); err == nil {
-				_ = s.Set("site_links", string(raw))
+				write("site_links", string(raw))
 			}
 		}
 	}
@@ -83,14 +94,16 @@ func (s *SettingsService) SaveSite(input map[string]any) error {
 		} else {
 			v = ""
 		}
-		_ = s.Set("maintenance_enabled", v)
+		write("maintenance_enabled", v)
 	}
 	if v := strings.TrimSpace(str(input["maintenance_password"])); v != "" {
 		// 存储 SHA-256 哈希，不再明文保存。
-		_ = s.SetMaintenancePasswordHash(s.HashMaintenancePassword(v))
+		if writeErr == nil {
+			writeErr = s.SetMaintenancePasswordHash(s.HashMaintenancePassword(v))
+		}
 	}
 	if v := strings.TrimSpace(str(input["turnstile_secret"])); v != "" {
-		_ = s.SetSecret("turnstile_secret", v)
+		writeSecret("turnstile_secret", v)
 	}
-	return nil
+	return writeErr
 }
