@@ -3,17 +3,18 @@ package integration
 import (
 	"database/sql"
 	couponsqlite "shop/internal/modules/coupon/repository/sqlite"
+	inventorydomain "shop/internal/modules/inventory/domain"
 	inventorysqlite "shop/internal/modules/inventory/repository/sqlite"
 	orderapp "shop/internal/modules/order/application"
 	orderdomain "shop/internal/modules/order/domain"
 	productapp "shop/internal/modules/product/application"
 	productdomain "shop/internal/modules/product/domain"
 	productsqlite "shop/internal/modules/product/repository/sqlite"
+	ordersqlite "shop/internal/modules/order/repository/sqlite"
 	settingsdomain "shop/internal/modules/settings/domain"
 	fixtures "shop/tests/fixtures"
 	"strings"
 	"testing"
-	"time"
 
 	"shop/internal/shared/clock"
 )
@@ -34,6 +35,13 @@ func manualOrderEnv(t *testing.T) (*orderapp.OrderService, *fixtures.MockGateway
 			TradeTypes:    []string{"usdt.trc20"},
 		}
 	})
+	orderRepo.SetOutboxEncoder(func(o orderdomain.Order, cards []inventorydomain.Card) ([]ordersqlite.OutboxEvent, error) {
+		payload, err := orderapp.EncodeEvent(orderapp.OrderDeliveredEvent{Order: o, Cards: cards})
+		if err != nil {
+			return nil, err
+		}
+		return []ordersqlite.OutboxEvent{{Type: "order.delivered", Payload: payload}}, nil
+	})
 	rec.Wire(svc)
 	svc.SetInventory(inventorysqlite.NewInventoryRepository(d))
 	svc.SetCouponStore(couponsqlite.NewCouponRepository(d))
@@ -53,7 +61,7 @@ func manualProduct(pid int64) productdomain.Product {
 
 // TestManualDeliveryFlow 人工手动交付完整流程：下单不锁卡 → 支付成功待发货 → 管理员发货。
 func TestManualDeliveryFlow(t *testing.T) {
-	svc, gw, rec, _, pid := manualOrderEnv(t)
+	svc, gw, _, d, pid := manualOrderEnv(t)
 
 	orderNo, paymentURL, _, _, err := svc.CreateOrder(manualProduct(pid), 1, "buyer@test.com", "usdt.trc20", "bepusdt", "")
 	if err != nil {
@@ -110,19 +118,12 @@ func TestManualDeliveryFlow(t *testing.T) {
 	if strings.TrimSpace(o3.DeliveryContent) != content {
 		t.Fatalf("delivery content = %q, want %q", o3.DeliveryContent, content)
 	}
-	// 买家通知已触发（SendPaid 收到带发货内容的订单；异步发送，轮询等待）
-	fixtures.WaitFor(t, 2*time.Second, func() bool { return rec.PaidCount() > 0 }, "SendPaid should be triggered on manual deliver")
-	last := rec.Paid[len(rec.Paid)-1]
-	if last.DeliveryContent != content {
-		t.Fatalf("SendPaid order delivery_content = %q", last.DeliveryContent)
+	var deliveredEvents int
+	if err := d.QueryRow(`SELECT COUNT(1) FROM outbox_events WHERE event_type = 'order.delivered'`).Scan(&deliveredEvents); err != nil {
+		t.Fatalf("delivered outbox query: %v", err)
 	}
-	// 管理员侧 delivered 事件已发布（异步发布，轮询等待）
-	deadline := time.Now().Add(2 * time.Second)
-	for rec.DeliveredCount() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if rec.DeliveredCount() == 0 {
-		t.Fatal("delivered event should be published")
+	if deliveredEvents != 1 {
+		t.Fatalf("delivered outbox events = %d, want 1", deliveredEvents)
 	}
 
 	// 已发货订单不允许再次发货
