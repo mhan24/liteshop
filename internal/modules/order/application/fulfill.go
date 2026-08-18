@@ -239,6 +239,9 @@ func (s *OrderService) Redeliver(orderID int64) error {
 		}
 		return nil
 	}
+	if o.Status == models.OrderDelivered || o.Status == models.OrderCompleted {
+		return fmt.Errorf("终态订单缺少卡密，不能补扣库存")
+	}
 	// 无预留卡密：从同商品库存补扣
 	if s.inventory == nil {
 		return fmt.Errorf("库存服务未注入")

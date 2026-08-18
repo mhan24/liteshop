@@ -203,6 +203,20 @@ func TestRedeliverRejectsManualDelivery(t *testing.T) {
 	}
 }
 
+func TestRedeliverDoesNotDowngradeCompletedOrderWithoutCards(t *testing.T) {
+	repo := &fakeOrderRepo{
+		order: models.Order{
+			ID: 1, OrderNo: "O1", Status: models.OrderCompleted,
+			ProductID: 1, Qty: 1, DeliveryType: productdomain.DeliveryTypeAuto,
+		},
+	}
+	svc, _ := newCancelExpireSvc(repo)
+	svc.inventory = &stubInventory{}
+	if err := svc.Redeliver(1); err == nil {
+		t.Fatal("completed order without cards must not be downgraded or restocked")
+	}
+}
+
 // TestExpireStale 批量过期：只统计成功过期的订单。
 func TestExpireStale(t *testing.T) {
 	repo := &fakeOrderRepo{
