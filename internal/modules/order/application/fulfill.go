@@ -217,6 +217,9 @@ func (s *OrderService) Redeliver(orderID int64) error {
 	default:
 		return fmt.Errorf("订单状态 %s 不允许补发卡密", o.Status)
 	}
+	if o.DeliveryType == productdomain.DeliveryTypeManual {
+		return fmt.Errorf("人工交付订单不能补发卡密")
+	}
 	if s.inventory == nil {
 		return fmt.Errorf("库存服务未注入")
 	}

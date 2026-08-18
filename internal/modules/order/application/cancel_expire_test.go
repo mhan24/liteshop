@@ -7,6 +7,7 @@ import (
 	"time"
 
 	models "shop/internal/modules/order/domain"
+	productdomain "shop/internal/modules/product/domain"
 	"shop/internal/platform/events"
 )
 
@@ -186,6 +187,19 @@ func TestCancelWithGatewayFailureDoesNotCancelLocally(t *testing.T) {
 	}
 	if len(repo.logs) != 0 {
 		t.Fatalf("local cancellation must not be recorded: %v", repo.logs)
+	}
+}
+
+func TestRedeliverRejectsManualDelivery(t *testing.T) {
+	repo := &fakeOrderRepo{
+		order: models.Order{
+			ID: 1, OrderNo: "O1", Status: models.OrderDelivered,
+			DeliveryType: productdomain.DeliveryTypeManual,
+		},
+	}
+	svc, _ := newCancelExpireSvc(repo)
+	if err := svc.Redeliver(1); err == nil {
+		t.Fatal("manual delivery order must not enter card redelivery")
 	}
 }
 
