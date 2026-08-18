@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -109,13 +110,30 @@ func (n *Notifier) CurrentConfig() config.Config {
 	if v := get("telegram_chat_id"); v != "" {
 		cfg.TelegramChatID = v
 	}
-	if v := get("webhook_url"); v != "" {
+	if v := safeWebhookURL(get("webhook_url")); v != "" {
 		cfg.WebhookURL = v
 	}
 	if v, err := n.settings.GetSecret("webhook_secret"); err == nil && strings.TrimSpace(v) != "" {
 		cfg.WebhookSecret = strings.TrimSpace(v)
 	}
 	return cfg
+}
+
+func safeWebhookURL(v string) string {
+	u, err := url.Parse(strings.TrimSpace(v))
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	if u.Scheme == "http" {
+		host := strings.TrimSuffix(u.Hostname(), ".")
+		if !strings.EqualFold(host, "localhost") {
+			ip := net.ParseIP(host)
+			if ip == nil || !ip.IsLoopback() {
+				return ""
+			}
+		}
+	}
+	return strings.TrimRight(v, "/")
 }
 
 func (n *Notifier) siteTitle() string {

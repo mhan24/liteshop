@@ -37,8 +37,8 @@ func (s *SettingsService) PaymentConfig() config.Config {
 	if len(cfg.BepusdtTradeTypes) > 0 {
 		cfg.BepusdtTradeType = cfg.BepusdtTradeTypes[0]
 	}
-	if v := s.Get("bepusdt_base_url"); v != "" {
-		cfg.BepusdtBaseURL = strings.TrimRight(v, "/")
+	if v := s.safeURL("bepusdt_base_url"); v != "" {
+		cfg.BepusdtBaseURL = v
 	}
 	if v := s.GetSecret("bepusdt_api_token"); v != "" {
 		cfg.BepusdtToken = v
@@ -48,8 +48,8 @@ func (s *SettingsService) PaymentConfig() config.Config {
 			cfg.BepusdtTimeoutSec = n
 		}
 	}
-	if v := s.Get("hashpay_base_url"); v != "" {
-		cfg.HashPayBaseURL = strings.TrimRight(v, "/")
+	if v := s.safeURL("hashpay_base_url"); v != "" {
+		cfg.HashPayBaseURL = v
 	}
 	if v := s.Get("hashpay_merchant_id"); v != "" {
 		cfg.HashPayMerchantID = v
@@ -61,13 +61,13 @@ func (s *SettingsService) PaymentConfig() config.Config {
 		cfg.HashPayCurrency = v
 	}
 	publicOverridden := false
-	if v := s.Get("shop_public_base_url"); v != "" {
-		cfg.PublicBaseURL = strings.TrimRight(v, "/")
+	if v := s.safeURL("shop_public_base_url"); v != "" {
+		cfg.PublicBaseURL = v
 		publicOverridden = true
 	}
-	if v := s.Get("bepusdt_notify_url"); v != "" {
+	if v := s.safeURL("bepusdt_notify_url"); v != "" {
 		cfg.NotifyURL = v
-	} else if v := s.Get("hashpay_notify_url"); v != "" {
+	} else if v := s.safeURL("hashpay_notify_url"); v != "" {
 		cfg.NotifyURL = v
 	} else if publicOverridden {
 		// 主网关回调路径（可配置），避免自定义路径下回调 404
@@ -96,7 +96,7 @@ func (s *SettingsService) PaymentServiceConfig() models.PaymentConfig {
 // notifyURLFor 返回指定网关的有效回调地址（显式配置 > 公开地址 + 网关回调路径）。
 func (s *SettingsService) notifyURLFor(cfg config.Config, gateway string) string {
 	if gateway == "hashpay" {
-		if v := s.Get("hashpay_notify_url"); v != "" {
+		if v := s.safeURL("hashpay_notify_url"); v != "" {
 			return v
 		}
 		if cfg.PublicBaseURL != "" {
@@ -104,13 +104,25 @@ func (s *SettingsService) notifyURLFor(cfg config.Config, gateway string) string
 		}
 		return ""
 	}
-	if v := s.Get("bepusdt_notify_url"); v != "" {
+	if v := s.safeURL("bepusdt_notify_url"); v != "" {
 		return v
 	}
 	if cfg.PublicBaseURL != "" {
 		return cfg.PublicBaseURL + s.NotifyPath()
 	}
 	return ""
+}
+
+func (s *SettingsService) safeURL(key string) string {
+	v := s.Get(key)
+	if v == "" {
+		return ""
+	}
+	normalized, err := normalizeHTTPURL(v, false)
+	if err != nil {
+		return ""
+	}
+	return normalized
 }
 
 // EnabledGateways 返回启用的支付网关列表，按优先级排序（数值越小越靠前；

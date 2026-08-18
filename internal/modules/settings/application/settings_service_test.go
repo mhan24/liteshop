@@ -324,6 +324,20 @@ func TestSettingsServiceRejectsDuplicateNotifyPaths(t *testing.T) {
 	}
 }
 
+func TestPaymentConfigIgnoresLegacyPublicHTTPURLs(t *testing.T) {
+	st := newStubSettingsStore()
+	st.settings["bepusdt_base_url"] = "http://pay.example.com"
+	st.settings["shop_public_base_url"] = "http://shop.example.com"
+	svc := NewSettingsService(st, nil, config.Config{
+		BepusdtBaseURL: "https://safe-pay.example",
+		PublicBaseURL:  "https://safe-shop.example",
+	})
+	cfg := svc.PaymentConfig()
+	if cfg.BepusdtBaseURL != "https://safe-pay.example" || cfg.PublicBaseURL != "https://safe-shop.example" {
+		t.Fatalf("unsafe legacy URLs were used: %#v", cfg)
+	}
+}
+
 func TestRestoreSettingsValidatesURLsAndNotifyPaths(t *testing.T) {
 	st := newStubSettingsStore()
 	svc := NewSettingsService(st, nil, config.Config{})
