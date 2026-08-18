@@ -23,3 +23,13 @@ func TestValidatePaymentCallback(t *testing.T) {
 		t.Fatalf("invalid amount = %v, want ErrPaymentAmountMismatch", err)
 	}
 }
+
+func TestValidatePaymentGateway(t *testing.T) {
+	order := domain.Order{PaymentGateway: "hashpay"}
+	if err := validatePaymentGateway(order, "bepusdt"); !errors.Is(err, ErrPaymentGatewayMismatch) {
+		t.Fatalf("gateway mismatch = %v, want ErrPaymentGatewayMismatch", err)
+	}
+	if err := validatePaymentGateway(order, "hashpay"); err != nil {
+		t.Fatalf("matching gateway rejected: %v", err)
+	}
+}

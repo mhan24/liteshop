@@ -20,6 +20,8 @@ var ErrCallbackInvalid = errors.New("payment callback invalid")
 var (
 	ErrPaymentAmountMismatch   = errors.New("payment amount mismatch")
 	ErrPaymentCurrencyMismatch = errors.New("payment currency mismatch")
+	ErrPaymentGatewayMismatch  = errors.New("payment gateway mismatch")
+	ErrPaymentTradeIDMissing   = errors.New("payment trade id missing")
 )
 
 // HandlePaymentCallback 处理支付网关回调：验签 → 按状态流转订单。
@@ -54,7 +56,7 @@ func (s *OrderService) HandlePaymentCallback(gateway, requestID string, body []b
 	case PaymentTxPaid:
 		return s.applyPaidCallback(gateway, requestID, cb)
 	case PaymentTxClosed:
-		return s.HandleGatewayCancel(cb.OrderID)
+		return s.HandleGatewayCancel(gateway, cb.OrderID)
 	}
 	return nil
 }
@@ -64,6 +66,12 @@ func (s *OrderService) applyPaidCallback(gateway, requestID string, cb PaymentCa
 	order, err := s.repo.GetOrderByNo(cb.OrderID)
 	if err != nil {
 		return err
+	}
+	if err := validatePaymentGateway(order, gateway); err != nil {
+		return err
+	}
+	if strings.TrimSpace(cb.TradeID) == "" {
+		return ErrPaymentTradeIDMissing
 	}
 	if err := validatePaymentCallback(order, cb); err != nil {
 		logging.Payment().Warn("payment callback rejected",
@@ -95,6 +103,17 @@ func (s *OrderService) applyPaidCallback(gateway, requestID string, cb PaymentCa
 		zap.String("trace_id", order.TradeID),
 		zap.String("result", map[bool]string{true: "ok", false: "noop"}[changed]),
 	)
+	return nil
+}
+
+func validatePaymentGateway(order domain.Order, gateway string) error {
+	expected := strings.ToLower(strings.TrimSpace(order.PaymentGateway))
+	if expected == "" {
+		expected = "bepusdt"
+	}
+	if strings.ToLower(strings.TrimSpace(gateway)) != expected {
+		return fmt.Errorf("%w: order=%s callback=%s", ErrPaymentGatewayMismatch, expected, gateway)
+	}
 	return nil
 }
 
