@@ -166,8 +166,8 @@ func TestManualDeliveryEnqueuesDeliveredEventAtomically(t *testing.T) {
 	o := &domain.Order{OrderNo: "S6", ProductID: 1, ProductName: "人工商品", Qty: 1, AmountCents: 1000,
 		Fiat: "CNY", TradeType: "usdt.trc20", DeliveryType: productdomain.DeliveryTypeManual,
 		Status: domain.OrderPendingDelivery, CreatedAt: now, UpdatedAt: now}
-	if _, err := d.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, delivery_type, status, payment_status, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, o.OrderNo, o.ProductID, o.ProductName, o.Qty, o.AmountCents, o.Fiat, o.TradeType, o.DeliveryType, o.Status, domain.PaymentConfirmed, now, now); err != nil {
+	if _, err := d.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, view_token, delivery_type, status, payment_status, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, o.OrderNo, o.ProductID, o.ProductName, o.Qty, o.AmountCents, o.Fiat, o.TradeType, "buyer@test.com", "tok", o.DeliveryType, o.Status, domain.PaymentConfirmed, now, now); err != nil {
 		t.Fatalf("insert order: %v", err)
 	}
 	var id int64
