@@ -51,3 +51,14 @@ func TestProductJSONForRoleHidesCostFromViewer(t *testing.T) {
 		t.Fatalf("operator cost_cents = %#v, want 400", operator["cost_cents"])
 	}
 }
+
+func TestCentsFromYuanRejectsNonFiniteAndOverflow(t *testing.T) {
+	for _, input := range []string{"NaN", "+Inf", "-Inf", "1e300"} {
+		if _, err := centsFromYuan(input); err == nil {
+			t.Fatalf("centsFromYuan(%q) should fail", input)
+		}
+	}
+	if got, err := centsFromYuan("1.23"); err != nil || got != 123 {
+		t.Fatalf("centsFromYuan(1.23) = %d, %v; want 123", got, err)
+	}
+}

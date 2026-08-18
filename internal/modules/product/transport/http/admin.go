@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	productdomain "shop/internal/modules/product/domain"
 	"shop/internal/platform/httpserver"
@@ -53,13 +54,17 @@ func (h *Handlers) currentRole(r *http.Request) string {
 // centsFromYuan 元字符串 → 分（金额换算属商品模块传输层）。
 func centsFromYuan(v string) (int64, error) {
 	f, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return 0, err
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, errors.New("invalid price")
 	}
-	if f < 0 {
+	if f <= 0 || f > float64(math.MaxInt64)/100 {
 		return 0, errors.New("price must be positive")
 	}
-	return int64(f*100 + 0.5), nil
+	cents := f*100 + 0.5
+	if cents > float64(math.MaxInt64) {
+		return 0, errors.New("price too large")
+	}
+	return int64(cents), nil
 }
 
 func productFromJSON(input map[string]any) (productdomain.Product, error) {
