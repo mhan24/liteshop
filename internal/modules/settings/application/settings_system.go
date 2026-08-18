@@ -73,7 +73,7 @@ func (s *SettingsService) validateRestoredSettings(settings map[string]string) e
 	} {
 		if v, ok := settings[key]; ok {
 			if _, err := normalizeHTTPURL(v, false); err != nil {
-				return key + " 无效"
+				return errors.New(key + " 无效")
 			}
 		}
 	}
