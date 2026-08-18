@@ -2,8 +2,8 @@
 package version
 
 var (
-	// Version 语义化版本号（如 0.2.0）。
-	Version = "0.2.0"
+	// Version 语义化版本号（如 0.3.0）。
+	Version = "0.3.0"
 	// Commit Git 提交哈希（构建时注入）。
 	Commit = ""
 	// Date 构建时间（构建时注入）。
