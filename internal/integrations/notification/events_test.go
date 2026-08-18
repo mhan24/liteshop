@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	settingssqlite "shop/internal/modules/settings/repository/sqlite"
 	"shop/internal/platform/config"
+	"shop/internal/platform/scheduler/jobs"
 	"sync"
 	"testing"
 	"time"
@@ -91,6 +92,14 @@ func TestNotifySyncPropagatesWebhookFailure(t *testing.T) {
 	}
 	if err := n.NotifySync(EventSystemError, map[string]string{"message": "test"}); err == nil {
 		t.Fatal("NotifySync must return webhook delivery failure")
+	}
+}
+
+func TestNotifySyncPropagatesMailQueueFailure(t *testing.T) {
+	n := &Notifier{}
+	err := n.handleJobSync(jobs.Job{Kind: jobs.KindMail, To: "buyer@test.com", Subject: "subject", Body: "body"})
+	if err == nil {
+		t.Fatal("mail queue failure must be propagated")
 	}
 }
 

@@ -66,7 +66,9 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 	if setupToken == "" {
 		setupToken = idgen.RandomToken(24)
 	}
-	log.Printf("setup token: %s", setupToken)
+	if !adminsqlite.HasAdmin(database) {
+		log.Printf("setup token: %s", setupToken)
+	}
 	settingsStore := settingssqlite.NewStore(database)
 	notifier := notify.New(cfg, database, bus,
 		notifySettingsReader{store: settingsStore, cipher: cipher},

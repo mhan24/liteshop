@@ -217,6 +217,21 @@ func TestRedeliverDoesNotDowngradeCompletedOrderWithoutCards(t *testing.T) {
 	}
 }
 
+func TestSetStatusCannotBypassPaymentOrDeliveryFlows(t *testing.T) {
+	repo := &fakeOrderRepo{
+		order: models.Order{ID: 1, OrderNo: "O1", Status: models.OrderWaitingPayment},
+	}
+	svc, _ := newCancelExpireSvc(repo)
+	for _, status := range []models.Status{
+		models.OrderPaid, models.OrderPendingDelivery,
+		models.OrderDelivered, models.OrderPaymentFailed,
+	} {
+		if err := svc.SetStatus(1, status, "manual"); err == nil {
+			t.Fatalf("manual transition to %s must be rejected", status)
+		}
+	}
+}
+
 // TestExpireStale 批量过期：只统计成功过期的订单。
 func TestExpireStale(t *testing.T) {
 	repo := &fakeOrderRepo{

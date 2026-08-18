@@ -53,8 +53,7 @@ func (n *Notifier) handleJobSync(j jobs.Job) error {
 	case jobs.KindMail:
 		if err := smtp.Send(cfg, j.To, j.Subject, j.Body); err != nil {
 			// 邮件有持久化重试队列，入队成功后可确认 Outbox 事件。
-			n.enqueueFailedMail(j.To, j.Subject, j.Body, 0)
-			return nil
+			return n.enqueueFailedMailErr(j.To, j.Subject, j.Body, 0)
 		}
 	case jobs.KindTelegram:
 		return retryNotify("telegram", 3, func() error {

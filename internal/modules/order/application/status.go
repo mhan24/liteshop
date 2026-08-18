@@ -18,14 +18,20 @@ func (s *OrderService) SetStatus(orderID int64, to domain.Status, message string
 	// 取消/过期必须走原子流程（释放卡密 + 回滚优惠券），不能直接改状态。
 	switch to {
 	case models.OrderCancelled:
-		return s.Cancel(orderID)
+		return s.CancelWithGateway(orderID)
 	case models.OrderExpired:
-		return s.Expire(orderID)
+		return s.ExpireWithGateway(orderID)
+	}
+	switch to {
+	case models.OrderPaid, models.OrderPendingDelivery, models.OrderDelivered, models.OrderPaymentFailed:
+		// 支付确认、人工发货、补发和支付失败都必须经过专用流程，
+		// 不能由通用状态接口绕过网关/库存/通知事务。
+		if o.Status == models.OrderDeliveryFailed && to == models.OrderDelivered {
+			return s.Redeliver(orderID)
+		}
+		return fmt.Errorf("状态 %s 必须通过专用业务流程修改", to)
 	}
 	// 发卡失败订单的"确认已发"应走补发流程（校验卡密）。
-	if o.Status == models.OrderDeliveryFailed && to == models.OrderDelivered {
-		return s.Redeliver(orderID)
-	}
 	if !models.IsValidOrderTransition(o.Status, to) {
 		return fmt.Errorf("invalid order transition %s -> %s", o.Status, to)
 	}

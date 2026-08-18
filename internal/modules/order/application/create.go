@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	models "shop/internal/modules/order/domain"
 	productdomain "shop/internal/modules/product/domain"
 	"shop/internal/shared/clock"
@@ -78,7 +79,10 @@ func (s *OrderService) CreateOrder(p productdomain.Product, qty int, contact, tr
 	if p.MaxQty > 0 && qty > p.MaxQty {
 		return "", "", 0, 0, newBusinessErrorf("最多购买 %d 件", p.MaxQty)
 	}
-	amountCents := baseCents * int64(qty)
+	amountCents, err := calculateAmountCents(baseCents, qty, 100)
+	if err != nil {
+		return "", "", 0, 0, newBusinessErrorf("订单金额超出支持范围")
+	}
 	bestMinQty := 0
 	bestDiscount := 100 // 默认无折扣
 	for _, tier := range p.Wholesale {
@@ -91,7 +95,10 @@ func (s *OrderService) CreateOrder(p productdomain.Product, qty int, contact, tr
 		}
 	}
 	if bestDiscount != 100 {
-		amountCents = baseCents * int64(qty) * int64(bestDiscount) / 100
+		amountCents, err = calculateAmountCents(baseCents, qty, int64(bestDiscount))
+		if err != nil {
+			return "", "", 0, 0, newBusinessErrorf("订单金额超出支持范围")
+		}
 	}
 	// 优惠券
 	// 券码统一大写（创建时已大写存储），避免大小写不匹配。
@@ -215,6 +222,25 @@ func (s *OrderService) CreateOrder(p productdomain.Product, qty int, contact, tr
 	_ = s.repo.AddLog(order.ID, "transaction_created", "支付交易已创建", models.OrderCreated, models.OrderWaitingPayment, 0)
 	s.fireCreatedEvents(order)
 	return order.OrderNo, paymentURL, discount, couponID, nil
+}
+
+func calculateAmountCents(baseCents int64, qty int, discount int64) (int64, error) {
+	if baseCents <= 0 || qty <= 0 || discount <= 0 || discount > 100 {
+		return 0, errors.New("invalid amount inputs")
+	}
+	qty64 := int64(qty)
+	if baseCents > math.MaxInt64/qty64 {
+		return 0, errors.New("amount overflow")
+	}
+	total := baseCents * qty64
+	if discount == 100 {
+		return total, nil
+	}
+	whole, remainder := total/100, total%100
+	if whole > math.MaxInt64/discount {
+		return 0, errors.New("discounted amount overflow")
+	}
+	return whole*discount + remainder*discount/100, nil
 }
 
 func (s *OrderService) cancelCreatedTrade(gateway, tradeID, orderNo string) {

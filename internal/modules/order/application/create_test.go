@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -227,5 +228,14 @@ func TestCreatePersistenceFailureCancelsRemoteTrade(t *testing.T) {
 	}
 	if gw.cancelCalls != 1 {
 		t.Fatalf("remote cancel calls = %d, want 1", gw.cancelCalls)
+	}
+}
+
+func TestCalculateAmountCentsRejectsOverflow(t *testing.T) {
+	if _, err := calculateAmountCents(math.MaxInt64, 2, 100); err == nil {
+		t.Fatal("amount multiplication overflow must be rejected")
+	}
+	if got, err := calculateAmountCents(123, 2, 50); err != nil || got != 123 {
+		t.Fatalf("discounted amount = %d, %v; want 123", got, err)
 	}
 }

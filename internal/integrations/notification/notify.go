@@ -297,10 +297,14 @@ func (n *Notifier) SendRawMail(to, subject, body string) error {
 
 // enqueueFailedMail 邮件发送失败后写入重试队列。
 func (n *Notifier) enqueueFailedMail(to, subject, body string, orderID int64) {
+	_ = n.enqueueFailedMailErr(to, subject, body, orderID)
+}
+
+func (n *Notifier) enqueueFailedMailErr(to, subject, body string, orderID int64) error {
 	if n.db == nil {
-		return
+		return errors.New("mail queue unavailable")
 	}
-	_ = mailqueue.EnqueueMail(n.db, to, subject, body, orderID, time.Now().Add(time.Minute).Unix())
+	return mailqueue.EnqueueMail(n.db, to, subject, body, orderID, time.Now().Add(time.Minute).Unix())
 }
 
 // orderURL 构造订单查看地址；新订单携带查看令牌，避免依赖邮箱弱凭证。
