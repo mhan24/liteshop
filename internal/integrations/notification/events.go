@@ -43,9 +43,29 @@ func (n *Notifier) Notify(event string, payload map[string]string) {
 // NotifySync 供 Outbox 使用：同步完成消费者处理后才返回，避免事件确认后进程退出导致内存任务丢失。
 func (n *Notifier) NotifySync(event string, payload map[string]string) error {
 	return n.notify(event, payload, func(j jobs.Job) error {
-		n.Handler()(j)
-		return nil
+		return n.handleJobSync(j)
 	})
+}
+
+func (n *Notifier) handleJobSync(j jobs.Job) error {
+	cfg := n.CurrentConfig()
+	switch j.Kind {
+	case jobs.KindMail:
+		if err := smtp.Send(cfg, j.To, j.Subject, j.Body); err != nil {
+			// 邮件有持久化重试队列，入队成功后可确认 Outbox 事件。
+			n.enqueueFailedMail(j.To, j.Subject, j.Body, 0)
+			return nil
+		}
+	case jobs.KindTelegram:
+		return retryNotify("telegram", 3, func() error {
+			return n.sendTelegramWithConfig(cfg, j.Text)
+		})
+	case jobs.KindWebhook:
+		return retryNotify("webhook", 3, func() error {
+			return n.sendWebhook(j.Event, j.Payload, n.siteTitle())
+		})
+	}
+	return nil
 }
 
 func (n *Notifier) notify(event string, payload map[string]string, enqueue func(jobs.Job) error) error {

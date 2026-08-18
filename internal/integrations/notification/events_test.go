@@ -79,6 +79,21 @@ func TestWebhookDelivery(t *testing.T) {
 	}
 }
 
+func TestNotifySyncPropagatesWebhookFailure(t *testing.T) {
+	d, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer d.Close()
+	n := &Notifier{
+		cfg: config.Config{WebhookURL: "http://127.0.0.1:1"},
+		db:  d,
+	}
+	if err := n.NotifySync(EventSystemError, map[string]string{"message": "test"}); err == nil {
+		t.Fatal("NotifySync must return webhook delivery failure")
+	}
+}
+
 func TestEventDisabledSkip(t *testing.T) {
 	d, err := db.Open(t.TempDir() + "/test.db")
 	if err != nil {
