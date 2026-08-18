@@ -107,6 +107,21 @@ func (g *failingGateway) VerifyCallback([]byte) (PaymentCallback, error) {
 	return PaymentCallback{}, nil
 }
 
+type trackingGateway struct {
+	cancelCalls int
+}
+
+func (g *trackingGateway) CreateTransaction(CreateInput) (string, string, error) {
+	return "https://pay.test/checkout", "TRADE-TRACKED", nil
+}
+func (g *trackingGateway) CancelTransaction(string) error {
+	g.cancelCalls++
+	return nil
+}
+func (g *trackingGateway) VerifyCallback([]byte) (PaymentCallback, error) {
+	return PaymentCallback{}, nil
+}
+
 // TestCreateUseCaseProductNotFound 商品不存在返回业务错误。
 func TestCreateUseCaseProductNotFound(t *testing.T) {
 	svc := &OrderService{productReader: &stubProductReader{err: errors.New("missing")}}
@@ -188,5 +203,25 @@ func TestCreatePaymentFailurePropagatesCleanupError(t *testing.T) {
 	}
 	if repo.paymentFailedCalls != 1 {
 		t.Fatalf("MarkPaymentFailed calls = %d, want 1", repo.paymentFailedCalls)
+	}
+}
+
+func TestCreatePersistenceFailureCancelsRemoteTrade(t *testing.T) {
+	repo := &createStubRepo{setTradeInfoErr: errors.New("save trade failed")}
+	gw := &trackingGateway{}
+	svc := &OrderService{
+		productReader: &stubProductReader{view: productdomain.ProductView{
+			Product: productdomain.Product{ID: 1, PriceCents: 1000, MinQty: 1, MaxQty: 10, DeliveryType: productdomain.DeliveryTypeManual},
+		}},
+		inventory: &stubInventory{available: 1},
+		repo:      repo,
+		payFn:     func(string) PaymentGateway { return gw },
+	}
+	_, err := svc.Create(CreateCommand{ProductID: 1, Qty: 1, Contact: "a@b.com", TradeType: "usdt.trc20", Gateway: "bepusdt"})
+	if err == nil || !strings.Contains(err.Error(), "save trade failed") {
+		t.Fatalf("error = %v, want persistence failure", err)
+	}
+	if gw.cancelCalls != 1 {
+		t.Fatalf("remote cancel calls = %d, want 1", gw.cancelCalls)
 	}
 }

@@ -199,12 +199,14 @@ func (s *OrderService) CreateOrder(p productdomain.Product, qty int, contact, tr
 		return order.OrderNo, "", discount, couponID, err
 	}
 	if err := s.repo.SetTradeInfo(order.ID, tradeID, paymentURL); err != nil {
+		s.cancelCreatedTrade(gateway, tradeID, order.OrderNo)
 		if cleanupErr := s.repo.MarkPaymentFailed(order.ID); cleanupErr != nil {
 			return order.OrderNo, "", discount, couponID, errors.Join(err, cleanupErr)
 		}
 		return order.OrderNo, "", discount, couponID, err
 	}
 	if err := s.repo.SetOrderStatus(order.ID, models.OrderWaitingPayment); err != nil {
+		s.cancelCreatedTrade(gateway, tradeID, order.OrderNo)
 		if cleanupErr := s.repo.MarkPaymentFailed(order.ID); cleanupErr != nil {
 			return order.OrderNo, "", discount, couponID, errors.Join(err, cleanupErr)
 		}
@@ -213,6 +215,15 @@ func (s *OrderService) CreateOrder(p productdomain.Product, qty int, contact, tr
 	_ = s.repo.AddLog(order.ID, "transaction_created", "支付交易已创建", models.OrderCreated, models.OrderWaitingPayment, 0)
 	s.fireCreatedEvents(order)
 	return order.OrderNo, paymentURL, discount, couponID, nil
+}
+
+func (s *OrderService) cancelCreatedTrade(gateway, tradeID, orderNo string) {
+	if strings.TrimSpace(tradeID) == "" || s.payFn == nil {
+		return
+	}
+	if err := s.payFn(gateway).CancelTransaction(tradeID); err != nil && s.SystemError != nil {
+		s.SystemError("本地订单落库失败且网关交易取消失败 order=" + orderNo + ": " + err.Error())
+	}
 }
 
 // completeFreeOrder 免费订单（100% 折扣）直接完成并发卡。
