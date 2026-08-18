@@ -137,7 +137,9 @@ func TestPaymentCallbackCancelHTTP(t *testing.T) {
 	if avail != 2 {
 		t.Fatalf("available after gateway cancel = %d, want 2", avail)
 	}
-	fixtures.WaitFor(t, 3*time.Second, func() bool { return cancelHits.Load() >= 1 }, "gateway cancel-transaction call")
+	if cancelHits.Load() != 0 {
+		t.Fatalf("gateway cancellation must not be retried after closed callback, got %d calls", cancelHits.Load())
+	}
 }
 
 // TestPaymentCallbackBadSignature 错误签名被拒绝。
