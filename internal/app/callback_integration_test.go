@@ -10,7 +10,6 @@ import (
 	orderdomain "shop/internal/modules/order/domain"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	bepusdt "shop/internal/integrations/payment/bepusdt"
 	inventorysqlite "shop/internal/modules/inventory/repository/sqlite"
@@ -100,7 +99,7 @@ func TestPaymentCallbackHTTP(t *testing.T) {
 	}
 }
 
-// TestPaymentCallbackCancelHTTP 网关取消回调（status=3）：过期订单并调用网关 cancel-transaction。
+// TestPaymentCallbackCancelHTTP 网关取消回调（status=3）：过期订单并释放库存。
 func TestPaymentCallbackCancelHTTP(t *testing.T) {
 	var cancelHits atomic.Int32
 	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

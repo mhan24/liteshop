@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"errors"
 	inventorysqlite "shop/internal/modules/inventory/repository/sqlite"
 	orderapp "shop/internal/modules/order/application"
 	settingsdomain "shop/internal/modules/settings/domain"
@@ -43,8 +44,8 @@ func TestHashPayCancelRaceAlert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get order: %v", err)
 	}
-	if err := svc.CancelWithGateway(o.ID); err != nil {
-		t.Fatalf("cancel order: %v", err)
+	if err := svc.CancelWithGateway(o.ID); !errors.Is(err, orderapp.ErrHashPayAlreadyPaid) {
+		t.Fatalf("cancel order error = %v, want ErrHashPayAlreadyPaid", err)
 	}
 	select {
 	case msg := <-alerts:
@@ -69,9 +70,9 @@ func TestHashPayCancelRaceAlert(t *testing.T) {
 	if !found {
 		t.Fatal("gateway_cancel_race log missing")
 	}
-	// 库存已释放。
+	// 本地订单不能在网关确认已支付时取消，库存仍被订单锁定。
 	avail, _ := keyRepo.AvailableCount(pid)
-	if avail != 2 {
-		t.Fatalf("available = %d, want 2", avail)
+	if avail != 1 {
+		t.Fatalf("available = %d, want 1", avail)
 	}
 }
