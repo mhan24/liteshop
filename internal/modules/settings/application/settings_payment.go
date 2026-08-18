@@ -9,8 +9,15 @@ import (
 )
 
 func (s *SettingsService) TurnstileSecret() string {
-	if v := s.GetSecret("turnstile_secret"); v != "" {
-		return v
+	if s.cipher != nil {
+		v, err := s.store.GetSecret("turnstile_secret", s.cipher)
+		if err != nil {
+			// 密钥存在但无法解密时必须保持校验开启，避免失败开放。
+			return "__turnstile_secret_unreadable__"
+		}
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
 	}
 	return s.cfg.TurnstileSecret
 }

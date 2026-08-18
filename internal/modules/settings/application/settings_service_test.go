@@ -338,6 +338,15 @@ func TestPaymentConfigIgnoresLegacyPublicHTTPURLs(t *testing.T) {
 	}
 }
 
+func TestTurnstileSecretFailsClosedOnDecryptError(t *testing.T) {
+	st := newStubSettingsStore()
+	st.secretErr = errors.New("decrypt failed")
+	svc := NewSettingsService(st, security.NewCipher("test-secret"), config.Config{TurnstileSecret: ""})
+	if svc.TurnstileSecret() == "" {
+		t.Fatal("turnstile verification must remain enabled when stored secret cannot be decrypted")
+	}
+}
+
 func TestRestoreSettingsValidatesURLsAndNotifyPaths(t *testing.T) {
 	st := newStubSettingsStore()
 	svc := NewSettingsService(st, nil, config.Config{})
