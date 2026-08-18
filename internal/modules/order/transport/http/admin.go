@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,17 +52,25 @@ func (h *Handlers) AdminOrdersExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
-	w.Write([]byte("\xEF\xBB\xBF"))
-	w.Write([]byte("ID,订单号,商品,数量,金额,法币,收款类型,联系方式,状态,创建时间,支付时间\n"))
+	_, _ = w.Write([]byte("\xEF\xBB\xBF"))
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"ID", "订单号", "商品", "数量", "金额", "法币", "收款类型", "联系方式", "状态", "创建时间", "支付时间"})
 	for _, o := range orders {
-		fmt.Fprintf(w, "%d,%s,%s,%d,%s,%s,%s,%s,%s,%s,%s\n",
-			o.ID, csvSafe(o.OrderNo), csvSafe(o.ProductName), o.Qty,
-			fmt.Sprintf("%.2f", float64(o.AmountCents)/100), csvSafe(o.Fiat), csvSafe(o.TradeType),
-			csvSafe(o.BuyerContact), csvSafe(string(o.Status)),
+		_ = cw.Write([]string{
+			strconv.FormatInt(o.ID, 10),
+			csvSafe(o.OrderNo),
+			csvSafe(o.ProductName),
+			strconv.Itoa(o.Qty),
+			fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
+			csvSafe(o.Fiat),
+			csvSafe(o.TradeType),
+			csvSafe(o.BuyerContact),
+			csvSafe(string(o.Status)),
 			time.Unix(o.CreatedAt, 0).In(tz).Format("2006-01-02 15:04:05"),
 			map[bool]string{true: time.Unix(o.PaidAt, 0).In(tz).Format("2006-01-02 15:04:05"), false: "-"}[o.PaidAt > 0],
-		)
+		})
 	}
+	cw.Flush()
 }
 
 // csvSafe 防止 CSV 公式注入：以 = + - @ 开头的单元格前缀单引号。
@@ -74,8 +83,13 @@ func (h *Handlers) AdminOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := []orderResponse{}
+	role := h.currentRole(r)
 	for _, o := range orders {
-		out = append(out, h.toOrderResponse(o))
+		item := h.toOrderResponse(o)
+		if role == "viewer" {
+			item = item.Public()
+		}
+		out = append(out, item)
 	}
 	httpserver.WriteJSON(w, 200, map[string]any{"orders": out})
 }
@@ -91,17 +105,32 @@ func (h *Handlers) AdminOrder(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteError(w, 404, "not found")
 		return
 	}
-	cards, _ := h.deps.Orders.GetOrderCards(o.ID)
+	cards, err := h.deps.Orders.GetOrderCards(o.ID)
+	if err != nil {
+		httpserver.WriteInternalError(w, err)
+		return
+	}
 	list := []cardResponse{}
 	for _, c := range cards {
 		list = append(list, toCardResponse(c))
 	}
-	logs, _ := h.deps.Orders.Logs(o.ID)
+	logs, err := h.deps.Orders.Logs(o.ID)
+	if err != nil {
+		httpserver.WriteInternalError(w, err)
+		return
+	}
 	logList := []orderEventResponse{}
 	for _, e := range logs {
 		logList = append(logList, toOrderEventResponse(e))
 	}
 	httpserver.WriteJSON(w, 200, map[string]any{"order": h.toOrderResponse(o), "cards": list, "logs": logList})
+}
+
+func (h *Handlers) currentRole(r *http.Request) string {
+	if h.deps.CurrentRole == nil {
+		return "viewer"
+	}
+	return h.deps.CurrentRole(r)
 }
 
 func (h *Handlers) AdminOrderExpire(w http.ResponseWriter, r *http.Request) {

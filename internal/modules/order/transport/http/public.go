@@ -3,7 +3,6 @@ package http
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	orderapp "shop/internal/modules/order/application"
@@ -104,44 +103,8 @@ func (h *Handlers) CreateOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) OrdersByContact(w http.ResponseWriter, r *http.Request) {
-	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
-	if !httpserver.ValidEmail(contact) {
-		httpserver.WriteError(w, 400, "invalid email")
-		return
-	}
-	// 已配置 Turnstile 时，邮箱查询同样要求人机验证（防枚举/防刷）。
-	if h.deps.Settings.TurnstileSecret() != "" {
-		if err := h.verifyTurnstile(strings.TrimSpace(r.Header.Get("X-Turnstile-Response")), h.deps.ClientIP(r), r.Host); err != nil {
-			httpserver.WriteError(w, 403, "turnstile failed")
-			return
-		}
-	}
-	orders, err := h.deps.Orders.OrdersByContact(contact, 10)
-	if err != nil {
-		httpserver.WriteInternalError(w, err)
-		return
-	}
-	out := []map[string]any{}
-	for _, o := range orders {
-		item := map[string]any{
-			"order_no":        o.OrderNo,
-			"product_name":    o.ProductName,
-			"qty":             o.Qty,
-			"amount":          fmt.Sprintf("%.2f", float64(o.AmountCents)/100),
-			"fiat":            o.Fiat,
-			"trade_type":      o.TradeType,
-			"payment_gateway": o.PaymentGateway,
-			"status":          o.Status,
-			"created_at":      o.CreatedAt,
-			"paid_at":         o.PaidAt,
-		}
-		// 订单号用于前台"勾选部分/单个重发查看链接"（发送接口校验邮箱归属后才发令牌）。
-		if o.Status == orderdomain.OrderWaitingPayment {
-			item["payment_url"] = o.PaymentURL
-		}
-		out = append(out, item)
-	}
-	httpserver.WriteJSON(w, 200, map[string]any{"orders": out})
+	// 邮箱不是订单访问凭证；查看链接必须通过邮件发送的 token 获取。
+	httpserver.WriteError(w, http.StatusGone, "订单清单已关闭，请通过邮箱接收订单查看链接")
 }
 
 // apiSendOrderLinks 发送查看链接到登记邮箱：
@@ -290,7 +253,5 @@ func (h *Handlers) orderOwned(r *http.Request, o orderdomain.Order) bool {
 	if token != "" {
 		return hmacEqual(token, o.ViewToken)
 	}
-	// 存量订单兼容路径：邮箱 + 订单号可查看订单，但新链接始终优先使用 token。
-	contact := strings.TrimSpace(r.URL.Query().Get("contact"))
-	return contact != "" && strings.EqualFold(contact, strings.TrimSpace(o.BuyerContact))
+	return false
 }

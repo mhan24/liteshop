@@ -45,7 +45,7 @@ func (h *Handlers) AdminProduct(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) currentRole(r *http.Request) string {
 	if h.deps.CurrentRole == nil {
-		return "admin"
+		return "viewer"
 	}
 	return h.deps.CurrentRole(r)
 }

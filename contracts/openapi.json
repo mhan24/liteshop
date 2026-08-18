@@ -314,10 +314,10 @@
       },
       "get": {
         "tags": ["public"],
-        "summary": "按邮箱查询订单（模糊响应）",
-        "description": "返回订单号（供勾选/单个重发查看链接），不返回查看令牌；待支付订单含 payment_url。需 Turnstile（已配置时）。",
-        "parameters": [{ "name": "contact", "in": "query", "required": true, "schema": { "type": "string", "format": "email" } }],
-        "responses": { "200": { "description": "订单列表" } }
+        "summary": "按邮箱查询订单（已停用）",
+        "description": "邮箱不是订单访问凭证；请使用 POST /api/v1/orders/links 发送邮件查看链接。",
+        "deprecated": true,
+        "responses": { "410": { "description": "请通过邮箱接收订单查看链接" } }
       }
     },
     "/api/v1/orders/links": {

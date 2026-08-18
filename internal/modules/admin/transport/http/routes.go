@@ -21,6 +21,7 @@ type Deps struct {
 	ClientIP         func(r *http.Request) string
 	SessionID        func(r *http.Request) (string, bool)
 	CurrentSession   func(r *http.Request) (int64, string, bool)
+	CurrentRole      func(r *http.Request) string
 	CurrentAdminID   func(r *http.Request) int64
 	CurrentAdminName func(r *http.Request) string
 	StartSession     func(w http.ResponseWriter, r *http.Request, adminID int64) error

@@ -48,6 +48,7 @@ func (r orderResponse) Public() orderResponse {
 	r.BuyerContact = ""
 	r.PaymentURL = ""
 	r.TradeID = ""
+	r.BlockTransactionID = ""
 	r.DeliveryContent = ""
 	return r
 }

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,15 +82,17 @@ func (h *Handlers) AdminCardsExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=cards_%d.csv", id))
-	w.Write([]byte("\xEF\xBB\xBF"))
-	w.Write([]byte("ID,内容,状态,售出时间\n"))
+	_, _ = w.Write([]byte("\xEF\xBB\xBF"))
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"ID", "内容", "状态", "售出时间"})
 	for _, c := range cards {
 		ts := "-"
 		if c.SoldAt > 0 {
 			ts = clock.FormatBeijing(c.SoldAt)
 		}
-		fmt.Fprintf(w, "%d,%s,%s,%s\n", c.ID, csvSafe(c.Content), c.Status, ts)
+		_ = cw.Write([]string{fmt.Sprintf("%d", c.ID), csvSafe(c.Content), c.Status, ts})
 	}
+	cw.Flush()
 }
 
 func csvSafe(s string) string {

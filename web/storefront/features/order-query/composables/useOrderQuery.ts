@@ -1,12 +1,7 @@
-import { cancelOrder, getOrderDetail, lookupOrders, sendLinks, sendSingleLink } from '../api'
+import { cancelOrder, getOrderDetail, sendLinks, sendSingleLink } from '../api'
 
 // 订单查询用例：邮箱查单、单号查详情、发送/重发查看链接、取消。
 export function useOrderQuery() {
-  async function lookup(contact: string, token: string) {
-    const data = await lookupOrders(contact, token)
-    return data.orders || []
-  }
-
   async function detail(orderNo: string, query?: Record<string, string | undefined>) {
     return getOrderDetail(orderNo, query)
   }
@@ -27,5 +22,5 @@ export function useOrderQuery() {
     return cancelOrder(orderNo, query)
   }
 
-  return { lookup, detail, sendAll, sendSelected, sendOne, cancel }
+  return { detail, sendAll, sendSelected, sendOne, cancel }
 }

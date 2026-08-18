@@ -307,6 +307,16 @@ func TestSettingsServiceGatewayPriority(t *testing.T) {
 	}
 }
 
+func TestSettingsServiceRejectsDuplicateNotifyPaths(t *testing.T) {
+	st := newStubSettingsStore()
+	svc := NewSettingsService(st, nil, config.Config{})
+	if err := svc.SavePayment(map[string]any{
+		"bepusdt_notify_path": "/notify/hashpay",
+	}); err == nil {
+		t.Fatal("duplicate payment callback paths must be rejected")
+	}
+}
+
 // TestSettingsServiceSaveNotifyWebhookURL 非法 webhook_url 应报错；合法 http(s) 可保存。
 func TestSettingsServiceSaveNotifyWebhookURL(t *testing.T) {
 	st := newStubSettingsStore()

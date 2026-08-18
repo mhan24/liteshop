@@ -1,17 +1,7 @@
 import { http } from '@/services/http/client'
-import type { LookupItem, Order, SendLinksResult } from './types'
+import type { Order, SendLinksResult } from './types'
 
 // 订单查询/查单链接业务 API。
-export function lookupOrders(contact: string, turnstileToken: string) {
-  return http.get<{ orders: LookupItem[] }>(
-    '/orders',
-    { contact },
-    {
-      'X-Turnstile-Response': turnstileToken,
-    },
-  )
-}
-
 export function getOrderDetail(orderNo: string, query?: Record<string, string | undefined>) {
   return http.get<{ order: Order; cards?: { id: number; content: string }[] }>(
     '/orders/' + encodeURIComponent(orderNo),

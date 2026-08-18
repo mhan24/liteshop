@@ -39,12 +39,10 @@ func (h *Handlers) Dashboard(w http.ResponseWriter, r *http.Request) {
 	ver := runtime.Version()
 	uptime := int64(time.Since(h.deps.StartTime).Seconds())
 
-	httpserver.WriteJSON(w, 200, map[string]any{
+	resp := map[string]any{
 		"today_orders":     data.TodayOrders,
 		"today_sales":      data.TodaySales,
 		"today_revenue":    data.TodayRevenue,
-		"today_cost":       data.TodayCost,
-		"today_profit":     data.TodayProfit,
 		"today_paid_cards": data.TodayPaidCards,
 		"pending_orders":   data.PendingOrders,
 		"payment_failed":   data.PaymentFailed,
@@ -60,7 +58,19 @@ func (h *Handlers) Dashboard(w http.ResponseWriter, r *http.Request) {
 			"db_size":    dbSize,
 			"uptime":     uptime,
 		},
-	})
+	}
+	if h.currentRole(r) != "viewer" {
+		resp["today_cost"] = data.TodayCost
+		resp["today_profit"] = data.TodayProfit
+	}
+	httpserver.WriteJSON(w, 200, resp)
+}
+
+func (h *Handlers) currentRole(r *http.Request) string {
+	if h.deps.CurrentRole == nil {
+		return "viewer"
+	}
+	return h.deps.CurrentRole(r)
 }
 
 // apiAdminSalesReport 返回销售报表（近 N 日营收曲线 + 商品销售占比）。

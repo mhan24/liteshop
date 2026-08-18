@@ -19,6 +19,7 @@ type Deps struct {
 	Audit func(r *http.Request, action, targetType, targetID, before, after string)
 	// ClientIP 返回请求方 IP（组合根提供，含 Cloudflare 信任边界）。
 	ClientIP func(r *http.Request) string
+	CurrentRole func(r *http.Request) string
 }
 
 // Registrar 路由注册器（由组合根实现，携带鉴权/限流中间件）。
@@ -48,7 +49,7 @@ func Register(reg Registrar, h *Handlers) {
 	reg.Public("POST", "/api/v1/orders/links", 10, h.SendOrderLinks)
 
 	reg.Admin("GET", "/api/v1/admin/orders", "viewer", h.AdminOrders)
-	reg.Admin("GET", "/api/v1/admin/orders/export", "viewer", h.AdminOrdersExport)
+	reg.Admin("GET", "/api/v1/admin/orders/export", "operator", h.AdminOrdersExport)
 	reg.Admin("GET", "/api/v1/admin/orders/{id}", "operator", h.AdminOrder)
 	reg.Admin("POST", "/api/v1/admin/orders/{id}/expire", "operator", h.AdminOrderExpire)
 	reg.Admin("POST", "/api/v1/admin/orders/{id}/cancel", "operator", h.AdminOrderCancel)

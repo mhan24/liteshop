@@ -96,13 +96,15 @@ func (s *SettingsService) SavePayment(input map[string]any) (err error) {
 			write(field, u)
 		}
 	}
+	bepusdtNotifyPath := s.NotifyPath()
+	hashPayNotifyPath := s.HashPayNotifyPath()
 	// 回调路径需字符校验且不得与已有路由冲突，非法值回退默认（不保存）
 	if v := strings.TrimSpace(str(input["bepusdt_notify_path"])); v != "" {
 		if !strings.HasPrefix(v, "/") {
 			v = "/" + v
 		}
 		if reNotifyPath.MatchString(v) && !notifyPathConflicts(v) {
-			write("bepusdt_notify_path", v)
+			bepusdtNotifyPath = v
 		}
 	}
 	if v := strings.TrimSpace(str(input["bepusdt_api_token"])); v != "" {
@@ -135,8 +137,17 @@ func (s *SettingsService) SavePayment(input map[string]any) (err error) {
 			v = "/" + v
 		}
 		if reNotifyPath.MatchString(v) && !notifyPathConflicts(v) {
-			write("hashpay_notify_path", v)
+			hashPayNotifyPath = v
 		}
+	}
+	if bepusdtNotifyPath == hashPayNotifyPath {
+		return errors.New("支付回调路径不能相同")
+	}
+	if bepusdtNotifyPath != s.NotifyPath() {
+		write("bepusdt_notify_path", bepusdtNotifyPath)
+	}
+	if hashPayNotifyPath != s.HashPayNotifyPath() {
+		write("hashpay_notify_path", hashPayNotifyPath)
 	}
 	if v := strings.TrimSpace(str(input["hashpay_private_key"])); v != "" {
 		// 防呆：HashPay 商户面板同时展示公钥与私钥，误填公钥会导致下单 502。

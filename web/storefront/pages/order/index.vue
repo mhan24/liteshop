@@ -172,19 +172,11 @@ async function doLookup(token: string) {
     await navigateTo({ path: `/order/${form.order_no}`, query: { contact: form.contact } })
     return
   }
-  loading.value = true
-  searched.value = true
+  // 邮箱不是订单访问凭证；通过邮件发送 token 查看订单。
+  searched.value = false
   orders.value = []
   selected.value = []
-  try {
-    const data: any = await orderQuery.lookup(form.contact, token)
-    orders.value = data.orders || []
-    selected.value = []
-  } catch (e: any) {
-    errorMsg.value = e?.data?.error || e?.message || t('queryFail')
-  } finally {
-    loading.value = false
-  }
+  await doSendLinks(token, [])
 }
 async function sendAllLinks() {
   if (turnstileSiteKey.value) {

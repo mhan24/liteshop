@@ -136,6 +136,10 @@ func (s *Server) registerModuleRoutes(mux *http.ServeMux) {
 	orderhttp.Register(reg, orderhttp.NewHandlers(orderhttp.Deps{
 		Orders: s.orders, Products: s.products, Settings: s.settings, Notify: s.notifySvc,
 		Audit: s.recordAudit, ClientIP: clientIP,
+		CurrentRole: func(r *http.Request) string {
+			_, role, _ := s.currentSession(r)
+			return role
+		},
 	}))
 	producthttp.Register(reg, producthttp.NewHandlers(producthttp.Deps{
 		Products: s.products, Settings: s.settings, Audit: s.recordAudit,
@@ -159,6 +163,10 @@ func (s *Server) registerModuleRoutes(mux *http.ServeMux) {
 		Settings: s.settings, Audit: s.recordAudit, ClientIP: clientIP,
 		SessionID:        s.sessionID,
 		CurrentSession:   s.currentSession,
+		CurrentRole:      func(r *http.Request) string {
+			_, role, _ := s.currentSession(r)
+			return role
+		},
 		CurrentAdminID:   s.currentAdminID,
 		CurrentAdminName: s.currentAdminName,
 		StartSession:     s.startSession,

@@ -234,22 +234,21 @@ export interface paths {
       cookie?: never
     }
     /**
-     * 按邮箱查询订单（模糊响应）
-     * @description 返回订单号（供勾选/单个重发查看链接），不返回查看令牌；待支付订单含 payment_url。需 Turnstile（已配置时）。
+     * 按邮箱查询订单（已停用）
+     * @deprecated
+     * @description 邮箱不是订单访问凭证；请使用 POST /api/v1/orders/links 发送邮件查看链接。
      */
     get: {
       parameters: {
-        query: {
-          contact: string
-        }
+        query?: never
         header?: never
         path?: never
         cookie?: never
       }
       requestBody?: never
       responses: {
-        /** @description 订单列表 */
-        200: {
+        /** @description 请通过邮箱接收订单查看链接 */
+        410: {
           headers: {
             [name: string]: unknown
           }
@@ -1178,7 +1177,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** 卡密列表 */
+    /** 卡密列表（需 operator+） */
     get: {
       parameters: {
         query?: never
@@ -1246,7 +1245,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** 卡密 CSV 导出 */
+    /** 卡密 CSV 导出（需 operator+） */
     get: {
       parameters: {
         query?: never
@@ -1455,7 +1454,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** 订单详情（含卡密 + 事件日志） */
+    /** 订单详情（含卡密 + 事件日志，需 operator+） */
     get: {
       parameters: {
         query?: never
