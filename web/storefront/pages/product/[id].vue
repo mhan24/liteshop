@@ -127,7 +127,7 @@
         <CardContent class="py-8 text-center text-muted-foreground">{{ t('productNotFound') }}</CardContent>
       </Card>
 
-      <Dialog :open="turnstileOpen" @update:open="turnstileOpen = $event">
+      <Dialog :open="turnstileOpen" @update:open="onTurnstileOpenChange">
         <DialogContent class="max-w-sm text-center">
           <DialogHeader>
             <DialogTitle>{{ t('verifyTitle') }}</DialogTitle>
@@ -136,7 +136,7 @@
           <!-- 注意：不要加 cf-turnstile 类（会触发 api.js 自动渲染，与下方显式 render 冲突） -->
           <div ref="turnstileContainer" class="mt-4 flex justify-center"></div>
           <p v-if="turnstileError" class="mt-2 text-sm text-destructive">{{ t('verifyRetry') }}</p>
-          <Button variant="ghost" size="sm" class="mt-2" @click="closeTurnstile">
+          <Button variant="ghost" size="sm" class="mt-2" @click="cancelTurnstile">
             {{ t('verifyCancel') }}
           </Button>
         </DialogContent>
@@ -187,6 +187,7 @@ const product = computed(() => (data.value as any)?.product)
 const qrDataUrl = ref('')
 const qrError = ref(false)
 const showQr = computed(() => !!product.value && !isMobile.value && !!qrDataUrl.value)
+let checkoutWindow: Window | null = null
 
 async function generateQr() {
   if (qrDataUrl.value || qrError.value) return
@@ -305,9 +306,10 @@ function renderTurnstile() {
         action: 'turnstile-spin-v2',
         callback: (token: string) => {
           turnstileError.value = false
+          const shouldSubmit = turnstilePending
+          turnstilePending = false
           closeTurnstile()
-          if (turnstilePending) {
-            turnstilePending = false
+          if (shouldSubmit) {
             createOrder(token)
           }
         },
@@ -335,6 +337,25 @@ function closeTurnstile() {
   }
 }
 
+function closeCheckoutWindow() {
+  if (checkoutWindow && !checkoutWindow.closed) checkoutWindow.close()
+  checkoutWindow = null
+}
+
+function cancelTurnstile() {
+  turnstilePending = false
+  closeTurnstile()
+  closeCheckoutWindow()
+}
+
+function onTurnstileOpenChange(open: boolean) {
+  turnstileOpen.value = open
+  if (!open && turnstilePending) {
+    turnstilePending = false
+    closeCheckoutWindow()
+  }
+}
+
 onBeforeUnmount(() => {
   if (window.turnstile && turnstileWidget.value) {
     window.turnstile.remove(turnstileWidget.value)
@@ -347,6 +368,7 @@ function imgSrc(url: string) {
 }
 async function submit() {
   if (loading.value) return
+  checkoutWindow = window.open('', '_blank', 'noopener,noreferrer')
   openTurnstile()
 }
 
@@ -363,11 +385,21 @@ async function createOrder(token: string) {
       turnstileToken: token,
     })
     if (!res) {
+      closeCheckoutWindow()
       errorMsg.value = checkout.error.value || t('createOrderFail')
       return
     }
     if (res.order_no) {
-      if (res.payment_url) window.open(res.payment_url, '_blank', 'noopener')
+      if (res.payment_url) {
+        if (checkoutWindow && !checkoutWindow.closed) {
+          checkoutWindow.location.href = res.payment_url
+        } else {
+          window.location.href = res.payment_url
+          return
+        }
+      } else if (checkoutWindow && !checkoutWindow.closed) {
+        checkoutWindow.close()
+      }
       const q = res.token ? 'token=' + encodeURIComponent(res.token) : 'contact=' + encodeURIComponent(form.contact)
       window.location.href = '/order/' + res.order_no + '?' + q
     }
@@ -378,7 +410,9 @@ async function createOrder(token: string) {
     } else {
       errorMsg.value = msg || t('createOrderFail')
     }
+    if (!msg.includes('turnstile') && !msg.includes('captcha')) closeCheckoutWindow()
   } finally {
+    if (!turnstileOpen.value) checkoutWindow = null
     loading.value = false
   }
 }
