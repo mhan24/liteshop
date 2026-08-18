@@ -70,6 +70,16 @@ func (h *Handlers) AdminAccountSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.deps.Audit(r, "account_update", "admin", fmt.Sprintf("%d", id), oldUsername+" / "+(map[bool]string{true: "密码已修改", false: "密码未变"}[input.NewPassword != ""]), username+" / "+map[bool]string{true: "密码已修改", false: "密码未变"}[input.NewPassword != ""])
+	if input.NewPassword != "" {
+		if err := h.deps.Admin.DeleteSessionsByAdmin(id); err != nil {
+			httpserver.WriteInternalError(w, err)
+			return
+		}
+		if err := h.deps.StartSession(w, r, id); err != nil {
+			httpserver.WriteInternalError(w, err)
+			return
+		}
+	}
 	httpserver.WriteJSON(w, 200, map[string]any{"ok": true})
 }
 

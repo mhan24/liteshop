@@ -229,11 +229,11 @@
       "get": {
         "tags": ["public"],
         "summary": "健康检查",
-        "description": "返回应用名、版本、运行时长与组件状态（database / payment）；数据库故障时返回 503。",
+        "description": "未认证请求仅返回 ok；管理员会话可获得完整组件状态。数据库故障时返回 503。",
         "responses": {
           "200": {
             "description": "OK",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "app": { "type": "string" }, "version": { "type": "string" }, "build": { "type": "string" }, "config_version": { "type": "integer", "description": "settings 配置版本" }, "uptime_sec": { "type": "integer" }, "database": { "type": "object", "properties": { "status": { "type": "string" }, "size_bytes": { "type": "integer" }, "migration_version": { "type": "integer" }, "last_backup": { "type": "object", "properties": { "file": { "type": "string" }, "modified": { "type": "integer" } } }, "integrity": { "type": "string", "enum": ["ok", "error"] } } }, "jobs": { "type": "object", "properties": { "mail_queue_size": { "type": "integer" }, "last_success": { "type": "integer" } } }, "payment": { "type": "string" } } } } }
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } } } } }
           },
           "503": { "description": "数据库故障" }
         }

@@ -265,6 +265,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.Ping(); err != nil {
 		dbStatus = "fail"
 	}
+	status := http.StatusOK
+	if dbStatus != "ok" {
+		status = http.StatusServiceUnavailable
+	}
+	if !s.isAdmin(r) {
+		writeJSON(w, status, map[string]any{"ok": dbStatus == "ok"})
+		return
+	}
 	payCfg := s.settings.PaymentConfig()
 	paymentStatus := paymentStatusFor(payCfg)
 	var dbSize int64
@@ -301,10 +309,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"last_success":    health.LastJobSuccess,
 		},
 		"payment": paymentStatus,
-	}
-	status := http.StatusOK
-	if dbStatus != "ok" {
-		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, body)
 }

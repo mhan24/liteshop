@@ -2,6 +2,7 @@ package application
 
 import (
 	"errors"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -92,5 +93,16 @@ func normalizeHTTPURL(v string, required bool) (string, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return "", errors.New("URL 必须是 http/https 格式")
 	}
+	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return "", errors.New("公网 URL 必须使用 HTTPS；仅允许 localhost/回环地址使用 HTTP")
+	}
 	return strings.TrimRight(v, "/"), nil
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(strings.TrimSuffix(host, "."), "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

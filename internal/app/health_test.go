@@ -41,20 +41,10 @@ func TestHealthEndpoint(t *testing.T) {
 	if body["ok"] != true {
 		t.Fatalf("unexpected health body: %v", body)
 	}
-	dbInfo, ok := body["database"].(map[string]any)
-	if !ok || dbInfo["status"] != "ok" {
-		t.Fatalf("database status missing: %v", body["database"])
+	if _, ok := body["database"]; ok {
+		t.Fatal("public health must not expose database details")
 	}
-	if dbInfo["migration_version"] == nil || dbInfo["integrity"] != "ok" {
-		t.Fatalf("database metrics missing: %v", dbInfo)
-	}
-	if _, ok := body["jobs"].(map[string]any); !ok {
-		t.Fatalf("jobs metrics missing: %v", body)
-	}
-	if body["payment"] != "not_configured" {
-		t.Fatalf("payment status = %v, want not_configured", body["payment"])
-	}
-	if body["version"] == "" || body["app"] != "LiteShop" {
-		t.Fatalf("version/app missing: %v", body)
+	if _, ok := body["version"]; ok {
+		t.Fatal("public health must not expose build details")
 	}
 }

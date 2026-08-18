@@ -13,7 +13,7 @@ export interface paths {
     }
     /**
      * 健康检查
-     * @description 返回应用名、版本、运行时长与组件状态（database / payment）；数据库故障时返回 503。
+     * @description 未认证请求仅返回 ok；管理员会话可获得完整组件状态。数据库故障时返回 503。
      */
     get: {
       parameters: {
@@ -32,28 +32,6 @@ export interface paths {
           content: {
             'application/json': {
               ok?: boolean
-              app?: string
-              version?: string
-              build?: string
-              /** @description settings 配置版本 */
-              config_version?: number
-              uptime_sec?: number
-              database?: {
-                status?: string
-                size_bytes?: number
-                migration_version?: number
-                last_backup?: {
-                  file?: string
-                  modified?: number
-                }
-                /** @enum {string} */
-                integrity?: 'ok' | 'error'
-              }
-              jobs?: {
-                mail_queue_size?: number
-                last_success?: number
-              }
-              payment?: string
             }
           }
         }

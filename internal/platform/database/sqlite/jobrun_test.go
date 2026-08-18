@@ -107,6 +107,9 @@ func TestResetAllTablesScope(t *testing.T) {
 	}
 	defer d.Close()
 	now := clock.Now()
+	_, _ = d.Exec(`INSERT INTO coupons(code, type, value_cents, created_at, updated_at) VALUES('RESET', 'fixed', 1, ?, ?)`, now, now)
+	_, _ = d.Exec(`INSERT INTO audit_logs(admin_id, username, action, target_type, target_id, before_value, after_value, created_at) VALUES(1, 'admin', 'x', 'x', 'x', '', '', ?)`, now)
+	_, _ = d.Exec(`INSERT INTO low_stock_reminders(product_id, notified_at) VALUES(1, ?)`, now)
 	_, _ = d.Exec(`INSERT INTO secrets(key, value, updated_at) VALUES('k','v',?)`, now)
 	_, _ = d.Exec(`INSERT INTO sessions(id, admin_id, expires_at) VALUES('s1',1,?)`, now)
 	_, _ = d.Exec(`INSERT INTO outbox_events(event_type, payload, created_at) VALUES('t','{}',?)`, now)
@@ -122,6 +125,17 @@ func TestResetAllTablesScope(t *testing.T) {
 		if n != 0 {
 			t.Fatalf("table %s not cleared: %d rows", tbl, n)
 		}
+	}
+	for _, tbl := range []string{"coupons", "audit_logs", "low_stock_reminders"} {
+		var n int
+		_ = d.QueryRow(`SELECT COUNT(1) FROM ` + tbl).Scan(&n)
+		if n != 0 {
+			t.Fatalf("table %s not cleared: %d", tbl, n)
+		}
+	}
+	var sessionSecret string
+	if err := d.QueryRow(`SELECT value FROM settings WHERE key = 'session_secret'`).Scan(&sessionSecret); err != nil || sessionSecret == "" {
+		t.Fatalf("session_secret must survive reset: %q, err=%v", sessionSecret, err)
 	}
 	var v int
 	_ = d.QueryRow(`SELECT COALESCE(MAX(version),0) FROM settings_version`).Scan(&v)

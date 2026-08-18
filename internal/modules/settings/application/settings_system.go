@@ -1,6 +1,7 @@
 package application
 
 import (
+	"errors"
 	"strings"
 )
 
@@ -20,6 +21,9 @@ func (s *SettingsService) BackupSettings() (map[string]string, error) {
 
 // RestoreSettings 恢复配置（跳过密钥类与超长值）。返回恢复条数。
 func (s *SettingsService) RestoreSettings(settings map[string]string) (int, error) {
+	if err := s.validateRestoredSettings(settings); err != nil {
+		return 0, err
+	}
 	count := 0
 	for k, v := range settings {
 		if len(k) > 80 || len(v) > 20000 {
@@ -35,6 +39,45 @@ func (s *SettingsService) RestoreSettings(settings map[string]string) (int, erro
 		count++
 	}
 	return count, nil
+}
+
+func (s *SettingsService) validateRestoredSettings(settings map[string]string) error {
+	bepusdtPath := s.NotifyPath()
+	hashPayPath := s.HashPayNotifyPath()
+	if v, ok := settings["bepusdt_notify_path"]; ok && strings.TrimSpace(v) != "" {
+		v = strings.TrimSpace(v)
+		if !strings.HasPrefix(v, "/") {
+			v = "/" + v
+		}
+		if !reNotifyPath.MatchString(v) || notifyPathConflicts(v) {
+			return errors.New("bepusdt_notify_path 无效")
+		}
+		bepusdtPath = v
+	}
+	if v, ok := settings["hashpay_notify_path"]; ok && strings.TrimSpace(v) != "" {
+		v = strings.TrimSpace(v)
+		if !strings.HasPrefix(v, "/") {
+			v = "/" + v
+		}
+		if !reNotifyPath.MatchString(v) || notifyPathConflicts(v) {
+			return errors.New("hashpay_notify_path 无效")
+		}
+		hashPayPath = v
+	}
+	if bepusdtPath == hashPayPath {
+		return errors.New("支付回调路径不能相同")
+	}
+	for _, key := range []string{
+		"shop_public_base_url", "bepusdt_base_url", "bepusdt_notify_url",
+		"hashpay_base_url", "hashpay_notify_url", "webhook_url",
+	} {
+		if v, ok := settings[key]; ok {
+			if _, err := normalizeHTTPURL(v, false); err != nil {
+				return key + " 无效"
+			}
+		}
+	}
+	return nil
 }
 
 // ResetAll 清空业务数据（恢复/重置用）。

@@ -93,8 +93,15 @@ func TestSettingsServiceSavePaymentInvalid(t *testing.T) {
 	if err := svc.SavePayment(map[string]any{"bepusdt_base_url": "ftp://x"}); err == nil {
 		t.Fatal("invalid url should error")
 	}
+	if err := svc.SavePayment(map[string]any{"bepusdt_base_url": "http://pay.example.com"}); err == nil {
+		t.Fatal("public payment URL over HTTP should error")
+	}
 	if len(st.settings) != 0 {
 		t.Fatalf("invalid input must not write anything: %v", st.settings)
+	}
+	loopback := newStubSettingsStore()
+	if err := NewSettingsService(loopback, nil, config.Config{}).SavePayment(map[string]any{"bepusdt_base_url": "http://localhost:8081"}); err != nil {
+		t.Fatalf("loopback HTTP payment URL should remain allowed: %v", err)
 	}
 }
 
@@ -314,6 +321,21 @@ func TestSettingsServiceRejectsDuplicateNotifyPaths(t *testing.T) {
 		"bepusdt_notify_path": "/notify/hashpay",
 	}); err == nil {
 		t.Fatal("duplicate payment callback paths must be rejected")
+	}
+}
+
+func TestRestoreSettingsValidatesURLsAndNotifyPaths(t *testing.T) {
+	st := newStubSettingsStore()
+	svc := NewSettingsService(st, nil, config.Config{})
+	if _, err := svc.RestoreSettings(map[string]string{
+		"bepusdt_notify_path": "/notify/hashpay",
+	}); err == nil {
+		t.Fatal("restore must reject duplicate payment callback paths")
+	}
+	if _, err := svc.RestoreSettings(map[string]string{
+		"shop_public_base_url": "http://public.example.com",
+	}); err == nil {
+		t.Fatal("restore must reject public HTTP URLs")
 	}
 }
 
