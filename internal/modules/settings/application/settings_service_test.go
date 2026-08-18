@@ -36,6 +36,9 @@ func (s *stubSettingsStore) SetSetting(key, value string) error {
 }
 func (s *stubSettingsStore) AllSettings() (map[string]string, error) { return s.settings, nil }
 func (s *stubSettingsStore) GetSecret(key string, _ *security.Cipher) (string, error) {
+	if s.secretErr != nil {
+		return "", s.secretErr
+	}
 	return s.secrets[key], nil
 }
 func (s *stubSettingsStore) SetSecret(key, value string, _ *security.Cipher) error {
