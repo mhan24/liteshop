@@ -276,7 +276,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if dbStatus != "ok" {
 		status = http.StatusServiceUnavailable
 	}
-	if !s.isAdmin(r) {
+	if !s.roleAtLeast(r, admindomain.RoleAdmin) {
 		writeJSON(w, status, map[string]any{"ok": dbStatus == "ok"})
 		return
 	}
