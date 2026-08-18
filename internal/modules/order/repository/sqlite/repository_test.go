@@ -159,11 +159,12 @@ func TestSetOrderStatusFromRequiresExpectedState(t *testing.T) {
 
 func TestManualDeliveryEnqueuesDeliveredEventAtomically(t *testing.T) {
 	repo, d := openRepo(t)
+	pid := seedProductCards(t, d, 0)
 	repo.SetOutboxEncoder(func(o domain.Order, _ []inventorydomain.Card) ([]OutboxEvent, error) {
 		return []OutboxEvent{{Type: "order.delivered", Payload: o.DeliveryContent}}, nil
 	})
 	now := clock.Now()
-	o := &domain.Order{OrderNo: "S6", ProductID: 1, ProductName: "人工商品", Qty: 1, AmountCents: 1000,
+	o := &domain.Order{OrderNo: "S6", ProductID: pid, ProductName: "人工商品", Qty: 1, AmountCents: 1000,
 		Fiat: "CNY", TradeType: "usdt.trc20", DeliveryType: productdomain.DeliveryTypeManual,
 		Status: domain.OrderPendingDelivery, CreatedAt: now, UpdatedAt: now}
 	if _, err := d.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, buyer_contact, view_token, delivery_type, status, payment_status, created_at, updated_at)
