@@ -65,6 +65,8 @@ var (
 	ErrGatewayNotConfigured = errors.New("payment gateway is not configured")
 	// ErrHashPayAlreadyPaid 取消/过期时发现 HashPay 订单已支付（取消与付款竞态）。
 	ErrHashPayAlreadyPaid = errors.New("hashpay order already paid")
+	// ErrHashPayPending HashPay 仍待支付，不能提前把本地订单标记为已取消/过期。
+	ErrHashPayPending = errors.New("hashpay order still pending")
 )
 
 // OrderRepository 订单数据访问端口（由仓储层实现，测试可用 mock）。

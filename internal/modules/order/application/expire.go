@@ -23,7 +23,7 @@ func (s *OrderService) ExpireStale(timeoutSec int) (int, error) {
 	expired := 0
 	var firstErr error
 	for _, o := range orders {
-		if err := s.Expire(o.ID); err != nil {
+		if err := s.ExpireWithGateway(o.ID); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -52,6 +52,8 @@ func (s *OrderService) Expire(orderID int64) error {
 
 // ExpireWithGateway 过期订单并同步关闭支付交易。
 func (s *OrderService) ExpireWithGateway(orderID int64) error {
-	s.cancelGatewayTx(orderID)
+	if err := s.cancelGatewayTx(orderID); err != nil {
+		return err
+	}
 	return s.Expire(orderID)
 }

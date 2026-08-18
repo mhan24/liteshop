@@ -53,6 +53,22 @@ type fakePublisher struct {
 	got []events.Event
 }
 
+type cancelGatewayStub struct {
+	err   error
+	calls int
+}
+
+func (g *cancelGatewayStub) CreateTransaction(CreateInput) (string, string, error) {
+	return "", "", nil
+}
+func (g *cancelGatewayStub) CancelTransaction(string) error {
+	g.calls++
+	return g.err
+}
+func (g *cancelGatewayStub) VerifyCallback([]byte) (PaymentCallback, error) {
+	return PaymentCallback{}, nil
+}
+
 func (p *fakePublisher) Publish(e events.Event) {
 	p.mu.Lock()
 	p.got = append(p.got, e)
@@ -150,6 +166,26 @@ func TestCancelOrderNotFound(t *testing.T) {
 	svc, _ := newCancelExpireSvc(repo)
 	if err := svc.Cancel(9); err == nil || err.Error() != "not found" {
 		t.Fatalf("cancel err = %v, want not found", err)
+	}
+}
+
+func TestCancelWithGatewayFailureDoesNotCancelLocally(t *testing.T) {
+	repo := &fakeOrderRepo{
+		order:         models.Order{ID: 1, OrderNo: "O1", Status: models.OrderWaitingPayment, TradeID: "T1", PaymentGateway: "bepusdt"},
+		cancelChanged: true,
+	}
+	gw := &cancelGatewayStub{err: errors.New("gateway cancel failed")}
+	svc, _ := newCancelExpireSvc(repo)
+	svc.payFn = func(string) PaymentGateway { return gw }
+
+	if err := svc.CancelWithGateway(1); err == nil {
+		t.Fatal("gateway cancellation failure must be returned")
+	}
+	if gw.calls != 1 {
+		t.Fatalf("cancel calls = %d, want 1", gw.calls)
+	}
+	if len(repo.logs) != 0 {
+		t.Fatalf("local cancellation must not be recorded: %v", repo.logs)
 	}
 }
 

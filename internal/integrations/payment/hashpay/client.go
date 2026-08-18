@@ -91,8 +91,11 @@ func (c *HashPay) CancelTransaction(tradeID string) error {
 	if err != nil {
 		return fmt.Errorf("hashpay cancel check: %w", err)
 	}
-	if status == "paid" {
+	switch status {
+	case "paid":
 		return orderapp.ErrHashPayAlreadyPaid
+	case "pending":
+		return orderapp.ErrHashPayPending
 	}
 	return nil
 }

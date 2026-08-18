@@ -235,7 +235,7 @@ func TestHashPayCreateTransaction(t *testing.T) {
 
 func TestHashPayCancelQueriesStatus(t *testing.T) {
 	privatePEM, _ := newHashPayTestKeys(t)
-	// pending：取消等待 HashPay 到期回调（nil）。
+	// pending：不能提前本地取消，等待 HashPay 到期回调。
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/order/hp-1" || r.Method != http.MethodGet {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -247,8 +247,8 @@ func TestHashPayCancelQueriesStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 	gw := NewHashPay(srv.URL, "merchant-1", privatePEM, "USD")
-	if err := gw.CancelTransaction("hp-1"); err != nil {
-		t.Fatalf("pending cancel should be nil: %v", err)
+	if err := gw.CancelTransaction("hp-1"); !errors.Is(err, orderapp.ErrHashPayPending) {
+		t.Fatalf("pending cancel error = %v, want orderapp.ErrHashPayPending", err)
 	}
 
 	// paid：取消与付款竞态。
