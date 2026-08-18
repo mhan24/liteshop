@@ -70,7 +70,7 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, gateway, tradeID, blockTx str
 		return o, nil, false, err
 	}
 	if delivered == 0 || len(cards) == 0 {
-		if err := s.repo.SetOrderStatus(o.ID, models.OrderDeliveryFailed); err != nil {
+		if err := s.repo.SetOrderStatusFrom(o.ID, models.OrderPaid, models.OrderDeliveryFailed); err != nil {
 			// 状态落库失败需要让调用方感知，避免"已扣款但状态未知"。
 			return o, nil, false, err
 		}
@@ -78,7 +78,7 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, gateway, tradeID, blockTx str
 		s.fireDeliveryFailed(o, "无可用卡密")
 		return o, nil, false, models.ErrNoCards
 	}
-	if err := s.repo.SetOrderStatus(o.ID, models.OrderDelivered); err != nil {
+	if err := s.repo.SetOrderStatusFrom(o.ID, models.OrderPaid, models.OrderDelivered); err != nil {
 		return o, cards, false, err
 	}
 	_ = s.repo.AddLog(o.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
@@ -226,7 +226,7 @@ func (s *OrderService) Redeliver(orderID int64) error {
 	}
 	if len(cards) > 0 {
 		if o.Status != models.OrderDelivered && o.Status != models.OrderCompleted {
-			if err := s.repo.SetOrderStatus(o.ID, models.OrderDelivered); err != nil {
+			if err := s.repo.SetOrderStatusFrom(o.ID, o.Status, models.OrderDelivered); err != nil {
 				return err
 			}
 			_ = s.repo.AddLog(o.ID, "delivered", "管理员手动确认发卡", o.Status, models.OrderDelivered, 0)
@@ -259,7 +259,7 @@ func (s *OrderService) Redeliver(orderID int64) error {
 	if err != nil {
 		return err
 	}
-	if err := s.repo.SetOrderStatus(o.ID, models.OrderDelivered); err != nil {
+	if err := s.repo.SetOrderStatusFrom(o.ID, o.Status, models.OrderDelivered); err != nil {
 		return err
 	}
 	_ = s.repo.AddLog(o.ID, "delivered", "管理员补发卡密", o.Status, models.OrderDelivered, 0)

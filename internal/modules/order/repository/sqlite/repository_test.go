@@ -139,6 +139,22 @@ func TestMarkPaidAndDeliverSellsCards(t *testing.T) {
 	}
 }
 
+func TestSetOrderStatusFromRequiresExpectedState(t *testing.T) {
+	repo, d := openRepo(t)
+	pid := seedProductCards(t, d, 1)
+	o := &domain.Order{OrderNo: "S5", ProductID: pid, ProductName: "测试商品", Qty: 1, AmountCents: 1000,
+		Fiat: "CNY", TradeType: "usdt.trc20", DeliveryType: "auto", CreatedAt: clock.Now(), UpdatedAt: clock.Now()}
+	if err := repo.CreatePendingOrder(o); err != nil {
+		t.Fatalf("create pending: %v", err)
+	}
+	if err := repo.SetOrderStatusFrom(o.ID, domain.OrderWaitingPayment, domain.OrderCancelled); err != ErrNoRows {
+		t.Fatalf("wrong expected state error = %v, want ErrNoRows", err)
+	}
+	if err := repo.SetOrderStatusFrom(o.ID, domain.OrderCreated, domain.OrderWaitingPayment); err != nil {
+		t.Fatalf("matching expected state rejected: %v", err)
+	}
+}
+
 // TestConcurrentReserveLastCard 并发抢最后一张卡：恰好一个成功（并发更新）。
 func TestConcurrentReserveLastCard(t *testing.T) {
 	repo, d := openRepo(t)

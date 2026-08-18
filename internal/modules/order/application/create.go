@@ -205,7 +205,7 @@ func (s *OrderService) CreateOrder(p productdomain.Product, qty int, contact, tr
 		}
 		return order.OrderNo, "", discount, couponID, err
 	}
-	if err := s.repo.SetOrderStatus(order.ID, models.OrderWaitingPayment); err != nil {
+	if err := s.repo.SetOrderStatusFrom(order.ID, models.OrderCreated, models.OrderWaitingPayment); err != nil {
 		s.cancelCreatedTrade(gateway, tradeID, order.OrderNo)
 		if cleanupErr := s.repo.MarkPaymentFailed(order.ID); cleanupErr != nil {
 			return order.OrderNo, "", discount, couponID, errors.Join(err, cleanupErr)
@@ -248,14 +248,14 @@ func (s *OrderService) completeFreeOrder(order models.Order, discount, couponID 
 	order.PaidAt = now
 	_ = s.repo.AddLog(order.ID, "payment_success", "免费订单（100% 折扣）直接完成", models.OrderCreated, models.OrderPaid, 0)
 	if delivered == 0 {
-		if err := s.repo.SetOrderStatus(order.ID, models.OrderDeliveryFailed); err != nil {
+		if err := s.repo.SetOrderStatusFrom(order.ID, models.OrderPaid, models.OrderDeliveryFailed); err != nil {
 			return order.OrderNo, "", discount, couponID, err
 		}
 		_ = s.repo.AddLog(order.ID, "delivery_failed", "发卡失败：无可用卡密", models.OrderPaid, models.OrderDeliveryFailed, 0)
 		s.fireDeliveryFailed(order, "无可用卡密")
 		return order.OrderNo, "", discount, couponID, models.ErrNoCards
 	}
-	if err := s.repo.SetOrderStatus(order.ID, models.OrderDelivered); err != nil {
+	if err := s.repo.SetOrderStatusFrom(order.ID, models.OrderPaid, models.OrderDelivered); err != nil {
 		return order.OrderNo, "", discount, couponID, err
 	}
 	_ = s.repo.AddLog(order.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)

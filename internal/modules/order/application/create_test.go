@@ -76,6 +76,9 @@ func (r *createStubRepo) SetOrderStatus(int64, domain.Status) error {
 	}
 	return nil
 }
+func (r *createStubRepo) SetOrderStatusFrom(id int64, from, to domain.Status) error {
+	return r.SetOrderStatus(id, to)
+}
 func (r *createStubRepo) MarkPaymentFailed(int64) error {
 	r.paymentFailedCalls++
 	return r.markPaymentFailedErr

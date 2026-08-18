@@ -85,6 +85,7 @@ type OrderRepository interface {
 	CancelOrder(orderID int64) (string, bool, error)
 	ExpireOrder(orderID int64) (string, bool, error)
 	SetOrderStatus(orderID int64, status domain.Status) error
+	SetOrderStatusFrom(orderID int64, from, to domain.Status) error
 	MarkPaymentFailed(orderID int64) error
 	SetPaymentStatus(orderID int64, status domain.PaymentStatus) error
 	GetPaymentStatus(orderID int64) (domain.PaymentStatus, error)

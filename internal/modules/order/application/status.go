@@ -29,7 +29,7 @@ func (s *OrderService) SetStatus(orderID int64, to domain.Status, message string
 	if !models.IsValidOrderTransition(o.Status, to) {
 		return fmt.Errorf("invalid order transition %s -> %s", o.Status, to)
 	}
-	if err := s.repo.SetOrderStatus(orderID, to); err != nil {
+	if err := s.repo.SetOrderStatusFrom(orderID, o.Status, to); err != nil {
 		return err
 	}
 	_ = s.repo.AddLog(orderID, "status_changed", message, o.Status, to, 0)
