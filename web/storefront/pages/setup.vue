@@ -17,6 +17,10 @@
             <Input v-model="form.username" class="mt-1" />
           </div>
           <div>
+            <label class="text-sm font-semibold">{{ t('setupToken') }}</label>
+            <Input v-model="form.setup_token" type="password" class="mt-1" />
+          </div>
+          <div>
             <label class="text-sm font-semibold">{{ t('adminPassword') }}</label>
             <Input v-model="form.password" type="password" class="mt-1" />
           </div>
@@ -64,6 +68,7 @@ const error = ref('')
 const form = reactive({
   site_title: 'LiteShop',
   username: 'admin',
+  setup_token: '',
   password: '',
   confirm: '',
   public_base_url: '',
@@ -82,7 +87,8 @@ async function submit() {
   loading.value = true
   error.value = ''
   try {
-    await api.post('/setup', form)
+    const { setup_token, ...body } = form
+    await api.post('/setup', body, { 'X-Setup-Token': setup_token })
     await navigateTo('/admin/login')
   } catch (e: any) {
     error.value = e?.data?.error || e?.message || t('setupFailed')

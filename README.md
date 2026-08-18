@@ -71,7 +71,7 @@ go build -tags production -o liteshop ./cmd/liteshop
 ```bash
 ./liteshop   # 默认监听 :8080，数据库在 ./data/shop.db
 ```
-首次启动自动建表与迁移；若库无管理员，访问 `/setup` 完成初始化。后台入口 `/admin`。
+首次启动自动建表与迁移；若库无管理员，访问 `/setup` 完成初始化。初始化令牌会输出到服务日志，也可通过 `LITESHOP_SETUP_TOKEN` 环境变量固定。后台入口 `/admin`。
 
 ## 测试与质量
 

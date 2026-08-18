@@ -105,6 +105,7 @@ type Server struct {
 	startTime time.Time
 
 	sessionKey string
+	setupToken string
 
 	limitersMu sync.Mutex
 	limiters   map[string]*RateLimiter

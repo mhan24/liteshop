@@ -19,7 +19,9 @@ func TestSetupValidationDoesNotCreateAdmin(t *testing.T) {
 	}
 	body := []byte(`{"username":"admin","password":"StrongPass123!","confirm":"StrongPass123!","public_base_url":"ftp://invalid"}`)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/setup", bytes.NewReader(body)))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/setup", bytes.NewReader(body))
+	req.Header.Set("X-Setup-Token", handler.(*Server).setupToken)
+	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -29,5 +31,19 @@ func TestSetupValidationDoesNotCreateAdmin(t *testing.T) {
 	}
 	if admins != 0 {
 		t.Fatalf("admins = %d, want 0 after validation failure", admins)
+	}
+}
+
+func TestSetupRequiresToken(t *testing.T) {
+	d := testutil.NewTestDB(t)
+	handler, err := NewHandler(context.Background(), config.Config{PublicBaseURL: "https://shop.test"}, d)
+	if err != nil {
+		t.Fatalf("new handler: %v", err)
+	}
+	body := []byte(`{"username":"admin","password":"StrongPass123!","confirm":"StrongPass123!"}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/setup", bytes.NewReader(body)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
 	}
 }

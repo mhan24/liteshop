@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	inventorydomain "shop/internal/modules/inventory/domain"
 	orderdomain "shop/internal/modules/order/domain"
 	"time"
@@ -36,6 +38,8 @@ import (
 	"shop/internal/platform/scheduler/jobs"
 	"shop/internal/platform/security"
 	"shop/internal/shared/clock"
+	"shop/internal/shared/idgen"
+	"strings"
 )
 
 // 编译期断言：SQLite 实现满足各模块端口接口。
@@ -58,6 +62,11 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 		return nil, fmt.Errorf("ensure session secret: %w", err)
 	}
 	cipher := security.NewCipher(sessionSecret)
+	setupToken := strings.TrimSpace(os.Getenv("LITESHOP_SETUP_TOKEN"))
+	if setupToken == "" {
+		setupToken = idgen.RandomToken(24)
+	}
+	log.Printf("setup token: %s", setupToken)
 	settingsStore := settingssqlite.NewStore(database)
 	notifier := notify.New(cfg, database, bus,
 		notifySettingsReader{store: settingsStore, cipher: cipher},
@@ -70,6 +79,7 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 		dbPath:     cfg.DatabasePath,
 		startTime:  time.Now(),
 		sessionKey: sessionSecret,
+		setupToken: setupToken,
 		limiters:   make(map[string]*RateLimiter),
 		linkSent:   make(map[string]int64),
 	}

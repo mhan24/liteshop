@@ -109,6 +109,10 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "already initialized")
 		return
 	}
+	if !hmacEqual(strings.TrimSpace(r.Header.Get("X-Setup-Token")), s.setupToken) {
+		writeError(w, http.StatusForbidden, "setup token required")
+		return
+	}
 	var input struct {
 		SiteTitle       string `json:"site_title"`
 		Username        string `json:"username"`

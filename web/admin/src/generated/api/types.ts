@@ -599,12 +599,14 @@ export interface paths {
     put?: never
     /**
      * 首次初始化（创建管理员 + 写入配置）
-     * @description 敏感配置（支付 Token / Turnstile 密钥）加密存入 secrets 表。
+     * @description 需要 X-Setup-Token 初始化令牌（服务日志输出，或由 LITESHOP_SETUP_TOKEN 提供）。敏感配置（支付 Token / Turnstile 密钥）加密存入 secrets 表。
      */
     post: {
       parameters: {
         query?: never
-        header?: never
+        header: {
+          'X-Setup-Token': string
+        }
         path?: never
         cookie?: never
       }
@@ -623,6 +625,13 @@ export interface paths {
         }
         /** @description 已初始化或参数错误 */
         400: {
+          headers: {
+            [name: string]: unknown
+          }
+          content?: never
+        }
+        /** @description 初始化令牌错误 */
+        403: {
           headers: {
             [name: string]: unknown
           }
