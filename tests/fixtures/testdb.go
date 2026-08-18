@@ -75,6 +75,13 @@ func SeedOrder(t testingTB, d *sql.DB, productID int64, status orderdomain.Statu
 	return orderNo
 }
 
+func SetOrderPaymentGateway(t testingTB, d *sql.DB, orderNo, gateway string) {
+	t.Helper()
+	if _, err := d.Exec(`UPDATE orders SET payment_gateway = ? WHERE order_no = ?`, gateway, orderNo); err != nil {
+		t.Fatalf("set order payment gateway: %v", err)
+	}
+}
+
 // WaitFor 轮询等待条件成立（异步通知/网关调用使用）。
 func WaitFor(t testingTB, timeout time.Duration, cond func() bool, msg string) {
 	t.Helper()

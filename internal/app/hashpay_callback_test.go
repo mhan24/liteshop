@@ -132,6 +132,7 @@ func TestHashPayCallbackHTTP(t *testing.T) {
 
 	pid := fixtures.SeedProductWithCards(t, d, 2)
 	orderNo := fixtures.SeedOrder(t, d, pid, orderdomain.OrderWaitingPayment, "HP1")
+	fixtures.SetOrderPaymentGateway(t, d, orderNo, "hashpay")
 	payload := hashPayEnvelope(t, publicPEM, hashPayPaidPayload(t, orderNo, "hp-1", "paid"))
 
 	rec := httptest.NewRecorder()
@@ -175,6 +176,7 @@ func TestHashPayCallbackExpired(t *testing.T) {
 
 	pid := fixtures.SeedProductWithCards(t, d, 2)
 	orderNo := fixtures.SeedOrder(t, d, pid, orderdomain.OrderWaitingPayment, "HP2")
+	fixtures.SetOrderPaymentGateway(t, d, orderNo, "hashpay")
 	payload := hashPayEnvelope(t, publicPEM, hashPayPaidPayload(t, orderNo, "hp-2", "expired"))
 
 	rec := httptest.NewRecorder()
@@ -222,6 +224,7 @@ func TestHashPayNotifyPathRuntimeChange(t *testing.T) {
 
 	pid := fixtures.SeedProductWithCards(t, d, 1)
 	orderNo := fixtures.SeedOrder(t, d, pid, orderdomain.OrderWaitingPayment, "HP4")
+	fixtures.SetOrderPaymentGateway(t, d, orderNo, "hashpay")
 	payload := hashPayEnvelope(t, publicPEM, hashPayPaidPayload(t, orderNo, "hp-4", "paid"))
 
 	rec := httptest.NewRecorder()
