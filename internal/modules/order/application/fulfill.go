@@ -81,6 +81,9 @@ func (s *OrderService) MarkPaidAndDeliver(orderNo, gateway, tradeID, blockTx str
 	if err := s.repo.SetOrderStatusFrom(o.ID, models.OrderPaid, models.OrderDelivered); err != nil {
 		return o, cards, false, err
 	}
+	if err := s.repo.EnqueueDeliveredEvent(o.ID); err != nil {
+		return o, cards, false, err
+	}
 	_ = s.repo.AddLog(o.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
 	// OrderPaid/OrderDelivered 事件已由支付事务写入 outbox，由 outbox worker 发布。
 	return o, cards, true, nil
@@ -109,12 +112,6 @@ func (s *OrderService) ManualDeliver(orderID int64, content string) error {
 	o.Status = models.OrderDelivered
 	o.DeliveryContent = content
 	_ = s.repo.AddLog(orderID, "delivered", "管理员人工发货", models.OrderPendingDelivery, models.OrderDelivered, 0)
-	// 买家通知（邮件 + Telegram）：发送内容为人工填写的发货内容。
-	if s.SendPaid != nil {
-		go s.SendPaid(o, nil)
-	}
-	// 管理员侧发货成功通知（模板事件，不走 outbox：非支付事务）。
-	s.publish(OrderDeliveredEvent{Order: o, Cards: nil})
 	return nil
 }
 
@@ -232,6 +229,9 @@ func (s *OrderService) Redeliver(orderID int64) error {
 			if err := s.repo.SetOrderStatusFrom(o.ID, o.Status, models.OrderDelivered); err != nil {
 				return err
 			}
+			if err := s.repo.EnqueueDeliveredEvent(o.ID); err != nil {
+				return err
+			}
 			_ = s.repo.AddLog(o.ID, "delivered", "管理员手动确认发卡", o.Status, models.OrderDelivered, 0)
 		}
 		if s.SendPaid != nil {
@@ -263,6 +263,9 @@ func (s *OrderService) Redeliver(orderID int64) error {
 		return err
 	}
 	if err := s.repo.SetOrderStatusFrom(o.ID, o.Status, models.OrderDelivered); err != nil {
+		return err
+	}
+	if err := s.repo.EnqueueDeliveredEvent(o.ID); err != nil {
 		return err
 	}
 	_ = s.repo.AddLog(o.ID, "delivered", "管理员补发卡密", o.Status, models.OrderDelivered, 0)

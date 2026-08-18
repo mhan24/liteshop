@@ -80,6 +80,7 @@ type OrderRepository interface {
 	MarkPaidAndDeliver(orderID int64, gateway, tradeID, blockTx string, paidAt int64) (int64, error)
 	MarkPaidPendingDelivery(orderID int64, gateway, tradeID, blockTx string, paidAt int64) error
 	SetManualDelivery(orderID int64, content string) (bool, error)
+	EnqueueDeliveredEvent(orderID int64) error
 	CompleteFreeOrder(orderID int64, paidAt int64) (int64, error)
 	CompleteFreeOrderManual(orderID int64, paidAt int64) error
 	CancelOrder(orderID int64) (string, bool, error)

@@ -251,8 +251,15 @@ func mailEventConsumer(notifier *notify.Notifier) func(platformevents.Event) {
 // mailOutboxConsumer 同步完成买家发卡通知，再允许 Outbox 确认事件。
 func mailOutboxConsumer(notifier *notify.Notifier) func(platformevents.Event) {
 	return func(e platformevents.Event) {
-		if ev, ok := e.(orderapp.OrderPaidEvent); ok && ev.Order.DeliveryType != productdomain.DeliveryTypeManual {
-			notifier.SendPaidSync(ev.Order, ev.Cards)
+		switch ev := e.(type) {
+		case orderapp.OrderPaidEvent:
+			if ev.Order.DeliveryType != productdomain.DeliveryTypeManual {
+				notifier.SendPaidSync(ev.Order, ev.Cards)
+			}
+		case orderapp.OrderDeliveredEvent:
+			if ev.Order.DeliveryType == productdomain.DeliveryTypeManual {
+				notifier.SendPaidSync(ev.Order, nil)
+			}
 		}
 	}
 }

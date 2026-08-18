@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	couponsqlite "shop/internal/modules/coupon/repository/sqlite"
+	inventorydomain "shop/internal/modules/inventory/domain"
 	inventorysqlite "shop/internal/modules/inventory/repository/sqlite"
 	"shop/internal/modules/order/domain"
+	productdomain "shop/internal/modules/product/domain"
 	db "shop/internal/platform/database/sqlite"
 	"shop/internal/shared/clock"
 )
@@ -152,6 +154,34 @@ func TestSetOrderStatusFromRequiresExpectedState(t *testing.T) {
 	}
 	if err := repo.SetOrderStatusFrom(o.ID, domain.OrderCreated, domain.OrderWaitingPayment); err != nil {
 		t.Fatalf("matching expected state rejected: %v", err)
+	}
+}
+
+func TestManualDeliveryEnqueuesDeliveredEventAtomically(t *testing.T) {
+	repo, d := openRepo(t)
+	repo.SetOutboxEncoder(func(o domain.Order, _ []inventorydomain.Card) ([]OutboxEvent, error) {
+		return []OutboxEvent{{Type: "order.delivered", Payload: o.DeliveryContent}}, nil
+	})
+	now := clock.Now()
+	o := &domain.Order{OrderNo: "S6", ProductID: 1, ProductName: "人工商品", Qty: 1, AmountCents: 1000,
+		Fiat: "CNY", TradeType: "usdt.trc20", DeliveryType: productdomain.DeliveryTypeManual,
+		Status: domain.OrderPendingDelivery, CreatedAt: now, UpdatedAt: now}
+	if _, err := d.Exec(`INSERT INTO orders(order_no, product_id, product_name, qty, amount_cents, fiat, trade_type, delivery_type, status, payment_status, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, o.OrderNo, o.ProductID, o.ProductName, o.Qty, o.AmountCents, o.Fiat, o.TradeType, o.DeliveryType, o.Status, domain.PaymentConfirmed, now, now); err != nil {
+		t.Fatalf("insert order: %v", err)
+	}
+	var id int64
+	_ = d.QueryRow(`SELECT id FROM orders WHERE order_no = ?`, o.OrderNo).Scan(&id)
+	ok, err := repo.SetManualDelivery(id, "账号：demo")
+	if err != nil || !ok {
+		t.Fatalf("manual delivery: ok=%v err=%v", ok, err)
+	}
+	var payload string
+	if err := d.QueryRow(`SELECT payload FROM outbox_events WHERE event_type = 'order.delivered'`).Scan(&payload); err != nil {
+		t.Fatalf("delivered outbox missing: %v", err)
+	}
+	if payload != "账号：demo" {
+		t.Fatalf("payload = %q, want delivery content", payload)
 	}
 }
 

@@ -258,6 +258,9 @@ func (s *OrderService) completeFreeOrder(order models.Order, discount, couponID 
 	if err := s.repo.SetOrderStatusFrom(order.ID, models.OrderPaid, models.OrderDelivered); err != nil {
 		return order.OrderNo, "", discount, couponID, err
 	}
+	if err := s.repo.EnqueueDeliveredEvent(order.ID); err != nil {
+		return order.OrderNo, "", discount, couponID, err
+	}
 	_ = s.repo.AddLog(order.ID, "delivered", "卡密已发放", models.OrderPaid, models.OrderDelivered, 0)
 	s.fireCreatedEvents(order)
 	// OrderPaid/OrderDelivered 事件由 CompleteFreeOrder 事务写入 outbox。

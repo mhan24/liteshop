@@ -38,6 +38,45 @@ func (r *OrderRepository) enqueueEventsTx(tx *sql.Tx, orderID int64) error {
 	return nil
 }
 
+func (r *OrderRepository) enqueueEventTypeTx(tx *sql.Tx, orderID int64, eventType string) error {
+	o, err := scanOrder(tx.QueryRow(`SELECT id, order_no, product_id, product_name, qty, amount_cents, cost_cents, fiat, trade_type, payment_gateway, buyer_contact, view_token, status, payment_status, trade_id, payment_url, block_transaction_id, delivery_type, delivery_content, created_at, updated_at, paid_at FROM orders WHERE id = ?`, orderID))
+	if err != nil {
+		return err
+	}
+	var cards []inventorydomain.Card
+	if r.cards != nil {
+		cards, err = r.cards.CardsByOrderTx(tx, orderID)
+		if err != nil {
+			return err
+		}
+	}
+	if r.encoder == nil {
+		return nil
+	}
+	events, err := r.encoder(o, cards)
+	if err != nil {
+		return err
+	}
+	for _, ev := range events {
+		if ev.Type == eventType {
+			return outbox.EnqueueOutboxTx(tx, ev.Type, ev.Payload)
+		}
+	}
+	return nil
+}
+
+func (r *OrderRepository) EnqueueDeliveredEvent(orderID int64) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := r.enqueueEventTypeTx(tx, orderID, "order.delivered"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ErrNoRows 数据不存在或无变更。
 var ErrNoRows = &NoRowsError{}
 
@@ -89,7 +128,7 @@ func (r *OrderRepository) MarkPaidAndDeliver(orderID int64, gateway, tradeID, bl
 	if err != nil {
 		return 0, err
 	}
-	if err := r.enqueueEventsTx(tx, orderID); err != nil {
+	if err := r.enqueueEventTypeTx(tx, orderID, "order.paid"); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -122,7 +161,7 @@ func (r *OrderRepository) MarkPaidPendingDelivery(orderID int64, gateway, tradeI
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return ErrNoRows
 	}
-	if err := r.enqueueEventsTx(tx, orderID); err != nil {
+	if err := r.enqueueEventTypeTx(tx, orderID, "order.paid"); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -138,12 +177,23 @@ func gatewayPrefix(gateway string) string {
 
 // SetManualDelivery 人工发货：pending_delivery → delivered，并保存发货内容。
 func (r *OrderRepository) SetManualDelivery(orderID int64, content string) (bool, error) {
-	res, err := r.db.Exec(`UPDATE orders SET status = 'delivered', delivery_content = ?, updated_at = ? WHERE id = ? AND status = 'pending_delivery'`, content, clock.Now(), orderID)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE orders SET status = 'delivered', delivery_content = ?, updated_at = ? WHERE id = ? AND status = 'pending_delivery'`, content, clock.Now(), orderID)
 	if err != nil {
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil || n == 0 {
+		return n > 0, err
+	}
+	if err := r.enqueueEventTypeTx(tx, orderID, "order.delivered"); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // CompleteFreeOrder 零金额订单（100% 折扣券）直接完成：created → paid 并发卡（单事务）。
@@ -168,7 +218,7 @@ func (r *OrderRepository) CompleteFreeOrder(orderID int64, paidAt int64) (int64,
 	if err != nil {
 		return 0, err
 	}
-	if err := r.enqueueEventsTx(tx, orderID); err != nil {
+	if err := r.enqueueEventTypeTx(tx, orderID, "order.paid"); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -191,7 +241,7 @@ func (r *OrderRepository) CompleteFreeOrderManual(orderID int64, paidAt int64) e
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return ErrNoRows
 	}
-	if err := r.enqueueEventsTx(tx, orderID); err != nil {
+	if err := r.enqueueEventTypeTx(tx, orderID, "order.paid"); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -93,7 +93,7 @@ func NewHandler(ctx context.Context, cfg config.Config, database *sql.DB) (http.
 			return nil, err
 		}
 		evs := []ordersqlite.OutboxEvent{{Type: "order.paid", Payload: paid}}
-		if o.DeliveryType != productdomain.DeliveryTypeManual {
+		if o.DeliveryType != productdomain.DeliveryTypeManual || o.Status == orderdomain.OrderDelivered {
 			delivered, err := orderapp.EncodeEvent(orderapp.OrderDeliveredEvent{Order: o, Cards: cards})
 			if err != nil {
 				return nil, err
