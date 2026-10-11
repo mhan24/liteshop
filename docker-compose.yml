@@ -1,0 +1,22 @@
+services:
+  liteshop:
+    build: .
+    restart: unless-stopped
+    ports:
+      # 仅本机回环调试；对外统一走 Caddy（80/443），避免绕过 TLS
+      - "127.0.0.1:${PORT:-3000}:3000"
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+    volumes:
+      - liteshop-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # 注意：SQLite 单写者，禁止水平扩容（deploy.replicas / scale 必须为 1）
+
+volumes:
+  liteshop-data:

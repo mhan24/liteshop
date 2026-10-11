@@ -1,0 +1,130 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { StatusBadge } from "@/components/admin/status-badge";
+
+interface OrderStatusPayload {
+  orderNo: string;
+  status: string;
+  statusLabel: string;
+  productName: string;
+  quantity: number;
+  total: string;
+  emailMasked: string;
+}
+
+/** 回跳页状态轮询：2s 间隔，completed/expired/closed 停止 */
+export function OrderStatusPoll({
+  orderNo,
+  initial,
+}: {
+  orderNo: string;
+  initial: OrderStatusPayload | null;
+}) {
+  const [order, setOrder] = useState<OrderStatusPayload | null>(initial);
+  const [notFound, setNotFound] = useState(!initial);
+
+  useEffect(() => {
+    if (!orderNo) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/orders/status?order_no=${encodeURIComponent(orderNo)}`);
+        if (res.ok) {
+          const json = (await res.json()) as { ok: boolean; order?: OrderStatusPayload };
+          if (json.ok && json.order) {
+            setOrder(json.order);
+            setNotFound(false);
+            if (!["pending", "paid", "delivering"].includes(json.order.status)) return; // 终态停轮询
+          }
+        } else if (res.status === 404) {
+          setNotFound(true);
+          return;
+        }
+      } catch {
+        // 网络抖动继续重试
+      }
+      if (!stopped) timer = setTimeout(tick, 2000);
+    };
+    tick();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [orderNo]);
+
+  if (notFound) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-10 text-center">
+        <p className="font-serif text-xl">没有找到订单</p>
+        <p className="mt-2 text-sm text-muted-foreground">请检查订单号是否正确</p>
+      </div>
+    );
+  }
+  if (!order) return null;
+
+  const done = ["completed", "expired", "closed"].includes(order.status);
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-8">
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="font-serif text-2xl tracking-tight">订单状态</h1>
+        <StatusBadge status={order.status} label={order.statusLabel} />
+      </div>
+      <dl className="mt-6 space-y-3 text-sm">
+        <Row label="订单号">
+          <span className="font-mono text-xs">{order.orderNo}</span>
+        </Row>
+        <Row label="商品">
+          {order.productName} × {order.quantity}
+        </Row>
+        <Row label="金额">
+          <span className="font-mono">{order.total}</span>
+        </Row>
+        <Row label="邮箱">{order.emailMasked}</Row>
+      </dl>
+
+      <div className="mt-6 rounded-lg bg-secondary p-4 text-sm leading-relaxed">
+        {order.status === "completed" ? (
+          <>
+            支付已确认，商品已交付。前往
+            <a href="/orders" className="mx-1 font-medium underline underline-offset-4">
+              订单查询
+            </a>
+            ，凭订单号和邮箱查看卡密 / 交付内容。
+          </>
+        ) : order.status === "pending" ? (
+          <>等待支付确认中，本页会自动刷新；支付完成后请勿关闭。</>
+        ) : order.status === "paid" ? (
+          <>支付已到账，订单处理中，请稍后回到本页或前往订单查询。</>
+        ) : order.status === "delivering" ? (
+          <>支付已到账，正在为你发货；如卡密紧张可能稍有延迟。</>
+        ) : order.status === "expired" ? (
+          <>订单已超时未支付。如已付款请联系客服核实。</>
+        ) : (
+          <>订单已关闭。如已付款请联系客服核实。</>
+        )}
+      </div>
+
+      {done ? (
+        <a
+          href="/orders"
+          className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-md bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-[#333333] active:scale-[0.98]"
+        >
+          前往订单查询取货
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-right">{children}</dd>
+    </div>
+  );
+}

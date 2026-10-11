@@ -1,0 +1,19 @@
+{$DOMAIN} {
+	# 反向代理到 liteshop（同 compose 网络）
+	reverse_proxy liteshop:3000
+
+	# 安全响应头
+	header {
+		X-Frame-Options DENY
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# 回调与 API 不缓存
+	@api path /api/*
+	header @api Cache-Control "no-store"
+
+	# 压缩
+	encode zstd gzip
+}
