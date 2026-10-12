@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useActionState } from "react";
+import { useEffect, useState, useActionState } from "react";
+import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -233,20 +234,21 @@ function RepurchaseOrder({ orderNo, productSlug }: { orderNo: string; productSlu
     null
   );
   const [asking, setAsking] = useState(false);
-  const openedRef = useRef(false);
+  const router = useRouter();
 
+  // 与普通下单保持一致：先跳到新的「待支付页」，由买家点击按钮再打开收银台。
+  // 好处：① 不会触发浏览器弹窗拦截；② 买家能看到并保存新的订单号。
   useEffect(() => {
-    if (state?.ok && state.paymentUrl && !openedRef.current) {
-      openedRef.current = true;
-      openPaymentWindow(toAbsoluteUrl(state.paymentUrl));
+    if (state?.ok && state.orderNo) {
+      router.push(`/pay/pending?order_no=${encodeURIComponent(state.orderNo)}`);
     }
-  }, [state]);
+  }, [state, router]);
 
   if (state?.ok) {
     return (
       <div className="mt-4 rounded-lg border border-border p-4 text-sm">
         <p className="text-muted-foreground">
-          {state.message}（新订单号 {state.orderNo}），正在前往收银台…
+          {state.message}（新订单号 {state.orderNo}），正在跳转…
         </p>
       </div>
     );

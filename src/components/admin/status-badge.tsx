@@ -1,9 +1,18 @@
 import { cn } from "@/lib/utils";
 
-export type OrderStatusKey = "pending" | "paid" | "delivering" | "completed" | "expired" | "closed";
+export type OrderStatusKey =
+  | "pending"
+  | "reconciling"
+  | "paid"
+  | "delivering"
+  | "completed"
+  | "expired"
+  | "closed";
 
 const STYLES: Record<OrderStatusKey, string> = {
   pending: "bg-pastel-yellow-bg text-pastel-yellow-text",
+  // 待对账属异常态，用醒目色提示需要人工核对网关
+  reconciling: "bg-pastel-red-bg text-pastel-red-text",
   paid: "bg-pastel-blue-bg text-pastel-blue-text",
   delivering: "bg-pastel-blue-bg text-pastel-blue-text",
   completed: "bg-pastel-green-bg text-pastel-green-text",
@@ -13,6 +22,7 @@ const STYLES: Record<OrderStatusKey, string> = {
 
 const LABELS: Record<OrderStatusKey, string> = {
   pending: "待支付",
+  reconciling: "待对账",
   paid: "待处理",
   delivering: "发货中",
   completed: "已完成",

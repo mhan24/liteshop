@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { manualDeliverAction, retryDeliveryAction, closeOrderAction } from "@/actions/admin";
+import {
+  manualDeliverAction,
+  retryDeliveryAction,
+  closeOrderAction,
+  resolveReconcilingAction,
+} from "@/actions/admin";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,6 +36,8 @@ export function OrderRowActions({
   const canManualDeliver = status === "paid" || status === "delivering";
   const canRetry = status === "delivering" && deliveryType === "auto";
   const canClose = status === "pending" || status === "paid" || status === "delivering" || status === "expired";
+  // 待对账订单需人工核对网关后再决定是否释放库存（不得自动超时释放）
+  const canResolveReconciling = status === "reconciling";
 
   return (
     <div className="flex items-center justify-end gap-1">
@@ -77,6 +84,21 @@ export function OrderRowActions({
           <input type="hidden" name="orderNo" value={orderNo} />
           <Button type="submit" variant="outline" size="sm">
             重试发货
+          </Button>
+        </form>
+      ) : null}
+
+      {canResolveReconciling ? (
+        <form action={resolveReconcilingAction}>
+          <input type="hidden" name="csrf" value={csrf} />
+          <input type="hidden" name="orderNo" value={orderNo} />
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            title="已核对 bepusdt 后台，确认该交易不存在，可释放库存"
+          >
+            确认未建单
           </Button>
         </form>
       ) : null}

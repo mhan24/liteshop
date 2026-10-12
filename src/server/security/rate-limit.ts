@@ -178,3 +178,18 @@ export function resetNotifyRejectStats(): void {
   notifyRejects.byIp.clear();
   notifyRejects.lastAt = 0;
 }
+
+/* ================= 重新购买限制 ================= */
+
+/**
+ * 同一原订单在窗口内可创建的新订单数上限。
+ *
+ * 即使经过统一的人机验证与频率限制，仍应给单个原订单设独立配额：
+ * 它把"一个订单反复重购"的影响面收敛到常数级，
+ * 避免攻击者用少量原订单持续占用库存。
+ */
+export const REPURCHASE_RULE: RateLimitRule = { windowMs: 600_000, max: 3 };
+
+export function checkRepurchaseLimit(sourceOrderNo: string, ip: string): RateLimitResult {
+  return consume(`repurchase:${sourceOrderNo}:${ip}`, REPURCHASE_RULE);
+}

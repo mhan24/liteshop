@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
 import { notifyLogs, orders, paymentAttempts, products } from "@/db/schema";
 import type { Order, OrderStatus } from "@/db/schema";
@@ -416,4 +416,50 @@ export function cancelPendingOrder(orderNo: string, email: string): AdminOpResul
     },
     { behavior: "immediate" }
   );
+}
+
+/* ================= 待对账订单处理（人工出口） ================= */
+
+/**
+ * 确认网关**未创建**该交易 → 关闭订单并释放库存。
+ *
+ * 这是 reconciling 订单释放库存的**唯一**安全途径：必须由人工核对
+ * bepusdt 后台后调用。仅凭本地倒计时释放是不允许的，因为创建响应丢失时
+ * 网关可能已经建单，其支付地址仍然有效——贸然释放会导致买家付款后无法履约。
+ */
+export function resolveReconcilingAsNotCreated(orderNo: string): AdminOpResult {
+  return db.transaction(
+    (tx) => {
+      const order = tx.select().from(orders).where(eq(orders.orderNo, orderNo)).get() as
+        | Order
+        | undefined;
+      if (!order) return { ok: false, message: "订单不存在" };
+      if (order.status !== "reconciling") {
+        return { ok: false, message: `订单状态为 ${order.status}，无需此操作` };
+      }
+      const product = order.productId
+        ? tx.select().from(products).where(eq(products.id, order.productId)).get()
+        : null;
+      if (product) {
+        getDeliveryStrategy(product.deliveryType).release(tx, order, product);
+      }
+      assertTransition("reconciling", "closed");
+      tx.update(orders)
+        .set({ status: "closed" as OrderStatus, updatedAt: new Date() })
+        .where(eq(orders.id, order.id))
+        .run();
+      return { ok: true, message: "已确认网关未建单，订单关闭并释放库存" };
+    },
+    { behavior: "immediate" }
+  );
+}
+
+/** 待对账订单数量（后台告警用） */
+export function countReconciling(): number {
+  const row = db
+    .select({ c: sql<number>`count(*)` })
+    .from(orders)
+    .where(eq(orders.status, "reconciling"))
+    .get();
+  return row?.c ?? 0;
 }

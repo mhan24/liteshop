@@ -21,6 +21,32 @@ function seedAuto(contents: string[]) {
 
 const getOrder = (no: string) => db.select().from(orders).where(eq(orders.orderNo, no)).get()!;
 
+/**
+ * 模拟一次「重新发起支付」（生产路径已改为重新下单，
+ * 但支付尝试模型本身仍需在多尝试场景下被验证）。
+ */
+async function simulateNewAttempt(orderNo: string): Promise<string> {
+  const { createAttempt } = await import("@/server/payment/attempts");
+  const freshTrade = `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  db.transaction(
+    (tx) => {
+      tx.update(orders)
+        .set({ tradeId: freshTrade, paymentUrl: "/pay/mock?x=1", expirationTime: new Date(Date.now() + 900_000), updatedAt: new Date() })
+        .where(eq(orders.orderNo, orderNo))
+        .run();
+      createAttempt(tx, {
+        orderNo, provider: "mock", tradeId: freshTrade,
+        amountCents: getOrder(orderNo).totalCents, currency: getOrder(orderNo).currency,
+        paymentUrl: "/pay/mock?x=1", expectedActualAmount: null,
+        expirationTime: new Date(Date.now() + 900_000), raw: null,
+      });
+    },
+    { behavior: "immediate" }
+  );
+  return freshTrade;
+}
+
+
 /** 按商品统计指定状态的卡密（测试同文件共享 DB，必须限定 productId） */
 const cardsOf = (productId: number, status: string) =>
   db.select().from(cards).where(and(eq(cards.productId, productId), eq(cards.status, status))).all();
@@ -150,10 +176,7 @@ describe("P0 回归：重新支付后旧交易的延迟回调不得误关订单"
       .set({ expirationTime: new Date(Date.now() - 60_000), paymentUrl: null })
       .where(eq(orders.orderNo, r.orderNo))
       .run();
-    const { resumeOrderPayment } = await import("./create-order");
-    const resumed = await resumeOrderPayment(r.orderNo);
-    expect(resumed.ok).toBe(true);
-    const newTrade = getOrder(r.orderNo).tradeId!;
+    const newTrade = await simulateNewAttempt(r.orderNo);
     expect(newTrade).not.toBe(oldTrade);
 
     // 旧交易的延迟超时回调到达（status=3）
@@ -182,8 +205,7 @@ describe("P0 回归：重新支付后旧交易的延迟回调不得误关订单"
     const oldTrade = getOrder(r.orderNo).tradeId!;
     db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000), paymentUrl: null })
       .where(eq(orders.orderNo, r.orderNo)).run();
-    const { resumeOrderPayment } = await import("./create-order");
-    await resumeOrderPayment(r.orderNo);
+    await simulateNewAttempt(r.orderNo);
 
     const res = handlePaymentNotify("mock", buildMockNotifyBody({
       orderNo: r.orderNo, tradeId: oldTrade,
@@ -197,13 +219,12 @@ describe("P0 回归：重新支付后旧交易的延迟回调不得误关订单"
   it("多次重新支付仅保留一个当前尝试，历史尝试可追溯", async () => {
     const p = seedAuto(["C1"]);
     const r = await createOrder({ email: "a@test.dev", quantity: 1, slug: p.slug });
-    const { resumeOrderPayment } = await import("./create-order");
     const { listAttempts, getCurrentAttempt } = await import("@/server/payment/attempts");
 
     for (let i = 0; i < 3; i++) {
       db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000), paymentUrl: null })
         .where(eq(orders.orderNo, r.orderNo)).run();
-      await resumeOrderPayment(r.orderNo);
+      await simulateNewAttempt(r.orderNo);
     }
 
     const all = listAttempts(r.orderNo);

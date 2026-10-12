@@ -11,6 +11,7 @@ import { expireOrderIfOverdue } from "./expire-orders";
 
 export const STATUS_LABELS: Record<OrderStatus, string> = {
   pending: "待支付",
+  reconciling: "待对账",
   paid: "已支付 · 处理中",
   delivering: "发货中",
   completed: "已完成",

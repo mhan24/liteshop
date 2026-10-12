@@ -5,7 +5,11 @@ import type { OrderStatus } from "@/db/schema";
  * pending --支付成功--> paid --自动发货中--> delivering --交付--> completed
  */
 const ALLOWED: Record<OrderStatus, readonly OrderStatus[]> = {
-  pending: ["paid", "expired", "closed"],
+  pending: ["paid", "expired", "closed", "reconciling"],
+  // reconciling：结果未知。经确认网关未建单 → closed（此时才释放库存）；
+  // 若确认已建单且到账 → paid（正常履约）。不允许直接 expired，
+  // 避免「只因为本地倒计时结束」就释放可能已在网关生效的库存。
+  reconciling: ["closed", "paid"],
   paid: ["delivering", "completed", "closed"],
   delivering: ["completed", "closed"],
   completed: [],

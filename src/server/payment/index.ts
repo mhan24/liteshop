@@ -62,6 +62,29 @@ export class PaymentError extends Error {
   }
 }
 
+/**
+ * 支付创建的结果分类。
+ *
+ * - confirmed：网关明确返回了交易（拿到了 trade_id）
+ * - rejected ：网关**明确拒绝**（业务参数错误、鉴权失败等）——确定没有建单
+ * - unknown  ：结果未知（超时、连接中断、5xx）——**可能已经建单**
+ *
+ * 这个区分直接决定能否安全释放库存：只有 rejected 才能关单回补；
+ * unknown 必须保留订单并对账，否则会出现「网关有支付地址、商店已释放卡密」，
+ * 买家付款后无法履约（资损）。
+ */
+export type PaymentCreationOutcome = "confirmed" | "rejected" | "unknown";
+
+/** 带结果分类的支付创建错误，供上层决定补偿策略 */
+export class PaymentCreationError extends Error {
+  readonly outcome: Exclude<PaymentCreationOutcome, "confirmed">;
+  constructor(outcome: Exclude<PaymentCreationOutcome, "confirmed">, message: string) {
+    super(message);
+    this.name = "PaymentCreationError";
+    this.outcome = outcome;
+  }
+}
+
 const KNOWN_PROVIDERS = ["mock", "bepusdt"] as const;
 
 /**

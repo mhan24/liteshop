@@ -16,6 +16,12 @@ export type DeliveryType = (typeof DeliveryType)[keyof typeof DeliveryType];
 
 export const OrderStatus = {
   pending: "pending",
+  /**
+   * 支付创建结果未知（超时/5xx）：网关可能已建单，也可能没有。
+   * 此状态**不会**被超时清扫自动释放库存——必须经人工或查询网关确认
+   * 交易确实不存在后才能关单，否则会出现「网关有支付地址、商店已释放卡密」。
+   */
+  reconciling: "reconciling",
   paid: "paid",
   delivering: "delivering",
   completed: "completed",

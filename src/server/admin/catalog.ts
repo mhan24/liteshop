@@ -274,6 +274,8 @@ export function clearAvailableCards(productId: number): number {
 
 export interface DashboardStats {
   todayOrders: number;
+  /** 待对账订单：结果未知，需人工核对网关后再决定是否释放库存 */
+  reconciling: number;
   /** 按币种分组的今日营收（禁止跨币种直接相加） */
   todayRevenue: CurrencyRevenue[];
   totalOrders: number;
@@ -339,6 +341,7 @@ export function getDashboardStats(threshold: number): DashboardStats {
 
   return {
     todayOrders: todayOrderCount,
+    reconciling: countReconcilingOrders(),
     todayRevenue: today,
     totalOrders: totalOrderCount,
     totalRevenue: total,
@@ -387,7 +390,12 @@ export function listOrdersForAdmin(opts: {
 }): AdminOrderRow[] {
   const limit = Math.min(opts.limit ?? 100, 500);
   const conds = [];
-  if (opts.status && ["pending", "paid", "delivering", "completed", "expired", "closed"].includes(opts.status)) {
+  if (
+    opts.status &&
+    ["pending", "reconciling", "paid", "delivering", "completed", "expired", "closed"].includes(
+      opts.status
+    )
+  ) {
     conds.push(eq(orders.status, opts.status));
   }
   const q = opts.q?.trim();
@@ -422,4 +430,15 @@ export function listOrdersForAdmin(opts: {
     .limit(limit)
     .all();
   return rows.map((r) => ({ ...r, deliveryType: r.deliveryType ?? "auto" }));
+}
+
+/** 待对账订单数（结果未知，需人工核对网关） */
+export function countReconcilingOrders(): number {
+  return (
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(orders)
+      .where(eq(orders.status, "reconciling"))
+      .get()?.c ?? 0
+  );
 }

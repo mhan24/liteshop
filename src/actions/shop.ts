@@ -6,8 +6,9 @@ import { lookupOrder, type PublicOrderView } from "@/server/order/query-order";
 import { cancelPendingOrder } from "@/server/order/fulfill-order";
 import { getTurnstileSecretKey, isTurnstileEnforced } from "@/server/settings";
 import { verifyTurnstileToken } from "@/lib/turnstile";
-import { checkOrderRateLimit } from "@/server/security/rate-limit";
-import { headers } from "next/headers";
+import { checkRepurchaseLimit } from "@/server/security/rate-limit";
+import { guardOrderCreation } from "@/server/security/order-guard";
+
 
 /** 前台下单 Action（游客模式）：成功后由客户端跳转支付收银台 */
 
@@ -35,14 +36,9 @@ export async function createOrderAction(
     }
   }
 
-  // 限流：Turnstile 关闭时这是唯一的下单频率防线。
-  // 不加限制时，脚本可批量创建待支付订单把在售卡密全部锁定（拒绝服务）。
-  const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip") ?? "-";
-  const limited = checkOrderRateLimit(ip, email);
-  if (!limited.ok) {
-    return { error: limited.message ?? "操作过于频繁，请稍后再试" };
-  }
+  // 统一入口防护（人机验证 + 频率限制）——与「重新购买」共用同一套检查
+  const guard = await guardOrderCreation(formData, email);
+  if (!guard.ok) return { error: guard.error };
 
   try {
     const result: CreateOrderResult = await createOrder({ slug, email, quantity, note });
@@ -149,9 +145,20 @@ export async function repurchaseOrderAction(
     return { error: "请填写订单号与下单邮箱" };
   }
 
+  // 统一入口防护：重新购买同样会真实占用库存，必须与正常下单同等防护，
+  // 否则可凭一笔过期订单反复建单刷空库存（历史缺陷）。
+  const guard = await guardOrderCreation(formData, email);
+  if (!guard.ok) return { error: guard.error };
+
   // 双因子确认归属（lookupOrder 会顺带把超时订单惰性置为 expired）
   const view = lookupOrder(orderNo, email);
   if (!view) return { error: "订单号与邮箱不匹配" };
+
+  // 同一原订单的独立配额，收敛重购影响面
+  const quota = checkRepurchaseLimit(orderNo, guard.ip ?? "-");
+  if (!quota.ok) {
+    return { error: quota.message ?? "该订单重新购买次数过多，请稍后再试" };
+  }
 
   if (view.status === "completed" || view.status === "paid" || view.status === "delivering") {
     return { error: "该订单已支付，无需重新购买" };

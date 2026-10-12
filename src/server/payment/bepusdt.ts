@@ -1,5 +1,6 @@
 import { minorUnitsToNumber } from "@/lib/money";
 import { epusdtSign, epusdtVerify, parseJsonObject } from "@/lib/signature";
+import { PaymentCreationError } from "./index";
 import type {
   CreatePaymentInput,
   CreatedPayment,
@@ -127,12 +128,30 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
         signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) {
-        throw new Error(`bepusdt 创建订单 HTTP ${res.status}`);
+        // 5xx 表示网关**可能已经建单**（例如写完库后返回失败、或前置代理报错），
+        // 因此归为 unknown：不得据此关单释放库存。
+        // 4xx 是明确的请求侧拒绝（参数/鉴权），可以安全判定为未建单。
+        const outcome = res.status >= 500 ? "unknown" : "rejected";
+        throw new PaymentCreationError(
+          outcome,
+          `bepusdt 创建订单 HTTP ${res.status}`
+        );
       }
-      const json = (await res.json()) as CreateOrderResponse;
+      let json: CreateOrderResponse;
+      try {
+        json = (await res.json()) as CreateOrderResponse;
+      } catch {
+        // 响应体无法解析：网关可能已建单，但回包损坏 → unknown
+        throw new PaymentCreationError("unknown", "bepusdt 创建订单响应无法解析");
+      }
       const data = json.data;
       if (!data?.trade_id || !data.payment_url) {
-        throw new Error(`bepusdt 创建订单失败: ${json.message ?? JSON.stringify(json).slice(0, 200)}`);
+        // 网关明确回了一个「业务失败」结构（有 status_code/message），
+        // 视为 rejected：它没有给出交易号，即未建单。
+        throw new PaymentCreationError(
+          "rejected",
+          `bepusdt 创建订单失败: ${json.message ?? JSON.stringify(json).slice(0, 200)}`
+        );
       }
       // 注意：bepusdt 的 expiration_time 是「剩余有效期（秒）」，不是 Unix 时间戳。
       // 网关源码 app/handler/epusdt/epusdt.go：

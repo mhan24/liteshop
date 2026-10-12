@@ -24,7 +24,12 @@ import {
   setProductStatus,
   updateProduct,
 } from "@/server/admin/catalog";
-import { closeOrder, manualDeliver, retryAutoDelivery } from "@/server/order/fulfill-order";
+import {
+  closeOrder,
+  manualDeliver,
+  retryAutoDelivery,
+  resolveReconcilingAsNotCreated,
+} from "@/server/order/fulfill-order";
 import { sendOrderEmail, sendTestEmail } from "@/server/mail";
 import { getPaymentConfig, getSetting, setSetting, upsertPaymentConfig, SETTING_KEYS } from "@/server/settings";
 import { clampBepusdtTimeout } from "@/server/payment/bepusdt";
@@ -234,6 +239,20 @@ export async function closeOrderAction(formData: FormData) {
   const orderNo = String(formData.get("orderNo") ?? "");
   const result = closeOrder(orderNo);
   logAdmin("order.close", orderNo, result.message, await clientIp(), session.u);
+  revalidatePath("/admin/orders");
+  await back("/admin/orders", result.message, result.ok);
+}
+
+/**
+ * 待对账订单：确认网关**未建单** → 关闭并释放库存。
+ * 这是 reconciling 状态释放库存的唯一安全途径（需人工核对网关后台）。
+ */
+export async function resolveReconcilingAction(formData: FormData) {
+  const session = await requireSession();
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
+  const orderNo = String(formData.get("orderNo") ?? "");
+  const result = resolveReconcilingAsNotCreated(orderNo);
+  logAdmin("order.reconcile", orderNo, result.message, await clientIp(), session.u);
   revalidatePath("/admin/orders");
   await back("/admin/orders", result.message, result.ok);
 }

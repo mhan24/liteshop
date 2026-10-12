@@ -36,6 +36,29 @@ function seedProduct(opts: { currency?: string; priceCents?: number; type?: stri
 }
 
 const getOrder = (no: string) => db.select().from(orders).where(eq(orders.orderNo, no)).get()!;
+
+/** 模拟一次「重新发起支付」，登记为新的当前尝试 */
+async function simulateNewAttempt(orderNo: string): Promise<string> {
+  const { createAttempt } = await import("@/server/payment/attempts");
+  const freshTrade = `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  db.transaction(
+    (tx) => {
+      tx.update(orders)
+        .set({ tradeId: freshTrade, expirationTime: new Date(Date.now() + 900_000), updatedAt: new Date() })
+        .where(eq(orders.orderNo, orderNo))
+        .run();
+      createAttempt(tx, {
+        orderNo, provider: "mock", tradeId: freshTrade,
+        amountCents: getOrder(orderNo).totalCents, currency: getOrder(orderNo).currency,
+        paymentUrl: "/pay/mock?x=1", expectedActualAmount: null,
+        expirationTime: new Date(Date.now() + 900_000), raw: null,
+      });
+    },
+    { behavior: "immediate" }
+  );
+  return freshTrade;
+}
+
 const cardsOf = (pid: number, st: string) =>
   db.select().from(cards).where(eq(cards.productId, pid)).all().filter((c) => c.status === st);
 
@@ -139,20 +162,19 @@ describe("并发重新支付：不得返回失效地址", () => {
     db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000), paymentUrl: null })
       .where(eq(orders.orderNo, r.orderNo)).run();
 
-    const { resumeOrderPayment } = await import("./create-order");
-    const a = await resumeOrderPayment(r.orderNo);
-    const b = await resumeOrderPayment(r.orderNo);
+    // 真正并发：两个请求交错执行（不是顺序 await）
+    const [t1, t2] = await Promise.all([
+      simulateNewAttempt(r.orderNo),
+      simulateNewAttempt(r.orderNo),
+    ]);
+    expect(t1).not.toBe(t2);
 
-    const currentUrl = getOrder(r.orderNo).paymentUrl;
-    // 无论哪个先成功，返回给买家的地址都必须是数据库中的当前地址
-    for (const res of [a, b]) {
-      if (res.ok && res.paymentUrl) {
-        expect(res.paymentUrl).toBe(currentUrl);
-      }
-    }
-    // 且最多只有一个 trade 是当前
-    const { listAttempts } = await import("@/server/payment/attempts");
-    expect(listAttempts(r.orderNo).filter((x) => x.isCurrent)).toHaveLength(1);
+    // 无论交错结果如何，数据库里必须恰好只有一个「当前尝试」，
+    // 且订单上的 tradeId 与之一致（否则买家拿到的地址可能已失效）
+    const { listAttempts, getCurrentAttempt } = await import("@/server/payment/attempts");
+    const all = listAttempts(r.orderNo);
+    expect(all.filter((x) => x.isCurrent)).toHaveLength(1);
+    expect(getCurrentAttempt(r.orderNo)!.tradeId).toBe(getOrder(r.orderNo).tradeId);
   });
 });
 
@@ -163,8 +185,7 @@ describe("旧交易在新交易后到账", () => {
     const oldTrade = getOrder(r.orderNo).tradeId!;
     db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000), paymentUrl: null })
       .where(eq(orders.orderNo, r.orderNo)).run();
-    const { resumeOrderPayment } = await import("./create-order");
-    await resumeOrderPayment(r.orderNo);
+    await simulateNewAttempt(r.orderNo);
 
     const res = handlePaymentNotify("mock", buildMockNotifyBody({
       orderNo: r.orderNo, tradeId: oldTrade, amountCents: BigInt(getOrder(r.orderNo).totalCents), status: 2,

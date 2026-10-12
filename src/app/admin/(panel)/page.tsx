@@ -43,6 +43,13 @@ export default async function AdminDashboardPage({
             <CardTitle className="text-base">待处理</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
+            {stats.reconciling > 0 ? (
+              <Row
+                label="⚠ 待对账（结果未知，需核对网关）"
+                value={stats.reconciling}
+                href={`${base}/orders?status=reconciling`}
+              />
+            ) : null}
             <Row
               label="待人工发货（已支付）"
               value={stats.pendingManual}
