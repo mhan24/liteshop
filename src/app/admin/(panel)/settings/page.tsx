@@ -10,6 +10,7 @@ import {
   sendTestEmailAction,
 } from "@/actions/admin";
 import { getAdminCredentials } from "@/server/auth";
+import { DEFAULT_REPO_URL } from "@/server/settings";
 import { getAdminPath } from "@/lib/admin-path";
 import { COPY_FIELDS, getCopyAll } from "@/server/copy";
 import { takeFlash } from "@/lib/flash-store";
@@ -77,6 +78,19 @@ export default async function AdminSettingsPage({
             <div className="space-y-1.5">
               <Label htmlFor="s-currency">默认币种（全站统一）</Label>
               <CurrencySelect name="currency" id="s-currency" defaultValue={siteCurrency} />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="s-repo">开源仓库地址</Label>
+              <Input
+                id="s-repo"
+                name="repoUrl"
+                defaultValue={settings[SETTING_KEYS.repoUrl] ?? DEFAULT_REPO_URL}
+                placeholder={DEFAULT_REPO_URL}
+              />
+              <p className="text-xs text-muted-foreground">
+                页脚「Powered by liteshop」将链接到此地址（新窗口打开）。
+                留空则不显示链接；仅接受 http/https 地址。
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="s-threshold">卡密低库存阈值</Label>

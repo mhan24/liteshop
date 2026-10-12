@@ -11,7 +11,15 @@ export const SETTING_KEYS = {
   siteUrl: "site_url",
   cardLowStockThreshold: "card_low_stock_threshold",
   currency: "currency",
+  /** 页脚「Powered by liteshop」指向的开源仓库地址 */
+  repoUrl: "repo_url",
 } as const;
+
+/**
+ * 页脚仓库链接的默认地址。
+ * 可通过后台「站点设置 → 开源仓库地址」覆盖；留空表示不显示链接。
+ */
+export const DEFAULT_REPO_URL = "https://github.com/mhan24/liteshop";
 
 export function getAllSettings(): Record<string, string> {
   const rows = db.select().from(settings).all();
@@ -46,6 +54,31 @@ export function getSiteUrl(): string {
   const fromDb = getSetting(SETTING_KEYS.siteUrl)?.trim();
   const raw = fromDb && fromDb !== "" ? fromDb : envConfig.siteUrl;
   return raw.replace(/\/+$/, "");
+}
+
+/**
+ * 页脚仓库地址。返回 null 表示不渲染链接。
+ *
+ * 该值会作为 <a href> 输出，因此必须严格校验为 http(s) 绝对地址：
+ * 放任 javascript: / data: 等协议会形成 XSS（点击即执行）。
+ * 校验失败时回落默认值，而不是把可疑值渲染出去。
+ */
+export function getRepoUrl(): string | null {
+  const raw = getSetting(SETTING_KEYS.repoUrl)?.trim();
+  // 显式留空（设置为 ""）视为「不显示」；未设置（null）则用默认值
+  if (raw === "") return null;
+  const candidate = raw && raw !== "" ? raw : DEFAULT_REPO_URL;
+  return isSafeHttpUrl(candidate) ? candidate : DEFAULT_REPO_URL;
+}
+
+/** 仅接受 http/https 绝对地址（用于任何会输出为链接的设置项） */
+export function isSafeHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /**

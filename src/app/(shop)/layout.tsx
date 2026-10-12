@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { getSiteName } from "@/server/settings";
+import { getRepoUrl, getSiteName } from "@/server/settings";
 import { getCopy } from "@/server/copy";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -15,6 +15,7 @@ export async function generateMetadata(): Promise<Metadata> {
 export default function ShopLayout({ children }: { children: React.ReactNode }) {
   const siteName = getSiteName();
   const footerPowered = getCopy("footer_powered");
+  const repoUrl = getRepoUrl();
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background">
       <header className="border-b border-border">
@@ -39,7 +40,19 @@ export default function ShopLayout({ children }: { children: React.ReactNode }) 
       <footer className="border-t border-border">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 text-xs text-muted-foreground">
           <span>{siteName}</span>
-          <span className="font-mono">{footerPowered}</span>
+          {repoUrl ? (
+            // 新窗口打开仓库；rel="noreferrer" 防止把本站地址带给对方
+            <a
+              href={repoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono transition-colors hover:text-foreground hover:underline underline-offset-4"
+            >
+              {footerPowered}
+            </a>
+          ) : (
+            <span className="font-mono">{footerPowered}</span>
+          )}
         </div>
       </footer>
     </div>

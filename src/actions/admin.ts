@@ -31,7 +31,14 @@ import {
   resolveReconcilingAsNotCreated,
 } from "@/server/order/fulfill-order";
 import { sendOrderEmail, sendTestEmail } from "@/server/mail";
-import { getPaymentConfig, getSetting, setSetting, upsertPaymentConfig, SETTING_KEYS } from "@/server/settings";
+import {
+  getPaymentConfig,
+  getSetting,
+  isSafeHttpUrl,
+  setSetting,
+  upsertPaymentConfig,
+  SETTING_KEYS,
+} from "@/server/settings";
 import {
   reissueAnomaly,
   acceptAnomalyForManualDelivery,
@@ -365,8 +372,16 @@ export async function saveSiteSettingsAction(formData: FormData) {
   if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
     await back("/admin/settings", `不支持的币种: ${currency}`, false);
   }
+  // 开源仓库地址：会输出为页脚 <a href>，必须校验协议，
+  // 否则 javascript:/data: 之类会造成点击即执行的 XSS。
+  const repoUrl = String(formData.get("repoUrl") ?? "").trim();
+  if (repoUrl !== "" && !isSafeHttpUrl(repoUrl)) {
+    await back("/admin/settings", "开源仓库地址需为 http/https 开头的完整地址", false);
+  }
+
   setSetting(SETTING_KEYS.siteName, siteName);
   setSetting(SETTING_KEYS.siteUrl, siteUrl.replace(/\/+$/, ""));
+  setSetting(SETTING_KEYS.repoUrl, repoUrl);
   setSetting(SETTING_KEYS.cardLowStockThreshold, String(threshold));
   setSetting(SETTING_KEYS.currency, currency);
   logAdmin("settings.site", "-", JSON.stringify({ siteName, siteUrl, threshold, currency }), await clientIp(), session.u);
