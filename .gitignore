@@ -51,3 +51,6 @@ next-env.d.ts
 # 部署凭证（与应用 .env 分离；由 scripts/deploy.sh 读取）
 .deploy.env
 .deploy.env.local
+
+# AI 会话规划文档（内部）
+.zcode/
