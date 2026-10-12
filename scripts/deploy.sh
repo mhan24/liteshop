@@ -170,8 +170,12 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# 回滚快照：记录当前提交，便于失败后快速定位
-PREV_SHA="\$(cat .deployed-commit 2>/dev/null || echo unknown)"
+# 回滚快照：发布元数据放在目标目录**之外**，避免被 rsync --delete 删除
+# （旧实现写在 $REMOTE_DIR/.deployed-commit，同步时会被清掉，
+#   失败后只能从终端输出里找上一版本）
+RELEASE_DIR="/var/lib/liteshop-release"
+mkdir -p "\$RELEASE_DIR"
+PREV_SHA="\$(cat "\$RELEASE_DIR/current" 2>/dev/null || echo unknown)"
 
 rsync -a --delete \
       --exclude '.env' --exclude '.deploy.env' \
@@ -197,9 +201,12 @@ if ! docker compose $COMPOSE_FILES up -d --build --wait --wait-timeout 180; then
 fi
 docker compose $COMPOSE_FILES ps
 
-# ── 4. 健康通过后才落盘部署标记 ───────────────────────────────────────────
-echo "$DEPLOY_SHA" > .deployed-commit
-echo "✓ 部署标记已写入：$DEPLOY_SHA"
+# ── 4. 健康通过后才落盘部署标记（保存在目标目录之外）─────────────────────
+echo "\$PREV_SHA" > "\$RELEASE_DIR/previous"
+echo "$DEPLOY_SHA" > "\$RELEASE_DIR/current"
+date -Is > "\$RELEASE_DIR/deployed-at"
+echo "✓ 发布记录：$DEPLOY_SHA（上一版本：\$PREV_SHA）"
+echo "  回滚：git checkout \$PREV_SHA 后重新执行 deploy.sh"
 EOF
 
 echo "✓ 部署完成 (${DEPLOY_SHA_SHORT})：https://${DOMAIN:-$SSH_HOST}"

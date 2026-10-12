@@ -32,7 +32,11 @@ import {
 } from "@/server/order/fulfill-order";
 import { sendOrderEmail, sendTestEmail } from "@/server/mail";
 import { getPaymentConfig, getSetting, setSetting, upsertPaymentConfig, SETTING_KEYS } from "@/server/settings";
-import { reissueAnomaly, resolveAnomalyAs } from "@/server/admin/anomalies";
+import {
+  reissueAnomaly,
+  acceptAnomalyForManualDelivery,
+  resolveAnomalyAs,
+} from "@/server/admin/anomalies";
 import { clampBepusdtTimeout } from "@/server/payment/bepusdt";
 import { COPY_KEYS, setCopy } from "@/server/copy";
 import { SUPPORTED_CURRENCIES } from "@/lib/money";
@@ -283,13 +287,33 @@ export async function reissueAnomalyAction(formData: FormData) {
   await back("/admin/orders?anomaly=open", message, result.ok);
 }
 
-/** 标记为退款 / 误报 */
+/** 人工发货商品：核实到账后转入待人工发货 */
+export async function acceptAnomalyManualAction(formData: FormData) {
+  const session = await requireSession();
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
+  const id = Number(formData.get("id") ?? 0);
+  const note = String(formData.get("note") ?? "");
+  const result = acceptAnomalyForManualDelivery(id, note);
+  logAdmin("anomaly.manual", String(id), result.message, await clientIp(), session.u);
+  revalidatePath("/admin/orders");
+  await back("/admin/orders?anomaly=open", result.message, result.ok);
+}
+
+/** 标记为已退款 / 误报（仅记录，不执行资金操作） */
 export async function resolveAnomalyAction(formData: FormData) {
   const session = await requireSession();
   await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const id = Number(formData.get("id") ?? 0);
   const kind = String(formData.get("kind") ?? "") === "refunded" ? "refunded" : "dismissed";
   const note = String(formData.get("note") ?? "");
+  // 系统不会自动退款：标记为「已退款」时必须留下链上凭证，避免误以为已完成
+  if (kind === "refunded" && note.trim().length < 8) {
+    await back(
+      "/admin/orders?anomaly=open",
+      "标记已退款需填写退款交易哈希或凭证（至少 8 字符）",
+      false
+    );
+  }
   const result = resolveAnomalyAs(id, kind, note);
   logAdmin(`anomaly.${kind}`, String(id), result.message, await clientIp(), session.u);
   revalidatePath("/admin/orders");

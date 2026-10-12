@@ -201,13 +201,177 @@ describe("付款先于过期、回调晚于过期", () => {
     lookupOrder(r.orderNo, "amt@test.dev");
 
     const before = countOpenAnomalies();
-    handlePaymentNotify("mock", buildMockNotifyBody({
+    const res = handlePaymentNotify("mock", buildMockNotifyBody({
       orderNo: r.orderNo, tradeId: o.tradeId!,
       amountCents: BigInt(o.totalCents) + 999n, currency: o.currency, status: 2,
     }));
-    // 当前实现对 expired 分支先登记异常（金额校验在其后）——这里断言至少不会发货
+
+    // 关键断言：不得进入可补发队列
+    expect(countOpenAnomalies()).toBe(before);
+    expect(res.message).toContain("不匹配");
     expect(cardsOf(p.id, "sold")).toHaveLength(0);
     expect(getOrder(r.orderNo).status).toBe("expired");
-    void before;
+  });
+
+  it("缺少 trade_id 的迟到回调不登记异常", async () => {
+    const p = seedProduct(["C1"]);
+    const r = await createOrder({ email: "noid@test.dev", quantity: 1, slug: p.slug });
+    const o = getOrder(r.orderNo);
+    db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000) })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    lookupOrder(r.orderNo, "noid@test.dev");
+
+    const before = countOpenAnomalies();
+    // 构造一份不带 trade_id 的已签名回调
+    const { epusdtSign } = await import("@/lib/signature");
+    const unsigned: Record<string, unknown> = {
+      order_id: r.orderNo,
+      amount: Number(o.totalCents) / 100,
+      actual_amount: (Number(o.totalCents) / 100).toFixed(6),
+      token: "0xmock",
+      block_transaction_id: "0xnone",
+      status: 2,
+    };
+    const forged = JSON.stringify({
+      ...unsigned,
+      signature: epusdtSign(unsigned, process.env.MOCK_PAYMENT_TOKEN || "mock-token"),
+    });
+    const res = handlePaymentNotify("mock", forged);
+
+    expect(res.handled).toBe(false);
+    expect(countOpenAnomalies()).toBe(before);
+    expect(cardsOf(p.id, "sold")).toHaveLength(0);
+  });
+
+  it("其他订单的 trade_id 不登记异常（防跨订单错配）", async () => {
+    const p = seedProduct(["C1", "C2"]);
+    // 另一笔独立订单
+    const other = await createOrder({ email: "other@test.dev", quantity: 1, slug: p.slug });
+    const otherTrade = getOrder(other.orderNo).tradeId!;
+
+    const r = await createOrder({ email: "mine@test.dev", quantity: 1, slug: p.slug });
+    const o = getOrder(r.orderNo);
+    db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000) })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    lookupOrder(r.orderNo, "mine@test.dev");
+
+    const before = countOpenAnomalies();
+    const res = handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo,
+      tradeId: otherTrade, // ← 属于另一订单
+      amountCents: BigInt(o.totalCents), currency: o.currency, status: 2,
+    }));
+    expect(res.handled).toBe(false);
+    expect(countOpenAnomalies()).toBe(before);
+  });
+
+  it("actual_amount 与创建快照不一致时不登记异常", async () => {
+    const p = seedProduct(["C1"]);
+    const r = await createOrder({ email: "actual@test.dev", quantity: 1, slug: p.slug });
+    const o = getOrder(r.orderNo);
+    // 人为写入一个与回调不符的创建快照
+    db.update(orders).set({ expectedActualAmount: "999.000000", expirationTime: new Date(Date.now() - 60_000) })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    lookupOrder(r.orderNo, "actual@test.dev");
+
+    const before = countOpenAnomalies();
+    // buildMockNotifyBody 生成的 actual_amount = amount，与 999.000000 不符
+    const res = handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo, tradeId: o.tradeId!,
+      amountCents: BigInt(o.totalCents), currency: o.currency, status: 2,
+    }));
+    expect(res.handled).toBe(false);
+    expect(countOpenAnomalies()).toBe(before);
+  });
+});
+
+describe("人工发货商品的异常到账处置（P1-2）", () => {
+  function seedManual(stockLimit: number) {
+    const slug = `late-m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const p = db
+      .insert(products)
+      .values({
+        name: "人工商品",
+        slug,
+        description: "d",
+        priceCents: 100,
+        deliveryType: "manual",
+        stockLimit,
+        status: "on",
+      })
+      .returning({ id: products.id })
+      .get()!;
+    return { id: p.id, slug };
+  }
+
+  async function makeAnomaly(slug: string, email: string) {
+    const r = await createOrder({ email, quantity: 1, slug });
+    const o = getOrder(r.orderNo);
+    db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000) })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    lookupOrder(r.orderNo, email); // 触发清扫：订单 expired 且库存已回补
+    handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo, tradeId: o.tradeId!, amountCents: BigInt(o.totalCents),
+      currency: o.currency, status: 2,
+    }));
+    return { orderNo: r.orderNo, anomalyId: listAnomalies({ status: "open" }).find((a) => a.orderNo === r.orderNo)!.id };
+  }
+
+  it("自动发卡商品走 reissue；人工商品走 accept（不再必然失败）", async () => {
+    const { acceptAnomalyForManualDelivery } = await import("@/server/admin/anomalies");
+    const p = seedManual(3);
+    const { orderNo, anomalyId } = await makeAnomaly(p.slug, "m1@test.dev");
+
+    // 用自动补发接口应被拒绝并提示改用人工入口
+    const wrong = reissueAnomaly(anomalyId, "x");
+    expect(wrong.ok).toBe(false);
+    expect(wrong.message).toContain("人工发货");
+
+    // 正确入口：转入人工发货
+    const ok = acceptAnomalyForManualDelivery(anomalyId, "已核实链上到账");
+    expect(ok.ok).toBe(true);
+    expect(getOrder(orderNo).status).toBe("paid");
+    expect(listAnomalies({ status: "reissued" }).some((a) => a.id === anomalyId)).toBe(true);
+  });
+
+  it("库存不重复计数：转入人工发货后关闭订单只回补一次", async () => {
+    const { acceptAnomalyForManualDelivery } = await import("@/server/admin/anomalies");
+    const { closeOrder } = await import("./fulfill-order");
+    const p = seedManual(3);
+    expect(db.select().from(products).where(eq(products.id, p.id)).get()!.stockLimit).toBe(3);
+
+    const { orderNo, anomalyId } = await makeAnomaly(p.slug, "m2@test.dev");
+    // 清扫已回补 → 恢复为 3
+    expect(db.select().from(products).where(eq(products.id, p.id)).get()!.stockLimit).toBe(3);
+
+    expect(acceptAnomalyForManualDelivery(anomalyId, "核实").ok).toBe(true);
+    // 重新占用一份 → 2
+    expect(db.select().from(products).where(eq(products.id, p.id)).get()!.stockLimit).toBe(2);
+
+    // 关闭该订单 → 回补一次 → 3（不得变成 4）
+    expect(closeOrder(orderNo).ok).toBe(true);
+    expect(db.select().from(products).where(eq(products.id, p.id)).get()!.stockLimit).toBe(3);
+  });
+
+  it("人工商品库存不足时拒绝转入（不产生负库存/超卖）", async () => {
+    const { acceptAnomalyForManualDelivery } = await import("@/server/admin/anomalies");
+    const p = seedManual(1);
+    const { anomalyId } = await makeAnomaly(p.slug, "m3@test.dev");
+
+    // 唯一库存被其他订单占用
+    db.update(products).set({ stockLimit: 0 }).where(eq(products.id, p.id)).run();
+    const res = acceptAnomalyForManualDelivery(anomalyId, "核实");
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("库存不足");
+    expect(db.select().from(products).where(eq(products.id, p.id)).get()!.stockLimit).toBe(0);
+  });
+
+  it("不限库存（-1）的人工商品转入时不扣减库存", async () => {
+    const { acceptAnomalyForManualDelivery } = await import("@/server/admin/anomalies");
+    const p = seedManual(-1);
+    const { orderNo, anomalyId } = await makeAnomaly(p.slug, "m4@test.dev");
+    expect(acceptAnomalyForManualDelivery(anomalyId, "核实").ok).toBe(true);
+    expect(db.select().from(products).where(eq(products.id, p.id)).get()!.stockLimit).toBe(-1);
+    expect(getOrder(orderNo).status).toBe("paid");
   });
 });

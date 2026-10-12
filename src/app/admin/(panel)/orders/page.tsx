@@ -3,7 +3,11 @@ import { csrfToken } from "@/lib/session";
 import { getSessionVersion } from "@/server/auth";
 import { getAdminBase } from "@/lib/admin-path";
 import { listAnomalies } from "@/server/admin/anomalies";
-import { reissueAnomalyAction, resolveAnomalyAction } from "@/actions/admin";
+import {
+  reissueAnomalyAction,
+  acceptAnomalyManualAction,
+  resolveAnomalyAction,
+} from "@/actions/admin";
 import { takeFlash } from "@/lib/flash-store";
 import { listOrdersForAdmin } from "@/server/admin/catalog";
 import { formatMoney } from "@/lib/money";
@@ -88,7 +92,10 @@ export default async function AdminOrdersPage({
             <p className="text-xs text-muted-foreground">
               这些订单已超时/关闭，但收到了**金额匹配的成功回调**。常见成因：买家在有效期内
               完成链上付款，回调在订单被清扫后到达。卡密当时已释放，可能已被他人买走，
-              因此不能自动恢复原订单 —— 请核对链上到账后选择「补发」或「退款」。
+              因此不能自动恢复原订单 —— 请核对链上到账后处置：
+              自动卡密商品用「补发商品」（从卡池重新取卡）；
+              人工发货商品用「转入人工发货」后到订单页录入内容；
+              已退款的请用「确认已退款」并填写链上凭证（系统不会自动退款）。
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -131,12 +138,29 @@ export default async function AdminOrdersPage({
                           补发商品
                         </Button>
                       </form>
+                      <form action={acceptAnomalyManualAction} className="flex items-center gap-1">
+                        <input type="hidden" name="csrf" value={csrf} />
+                        <input type="hidden" name="id" value={a.id} />
+                        <input
+                          name="note"
+                          placeholder="备注"
+                          className="w-24 rounded-md border border-input bg-transparent px-2 py-1 text-xs"
+                        />
+                        <Button type="submit" size="sm" variant="outline">
+                          转入人工发货
+                        </Button>
+                      </form>
                       <form action={resolveAnomalyAction} className="flex items-center gap-1">
                         <input type="hidden" name="csrf" value={csrf} />
                         <input type="hidden" name="id" value={a.id} />
                         <input type="hidden" name="kind" value="refunded" />
+                        <input
+                          name="note"
+                          placeholder="退款交易哈希"
+                          className="w-32 rounded-md border border-input bg-transparent px-2 py-1 font-mono text-xs"
+                        />
                         <Button type="submit" size="sm" variant="outline">
-                          标记退款
+                          确认已退款
                         </Button>
                       </form>
                       <form action={resolveAnomalyAction} className="flex items-center gap-1">

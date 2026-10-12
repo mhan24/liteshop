@@ -155,6 +155,64 @@ function markAttemptStatus(
     .run();
 }
 
+
+/**
+ * 成功回调的归属与金额校验（**必须在任何状态变更或异常登记之前执行**）。
+ *
+ * 签名只证明报文来自渠道，**不能**证明 trade_id 与金额属于当前订单。
+ * 历史缺陷：异常到账分支位于这些校验之前，导致「金额不符 / 交易号不属于本单」
+ * 的已签名通知也会进入可补发的人工队列 —— 会把伪造或错配的通知
+ * 变成真实的补发动作。
+ */
+function validateSuccessOwnership(
+  tx: DbTransaction,
+  order: Order,
+  payload: import("@/server/payment").NotifyPayload
+): { ok: true } | { ok: false; message: string } {
+  // trade_id 必须存在且属于本订单（不能因缺失而跳过校验）
+  if (!payload.tradeId) {
+    return { ok: false, message: "回调缺少 trade_id，拒绝处理" };
+  }
+  const current = getCurrentAttempt(order.orderNo, tx);
+  if (current) {
+    if (current.tradeId !== payload.tradeId) {
+      return { ok: false, message: "trade_id 非当前交易，拒绝处理" };
+    }
+  } else if (order.tradeId && order.tradeId !== payload.tradeId) {
+    // 兼容迁移前的历史订单（尚无 attempt 记录）
+    return { ok: false, message: "trade_id 与订单快照不匹配" };
+  }
+
+  // 法币金额必须与订单一致（按币种的最小单位比较，禁浮点）
+  if (payload.amount == null) {
+    return { ok: false, message: "回调缺少金额字段" };
+  }
+  let amountMinor: bigint;
+  try {
+    amountMinor = toMinorUnits(payload.amount, order.currency);
+  } catch {
+    return { ok: false, message: `回调金额非法: ${String(payload.amount)}` };
+  }
+  if (amountMinor !== BigInt(order.totalCents)) {
+    return {
+      ok: false,
+      message: `金额不匹配: 回调 ${String(payload.amount)} ${order.currency}，订单 ${order.totalCents}（最小单位）`,
+    };
+  }
+
+  // actual_amount 与创建交易快照一致（位数可不同的等值字符串）
+  if (
+    payload.actualAmount != null &&
+    order.expectedActualAmount != null &&
+    order.expectedActualAmount !== "" &&
+    normalizeAmountString(payload.actualAmount) !== normalizeAmountString(order.expectedActualAmount)
+  ) {
+    return { ok: false, message: "actual_amount 与创建交易快照不匹配" };
+  }
+
+  return { ok: true };
+}
+
 function processNotify(
   tx: DbTransaction,
   payload: import("@/server/payment").NotifyPayload
@@ -212,6 +270,16 @@ function processNotify(
     // 此时卡密已释放，**不能直接恢复原订单**（可能已被他人买走 → 一卡多卖）。
     // 因此登记为待人工处置的异常，核对链上到账后补发或退款。
     if (order.status === "expired" || order.status === "closed") {
+      // 先做归属与金额校验：只有**确实属于本订单**的到账才进入人工补发队列。
+      // 否则一条金额不符或交易号错配的已签名通知就能触发真实补发。
+      const ownership = validateSuccessOwnership(tx, order, payload);
+      if (!ownership.ok) {
+        return {
+          handled: false,
+          retryable: false,
+          message: `超时订单收到不匹配的成功回调，已记录但未登记补发：${ownership.message}`,
+        };
+      }
       const anomalyId = recordLatePaymentAnomaly(tx, order, payload);
       return {
         handled: false,
@@ -222,53 +290,10 @@ function processNotify(
     return { handled: false, retryable: false, message: `订单状态 ${order.status} 不接受支付通知` };
   }
 
-  // trade_id 必须与订单「当前有效尝试」一致（防跨订单伪造 + 防旧交易误入账）。
-  // 注意：不能因回调未携带 trade_id 就放行——否则攻击者可省略该字段绕过校验。
-  if (!payload.tradeId) {
-    return { handled: false, retryable: false, message: "回调缺少 trade_id，拒绝入账" };
-  }
-  const current = getCurrentAttempt(order.orderNo, tx);
-  if (current) {
-    if (current.tradeId !== payload.tradeId) {
-      return {
-        handled: false,
-        retryable: false,
-        message: "trade_id 非当前交易，拒绝入账（旧交易到账请走人工对账）",
-      };
-    }
-  } else if (order.tradeId && order.tradeId !== payload.tradeId) {
-    // 兼容迁移前的历史订单（尚无 attempt 记录）
-    return { handled: false, retryable: false, message: "trade_id 与订单快照不匹配" };
-  }
-
-  // 法币金额必须与订单一致（整数最小单位比较，禁浮点运算）。
-  // 必须按订单币种解析：JPY 是零小数币种，回调 amount=1500 表示 1500 日元，
-  // 而 toCents(1500) 会得到 150000（误当作分），导致日元订单永远无法入账。
-  if (payload.amount == null) {
-    return { handled: false, retryable: false, message: "回调缺少金额字段" };
-  }
-  let amountMinor: bigint;
-  try {
-    amountMinor = toMinorUnits(payload.amount, order.currency);
-  } catch {
-    return { handled: false, retryable: false, message: `回调金额非法: ${String(payload.amount)}` };
-  }
-  if (amountMinor !== BigInt(order.totalCents)) {
-    return {
-      handled: false,
-      retryable: false,
-      message: `金额不匹配: 回调 ${String(payload.amount)} ${order.currency}，订单 ${order.totalCents}（最小单位）`,
-    };
-  }
-
-  // actual_amount 与创建交易快照一致（位数可不同的等值字符串）
-  if (
-    payload.actualAmount != null &&
-    order.expectedActualAmount != null &&
-    order.expectedActualAmount !== "" &&
-    normalizeAmountString(payload.actualAmount) !== normalizeAmountString(order.expectedActualAmount)
-  ) {
-    return { handled: false, retryable: false, message: "actual_amount 与创建交易快照不匹配" };
+  // 归属与金额校验（与异常到账分支共用同一实现，避免两处逻辑漂移）
+  const ownership = validateSuccessOwnership(tx, order, payload);
+  if (!ownership.ok) {
+    return { handled: false, retryable: false, message: ownership.message };
   }
 
   const product = order.productId
