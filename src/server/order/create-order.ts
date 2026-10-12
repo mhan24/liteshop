@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
-import { notifyLogs, orders, products } from "@/db/schema";
+import { notifyLogs, orders, paymentAnomalies, products } from "@/db/schema";
 import type { OrderStatus, Product } from "@/db/schema";
 import { generateOrderNo } from "@/lib/order-no";
 import { getSiteUrl } from "@/server/settings";
@@ -361,6 +361,29 @@ export function canRepurchase(status: string): boolean {
   return (REPURCHASE_ALLOWED_STATUSES as readonly string[]).includes(status);
 }
 
+/**
+ * 重购前必须排除的两类「钱的问题」：
+ *
+ * 1. **已收款**（`paidAt` 非空）：状态机允许 paid → closed，
+ *    所以仅凭 status 无法判断是否收过钱。已付款的订单若允许重购，
+ *    会误导买家再次支付（虽不会自动重复扣款）。
+ * 2. **有未处理的异常到账**（payment_anomalies.status = 'open'）：
+ *    超时订单收到延迟的成功回调时会登记为待人工处置。
+ *    此时买家是否付款尚未核实，允许重购会让买家重复付款。
+ */
+export function repurchaseBlockedReason(
+  order: { status: string; paidAt: Date | null },
+  hasOpenAnomaly: boolean
+): string | null {
+  if (order.paidAt !== null) {
+    return "该订单已付款或尚未结束，请联系客服处理";
+  }
+  if (hasOpenAnomaly) {
+    return "该订单有一笔待核实的到账记录，为避免重复付款，请联系客服";
+  }
+  return null;
+}
+
 export async function createOrderForRepurchase(
   sourceOrderNo: string,
   email: string
@@ -379,6 +402,22 @@ export async function createOrderForRepurchase(
         ? "该订单支付状态待核实，请勿重复下单，请联系客服"
         : `订单状态为「${src.status}」，无法重新购买`
     );
+  }
+
+  // 收款/异常到账校验（不能只靠 status，见 repurchaseBlockedReason）
+  const hasOpenAnomaly = db
+    .select({ id: paymentAnomalies.id })
+    .from(paymentAnomalies)
+    .where(
+      and(
+        eq(paymentAnomalies.orderNo, sourceOrderNo),
+        eq(paymentAnomalies.status, "open")
+      )
+    )
+    .get();
+  const blocked = repurchaseBlockedReason(src, !!hasOpenAnomaly);
+  if (blocked) {
+    throw new OrderError("ALREADY_PAID", blocked);
   }
   if (!src.productId) {
     throw new OrderError("PRODUCT_NOT_FOUND", "原商品已删除，请重新选择商品");

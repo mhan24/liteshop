@@ -171,6 +171,9 @@ export async function repurchaseOrderAction(
     }
     return { error: `当前状态（${view.statusLabel}）无法重新购买` };
   }
+  if (view.paidAt !== null) {
+    return { error: "该订单已付款，如需帮助请联系客服" };
+  }
   if (!view.productSlug) {
     return { error: "原商品已下架或删除，请返回商品列表重新选择" };
   }
