@@ -139,6 +139,40 @@ console.log('超时未清:', d.prepare(\"SELECT COUNT(*) c FROM orders WHERE sta
 "
 ```
 
+## 库存一致性（务必理解）
+
+订单的库存/卡密释放**只能**通过 `releaseOrderStock()`（`src/server/delivery/release-stock.ts`）
+这一唯一入口，在调用方事务内执行。
+
+它保证两个不变量：
+
+1. **幂等**：以订单为权威状态，释放成功后在同一事务内清除 `stockCharged`；
+   重复调用直接跳过。历史缺陷是 7 处调用点各自调用策略 `release()`，
+   而 `manual.release()` 只读 `stockCharged` 却从不清除它 ——
+   导致「超时清扫释放一次 + 管理员关闭再释放一次」让库存凭空 +1
+   （实测 3 → 2 → 3 → **4**），进而超卖。
+2. **两类占用的判定方式不同**：
+   - `auto`：占用体现在卡密行上（`status='reserved'` + `order_id`），
+     按 `order_id` 条件更新，天然幂等。**不能**用 `stockCharged` 判定
+     （auto 单该字段恒为 false）。
+   - `manual`：占用体现在商品 `stock_limit` 上，`stockCharged` 是权威标志。
+
+### 发货方式以订单快照为准
+
+订单创建时保存 `delivery_type` 快照（迁移 0007）。履约与释放一律走
+`getOrderDeliveryType()`（优先快照、历史订单回落商品值），**不要**直接读
+`product.deliveryType` —— 商品类型可被后台修改，历史订单不应被追溯改变性质。
+否则会出现「manual→auto 后人工库存不回补」或「auto→manual 后预留卡密不释放」。
+
+## 限流与客户端 IP
+
+- 登录限流有两个维度：**IP+用户名**（5 次/15 分钟）与**仅 IP**（20 次/15 分钟）。
+  后者用于防止轮换用户名绕过；记录有 TTL（1 小时）与容量上限（5000，批量淘汰）。
+- 客户端 IP 一律经 `src/server/security/client-ip.ts` 解析：
+  取 `X-Forwarded-For` 的**最后一段**（受信代理 Caddy 写入）。
+  **不要**取第一段 —— 那是客户端可控值，攻击者每次换一个假 IP 即可绕过 IP 限流。
+- 若将来在 Caddy 前再加一层 CDN/代理，需同步调整 `TRUSTED_PROXY_HOPS`。
+
 ## 关键业务规则（改代码时勿破坏）
 
 1. **回调应答语义**：未真正处理时**绝不能**回 `success`（网关会停止重试 → 静默丢单）。
@@ -150,3 +184,7 @@ console.log('超时未清:', d.prepare(\"SELECT COUNT(*) c FROM orders WHERE sta
    并复位标记，使后续关单只回补一次。
 5. **金额一律按币种最小单位比较**：JPY 是零小数币种，传网关与比较都不能 /100。
 6. **校验先于副作用**：任何状态变更或异常登记之前，必须先验证 trade_id 归属与金额。
+7. **库存释放必须走统一入口**：见上文「库存一致性」。
+8. **发货方式读订单快照**，不读商品当前配置。
+9. **同一个事务内失败的语句不会回滚先前成功的写操作**：需要"重试"语义时
+   （如订单号冲突重试）必须用 `SAVEPOINT`，否则先前的库存扣减会累积。
