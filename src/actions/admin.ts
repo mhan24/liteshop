@@ -32,6 +32,7 @@ import {
 } from "@/server/order/fulfill-order";
 import { sendOrderEmail, sendTestEmail } from "@/server/mail";
 import { getPaymentConfig, getSetting, setSetting, upsertPaymentConfig, SETTING_KEYS } from "@/server/settings";
+import { reissueAnomaly, resolveAnomalyAs } from "@/server/admin/anomalies";
 import { clampBepusdtTimeout } from "@/server/payment/bepusdt";
 import { COPY_KEYS, setCopy } from "@/server/copy";
 import { SUPPORTED_CURRENCIES } from "@/lib/money";
@@ -255,6 +256,44 @@ export async function resolveReconcilingAction(formData: FormData) {
   logAdmin("order.reconcile", orderNo, result.message, await clientIp(), session.u);
   revalidatePath("/admin/orders");
   await back("/admin/orders", result.message, result.ok);
+}
+
+/* ===== 异常到账（超时后到账）处置 ===== */
+
+/** 补发商品：从卡池重新取卡交付（不恢复已被释放的那张卡） */
+export async function reissueAnomalyAction(formData: FormData) {
+  const session = await requireSession();
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
+  const id = Number(formData.get("id") ?? 0);
+  const note = String(formData.get("note") ?? "");
+  const result = reissueAnomaly(id, note);
+  logAdmin("anomaly.reissue", String(id), result.message, await clientIp(), session.u);
+  // 补发成功需通知买家（复用交付邮件；失败不阻断）
+  const orderNo = String(formData.get("orderNo") ?? "");
+  let message = result.message;
+  if (result.ok && orderNo) {
+    try {
+      const mail = await sendOrderEmail(orderNo, "delivered", true);
+      if (mail.ok) message += "；已发送交付邮件";
+    } catch {
+      /* 邮件失败不影响补发结果 */
+    }
+  }
+  revalidatePath("/admin/orders");
+  await back("/admin/orders?anomaly=open", message, result.ok);
+}
+
+/** 标记为退款 / 误报 */
+export async function resolveAnomalyAction(formData: FormData) {
+  const session = await requireSession();
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
+  const id = Number(formData.get("id") ?? 0);
+  const kind = String(formData.get("kind") ?? "") === "refunded" ? "refunded" : "dismissed";
+  const note = String(formData.get("note") ?? "");
+  const result = resolveAnomalyAs(id, kind, note);
+  logAdmin(`anomaly.${kind}`, String(id), result.message, await clientIp(), session.u);
+  revalidatePath("/admin/orders");
+  await back("/admin/orders?anomaly=open", result.message, result.ok);
 }
 
 /** 交付类操作成功后尝试发送邮件，结果附在提示信息里 */

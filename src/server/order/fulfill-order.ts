@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
-import { notifyLogs, orders, paymentAttempts, products } from "@/db/schema";
+import { notifyLogs, orders, paymentAnomalies, paymentAttempts, products } from "@/db/schema";
 import type { Order, OrderStatus } from "@/db/schema";
 import { normalizeAmountString, toMinorUnits } from "@/lib/money";
 import { sha256Hex } from "@/lib/signature";
@@ -91,6 +91,56 @@ function markHandled(id: number, handled: boolean): void {
   db.update(notifyLogs).set({ handled }).where(eq(notifyLogs.id, id)).run();
 }
 
+/**
+ * 登记「超时后到账」异常（必须在事务内调用）。
+ *
+ * 为什么不能自动发货：清扫已把卡密释放回 available，可能已被其他订单买走。
+ * 直接给该订单发卡会造成一卡多卖。正确做法是留下可追溯记录，
+ * 由管理员核对链上到账后决定补发（从卡池重新取卡）或退款。
+ *
+ * 幂等：同一 trade_id 重复回调只登记一条。
+ */
+function recordLatePaymentAnomaly(
+  tx: DbTransaction,
+  order: Order,
+  payload: import("@/server/payment").NotifyPayload
+): number | string {
+  if (payload.tradeId) {
+    const existing = tx
+      .select({ id: paymentAnomalies.id })
+      .from(paymentAnomalies)
+      .where(
+        and(
+          eq(paymentAnomalies.orderNo, order.orderNo),
+          eq(paymentAnomalies.tradeId, payload.tradeId)
+        )
+      )
+      .get();
+    if (existing) return existing.id;
+  }
+  const row = tx
+    .insert(paymentAnomalies)
+    .values({
+      orderNo: order.orderNo,
+      provider: payload.provider,
+      tradeId: payload.tradeId,
+      amount: String(payload.amount ?? ""),
+      currency: order.currency,
+      orderStatusAtArrival: order.status,
+      kind: "late_payment",
+      status: "open",
+      payload: JSON.stringify({
+        amount: payload.amount,
+        actualAmount: payload.actualAmount,
+        blockTxnId: payload.blockTxnId,
+        status: payload.status,
+      }).slice(0, 2000),
+    })
+    .returning({ id: paymentAnomalies.id })
+    .get();
+  return row?.id ?? "?";
+}
+
 /** 更新指定 trade_id 的支付尝试状态（回调处理时调用，必须传 tx 以保持原子性） */
 function markAttemptStatus(
   tx: DbTransaction,
@@ -157,6 +207,18 @@ function processNotify(
   // 但不能简单把它加进放行列表——reconciling 订单往往**没有 trade_id 快照**，
   // 归属校验必须更严（见下方 requireFreshTradeOwnership）。
   if (!["pending", "paid", "delivering", "reconciling"].includes(order.status)) {
+    // 异常到账：超时/关闭的订单收到了**已验签且金额匹配**的成功回调。
+    // 典型成因：买家在有效期内完成链上付款，但回调在本地清扫置为 expired 之后才到。
+    // 此时卡密已释放，**不能直接恢复原订单**（可能已被他人买走 → 一卡多卖）。
+    // 因此登记为待人工处置的异常，核对链上到账后补发或退款。
+    if (order.status === "expired" || order.status === "closed") {
+      const anomalyId = recordLatePaymentAnomaly(tx, order, payload);
+      return {
+        handled: false,
+        retryable: false, // 重试也无法自动解决，需人工核对
+        message: `超时/关闭订单收到成功回调，已登记为异常到账待处理（#${anomalyId}）`,
+      };
+    }
     return { handled: false, retryable: false, message: `订单状态 ${order.status} 不接受支付通知` };
   }
 

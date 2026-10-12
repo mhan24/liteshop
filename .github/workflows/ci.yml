@@ -80,3 +80,21 @@ jobs:
             echo "::error::归档中包含 AppleDouble 条目"; exit 1
           fi
           echo "✓ 归档检查通过"
+
+      # 验证 .dockerignore 下的完整 Docker 构建（无密钥参与）。
+      # 之前构建之所以成功，是因为 .env 被 COPY . . 带进上下文并提供了
+      # AUTH_SECRET；加入 .dockerignore 后必须能在无密钥环境构建，
+      # 否则说明构建仍隐式依赖运行时密钥。
+      - name: Docker build without secrets
+        run: |
+          set -euo pipefail
+          # 明确清空可能来自仓库的密钥环境变量
+          env -u AUTH_SECRET -u CRON_SECRET -u ADMIN_PASSWORD_HASH \
+            docker build -t liteshop-ci:verify .
+          echo "✓ 无密钥环境下 Docker 构建成功"
+          # 镜像内不得出现密钥文件
+          if docker run --rm --entrypoint sh liteshop-ci:verify \
+               -c 'test -e /app/.env -o -e /app/.deploy.env'; then
+            echo "::error::镜像内包含密钥文件"; exit 1
+          fi
+          echo "✓ 镜像内无密钥文件"

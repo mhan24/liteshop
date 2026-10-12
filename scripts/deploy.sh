@@ -154,39 +154,44 @@ if [ -e "\$STAGING/.env" ] || [ -e "\$STAGING/.deploy.env" ]; then
   echo "✗ staging 中发现密钥文件，中止" >&2; exit 1
 fi
 
-# ── 2. 保留生产侧不入库的内容，再同步到目标目录 ─────────────────────────────
+# ── 2. 同步到目标目录（保留生产侧不入库的内容）─────────────────────────────
 cd "\$REMOTE_DIR"
 
-# 备份生产 .env（其内容不来自仓库，绝不能被覆盖）
-ENV_BACKUP="\$(mktemp)"
-cp .env "\$ENV_BACKUP"
-
-# 记录将被移除的旧文件（同步后不存在于新版本者）
-if command -v rsync >/dev/null 2>&1; then
-  # --delete 保证目标目录严格等于 staging（即该提交）
-  rsync -a --delete --exclude '.env' --exclude '.deploy.env' \
-        --exclude 'data' --exclude 'node_modules' --exclude '.next' \
-        --exclude '.git' --exclude 'backups' \
-        "\$STAGING"/ "\$REMOTE_DIR"/
-else
+if ! command -v rsync >/dev/null 2>&1; then
   echo "✗ 目标机缺少 rsync（apt-get install rsync），中止以避免目录残留" >&2
   exit 1
 fi
 
-# 恢复 .env 并校验指纹
-cp "\$ENV_BACKUP" .env
-rm -f "\$ENV_BACKUP"
-NEW_ENV_HASH="\$(sha256sum .env | cut -d' ' -f1)"
-if [ "\$NEW_ENV_HASH" != "$ENV_HASH_BEFORE" ]; then
-  echo "✗ .env 指纹异常，中止部署" >&2
+# .env 从一开始就被 --exclude 排除，因此**不需要**临时备份副本
+# （旧实现把 .env 拷到 /tmp，异常退出会留下密钥副本，属不必要的风险）。
+# 同步前记录指纹，同步后复核，确保它确实没被动过。
+if [ ! -f .env ]; then
+  echo "✗ 目标目录缺少 .env，拒绝部署（应用无法启动）" >&2
   exit 1
 fi
-echo "✓ .env 未被改动"
+
+# 回滚快照：记录当前提交，便于失败后快速定位
+PREV_SHA="\$(cat .deployed-commit 2>/dev/null || echo unknown)"
+
+rsync -a --delete \
+      --exclude '.env' --exclude '.deploy.env' \
+      --exclude 'data' --exclude 'node_modules' --exclude '.next' \
+      --exclude '.git' --exclude 'backups' \
+      "\$STAGING"/ "\$REMOTE_DIR"/
+
+NEW_ENV_HASH="\$(sha256sum .env | cut -d' ' -f1)"
+if [ "\$NEW_ENV_HASH" != "$ENV_HASH_BEFORE" ]; then
+  echo "✗ .env 指纹变化，中止部署" >&2
+  exit 1
+fi
+echo "✓ .env 未被改动（同步全程排除）"
 
 # ── 3. 构建并等待健康 ─────────────────────────────────────────────────────
 rm -f /tmp/liteshop-deploy.tar.gz
 if ! docker compose $COMPOSE_FILES up -d --build --wait --wait-timeout 180; then
-  echo "✗ 构建或健康检查失败；容器保持现状，请检查日志：" >&2
+  echo "✗ 构建或健康检查失败。上一个可用提交：\$PREV_SHA" >&2
+  echo "  查看日志：docker compose $COMPOSE_FILES logs --tail 100 liteshop" >&2
+  echo "  回滚方式：git checkout \$PREV_SHA（在本地）后重新执行 deploy.sh" >&2
   docker compose $COMPOSE_FILES logs --tail 60 liteshop >&2 || true
   exit 1
 fi

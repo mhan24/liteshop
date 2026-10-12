@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { cards, orders, products } from "@/db/schema";
+import { cards, orders, paymentAnomalies, products } from "@/db/schema";
 import type { NewProduct, Product } from "@/db/schema";
 import { SUPPORTED_CURRENCIES, toMinorUnits, isZeroDecimalCurrency } from "@/lib/money";
 import { getSiteCurrency } from "@/server/settings";
@@ -276,6 +276,8 @@ export interface DashboardStats {
   todayOrders: number;
   /** 待对账订单：结果未知，需人工核对网关后再决定是否释放库存 */
   reconciling: number;
+  /** 异常到账待处理：超时后收到成功回调，需人工补发或退款 */
+  anomalies: number;
   /** 按币种分组的今日营收（禁止跨币种直接相加） */
   todayRevenue: CurrencyRevenue[];
   totalOrders: number;
@@ -342,6 +344,7 @@ export function getDashboardStats(threshold: number): DashboardStats {
   return {
     todayOrders: todayOrderCount,
     reconciling: countReconcilingOrders(),
+    anomalies: countOpenAnomalies(),
     todayRevenue: today,
     totalOrders: totalOrderCount,
     totalRevenue: total,
@@ -430,6 +433,17 @@ export function listOrdersForAdmin(opts: {
     .limit(limit)
     .all();
   return rows.map((r) => ({ ...r, deliveryType: r.deliveryType ?? "auto" }));
+}
+
+/** 异常到账待处理数（超时后到账，需人工补发或退款） */
+export function countOpenAnomalies(): number {
+  return (
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(paymentAnomalies)
+      .where(eq(paymentAnomalies.status, "open"))
+      .get()?.c ?? 0
+  );
 }
 
 /** 待对账订单数（结果未知，需人工核对网关） */

@@ -43,6 +43,13 @@ export default async function AdminDashboardPage({
             <CardTitle className="text-base">待处理</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
+            {stats.anomalies > 0 ? (
+              <Row
+                label="⚠ 异常到账待处理（超时后到账）"
+                value={stats.anomalies}
+                href={`${base}/orders?anomaly=open`}
+              />
+            ) : null}
             {stats.reconciling > 0 ? (
               <Row
                 label="⚠ 待对账（结果未知，需核对网关）"

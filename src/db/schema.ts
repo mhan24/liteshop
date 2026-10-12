@@ -246,6 +246,58 @@ export const notifyLogs = sqliteTable(
   ]
 );
 
+/**
+ * 异常到账（超时订单收到成功支付）。
+ *
+ * 场景：买家在支付有效期内完成链上付款，但成功回调在本地清扫把订单置为
+ * expired 之后才到达。此时卡密已释放，**不能直接恢复原订单**（可能已被
+ * 他人买走，直接发卡会造成一卡多卖/超卖）。
+ * 因此记录为独立的「异常到账」待人工处置：核对链上到账后补发或退款。
+ *
+ * 不复用 notify_logs 的原因：那是原始报文流水，本表是**需要跟进的业务事项**，
+ * 有独立的处理状态与操作人。
+ */
+export const AnomalyStatus = {
+  /** 待人工处置 */
+  open: "open",
+  /** 已补发商品 */
+  reissued: "reissued",
+  /** 已退款 */
+  refunded: "refunded",
+  /** 已核实为误报（如重复回调、金额不符） */
+  dismissed: "dismissed",
+} as const;
+export type AnomalyStatusType = (typeof AnomalyStatus)[keyof typeof AnomalyStatus];
+
+export const paymentAnomalies = sqliteTable(
+  "payment_anomalies",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    orderNo: text("order_no").notNull(),
+    provider: text("provider").notNull(),
+    /** 网关交易号：核对链上到账的依据 */
+    tradeId: text("trade_id"),
+    /** 回调声明的法币金额（原样） */
+    amount: text("amount").notNull().default(""),
+    currency: text("currency").notNull().default(""),
+    /** 订单在异常发生时的状态（一般为 expired / closed） */
+    orderStatusAtArrival: text("order_status_at_arrival").notNull(),
+    /** 异常类型：late_payment=超时后到账 */
+    kind: text("kind").notNull().default("late_payment"),
+    status: text("status").notNull().default(AnomalyStatus.open),
+    /** 处理备注（管理员填写） */
+    resolution: text("resolution").notNull().default(""),
+    /** 原始回调报文（截断） */
+    payload: text("payload").notNull().default(""),
+    createdAt: ts(),
+    updatedAt: tsUpdated(),
+  },
+  (t) => [
+    index("payment_anomalies_order_idx").on(t.orderNo),
+    index("payment_anomalies_status_idx").on(t.status),
+  ]
+);
+
 /** 邮件发送记录：unique(order_no, kind) 保证同类邮件只发一次（kind: delivered | processing） */
 export const mailLogs = sqliteTable(
   "mail_logs",
