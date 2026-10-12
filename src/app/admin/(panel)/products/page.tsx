@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { csrfToken } from "@/lib/session";
+import { getSessionVersion } from "@/server/auth";
 import { getAdminBase } from "@/lib/admin-path";
 import { takeFlash } from "@/lib/flash-store";
 import { getSiteCurrency } from "@/server/settings";
@@ -30,7 +31,7 @@ export default async function AdminProductsPage({
 }) {
   const { flash: flashId } = await searchParams;
   const flash = takeFlash(flashId);
-  const csrf = await csrfToken();
+  const csrf = await csrfToken(getSessionVersion());
   const base = await getAdminBase();
   const siteCurrency = getSiteCurrency();
   const products = listProducts();

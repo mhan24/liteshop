@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { isKnownProvider } from "@/server/payment";
 import { handlePaymentNotify } from "@/server/order/fulfill-order";
 import { sendOrderEmail } from "@/server/mail";
+import { checkNotifyRateLimit } from "@/server/security/rate-limit";
 
 /**
  * 支付回调统一入口（POST /api/pay/notify/[provider]）。
@@ -17,6 +18,16 @@ export async function POST(
   if (!isKnownProvider(provider)) {
     return new Response("not found", { status: 404 });
   }
+  // 未认证端点限流：验签失败的请求也会写库（对账需要），
+  // 不限速时可被刷爆日志表与磁盘。
+  const fwd = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const ip = fwd || request.headers.get("x-real-ip") || "-";
+  const limited = checkNotifyRateLimit(ip);
+  if (!limited.ok) {
+    // 应答 success 让渠道停止重试，避免放大
+    return new Response("success", { status: 200 });
+  }
+
   const rawBody = await request.text();
   if (rawBody.length > 64 * 1024) {
     // 异常报文直接终止重试

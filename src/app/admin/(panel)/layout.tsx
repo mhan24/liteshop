@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
 export default async function AdminPanelLayout({ children }: { children: React.ReactNode }) {
   const jar = await cookies();
   const session = await currentSession(jar.get(ADMIN_COOKIE)?.value);
-  if (!session) redirect("/admin/login");
+  // 自定义入口时 /admin/login 会被中间件 404，必须用实际 base
+  if (!session) redirect(`${await getAdminBase()}/login`);
   const siteName = getSiteName();
   const base = await getAdminBase();
 

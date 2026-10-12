@@ -40,13 +40,46 @@ async function hmac(secret: string, message: string): Promise<string> {
   return toBase64Url(new Uint8Array(sig));
 }
 
-/** CSRF token：部署级常量（HMAC(secret, "csrf")），随表单隐藏字段提交（PLAN §6-③） */
-export async function csrfToken(): Promise<string> {
-  return hmac(authSecret(), "csrf:liteshop:v1");
+/**
+ * CSRF token：与「会话版本」绑定（HMAC(secret, "csrf:v2:" + v)）。
+ *
+ * 历史缺陷：token 是部署级常量，一旦泄露（截图/日志/分享链接）对**所有**会话
+ * 长期有效，且无法轮换。绑定会话版本后，改密/改入口使会话版本 +1 时，
+ * 旧 token 立即失效；同时 token 本身不再能跨部署复用。
+ *
+ * 仍然配合 Origin 校验（见 assertCsrf），形成双层防护。
+ */
+export async function csrfToken(sessionVersion?: number): Promise<string> {
+  const v = sessionVersion ?? 1;
+  return hmac(authSecret(), `csrf:liteshop:v2:${v}`);
 }
 
-export async function assertCsrf(value: FormDataEntryValue | null): Promise<void> {
-  const expected = await csrfToken();
+/** 从请求头解析 Origin / Referer，用于同源校验 */
+export async function assertSameOrigin(headers: Headers): Promise<void> {
+  const origin = headers.get("origin");
+  const host = headers.get("host");
+  if (!origin) {
+    // 无 Origin：多为同源表单提交被浏览器省略，交由 CSRF token 校验兜底
+    return;
+  }
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    throw new Error("CSRF 校验失败：Origin 非法");
+  }
+  if (!host || originHost !== host) {
+    throw new Error("CSRF 校验失败：跨站来源");
+  }
+}
+
+export async function assertCsrf(
+  value: FormDataEntryValue | null,
+  sessionVersion?: number,
+  headers?: Headers
+): Promise<void> {
+  if (headers) await assertSameOrigin(headers);
+  const expected = await csrfToken(sessionVersion);
   const given = typeof value === "string" ? value : "";
   if (given.length !== expected.length) throw new Error("CSRF 校验失败");
   let diff = 0;

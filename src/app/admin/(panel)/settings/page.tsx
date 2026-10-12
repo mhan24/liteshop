@@ -1,4 +1,5 @@
 import { csrfToken } from "@/lib/session";
+import { getSessionVersion } from "@/server/auth";
 import {
   changeAdminCredentialsAction,
   savePaymentConfigAction,
@@ -31,7 +32,7 @@ export default async function AdminSettingsPage({
 }) {
   const { flash: flashId } = await searchParams;
   const flash = takeFlash(flashId);
-  const csrf = await csrfToken();
+  const csrf = await csrfToken(getSessionVersion());
   const settings = getAllSettings();
   const cfg = getPaymentConfig("bepusdt");
   const config = cfg?.configJson ?? {};
@@ -121,7 +122,7 @@ export default async function AdminSettingsPage({
                 id="b-token"
                 name="token"
                 type="password"
-                defaultValue={String(config["token"] ?? "")}
+                placeholder={config["token"] ? "已设置（留空则不修改）" : "未设置"}
                 autoComplete="off"
               />
             </div>
@@ -182,7 +183,7 @@ export default async function AdminSettingsPage({
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="t-secret">Secret Key（服务端校验）</Label>
-              <Input id="t-secret" name="turnstileSecretKey" type="password" defaultValue={settings["turnstile_secret_key"] ?? ""} className="font-mono text-xs" autoComplete="off" />
+              <Input id="t-secret" name="turnstileSecretKey" type="password" placeholder={settings["turnstile_secret_key"] ? "已设置（留空则不修改）" : "未设置"} className="font-mono text-xs" autoComplete="off" />
             </div>
             <div className="flex items-end sm:col-span-2">
               <Button type="submit">保存人机验证设置</Button>

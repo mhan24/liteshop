@@ -41,7 +41,7 @@ function clearFailures(ip: string, username: string): void {
   attempts.delete(attemptKey(ip, username));
 }
 
-function getSessionVersion(): number {
+export function getSessionVersion(): number {
   const v = Number(getSetting(SESSION_VERSION_KEY) ?? "1");
   return Number.isFinite(v) && v > 0 ? v : 1;
 }

@@ -6,6 +6,8 @@ import { lookupOrder, type PublicOrderView } from "@/server/order/query-order";
 import { cancelPendingOrder } from "@/server/order/fulfill-order";
 import { getTurnstileSecretKey, isTurnstileEnforced } from "@/server/settings";
 import { verifyTurnstileToken } from "@/lib/turnstile";
+import { checkOrderRateLimit } from "@/server/security/rate-limit";
+import { headers } from "next/headers";
 
 /** 前台下单 Action（游客模式）：成功后由客户端跳转支付收银台 */
 
@@ -31,6 +33,15 @@ export async function createOrderAction(
     if (!verify.ok) {
       return { error: "人机验证未通过，请重新完成验证后提交" };
     }
+  }
+
+  // 限流：Turnstile 关闭时这是唯一的下单频率防线。
+  // 不加限制时，脚本可批量创建待支付订单把在售卡密全部锁定（拒绝服务）。
+  const h = await headers();
+  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip") ?? "-";
+  const limited = checkOrderRateLimit(ip, email);
+  if (!limited.ok) {
+    return { error: limited.message ?? "操作过于频繁，请稍后再试" };
   }
 
   try {

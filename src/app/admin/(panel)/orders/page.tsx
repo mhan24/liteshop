@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { csrfToken } from "@/lib/session";
+import { getSessionVersion } from "@/server/auth";
 import { getAdminBase } from "@/lib/admin-path";
 import { takeFlash } from "@/lib/flash-store";
 import { listOrdersForAdmin } from "@/server/admin/catalog";
@@ -41,7 +42,7 @@ export default async function AdminOrdersPage({
 }) {
   const params = await searchParams;
   const flash = takeFlash(params.flash);
-  const csrf = await csrfToken();
+  const csrf = await csrfToken(getSessionVersion());
   const base = await getAdminBase();
   const status = params.status ?? "";
   const q = params.q ?? "";

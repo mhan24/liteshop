@@ -12,6 +12,7 @@ import {
   login as doLogin,
   lockedForSeconds,
   recordFailure,
+  getSessionVersion,
 } from "@/server/auth";
 import { logAdmin } from "@/server/admin-log";
 import {
@@ -25,7 +26,7 @@ import {
 } from "@/server/admin/catalog";
 import { closeOrder, manualDeliver, retryAutoDelivery } from "@/server/order/fulfill-order";
 import { sendOrderEmail, sendTestEmail } from "@/server/mail";
-import { setSetting, upsertPaymentConfig, SETTING_KEYS } from "@/server/settings";
+import { getPaymentConfig, getSetting, setSetting, upsertPaymentConfig, SETTING_KEYS } from "@/server/settings";
 import { clampBepusdtTimeout } from "@/server/payment/bepusdt";
 import { COPY_KEYS, setCopy } from "@/server/copy";
 import { SUPPORTED_CURRENCIES } from "@/lib/money";
@@ -49,7 +50,8 @@ function parseStockLimitInput(raw: FormDataEntryValue | null): number {
 async function requireSession() {
   const jar = await cookies();
   const session = await currentSession(jar.get(ADMIN_COOKIE)?.value);
-  if (!session) redirect("/admin/login");
+  // 必须走实际入口（admin_path 可自定义，硬编码 /admin 在伪装后会被中间件 404）
+  if (!session) redirect(`${await getAdminBase()}/login`);
   return session;
 }
 
@@ -123,7 +125,7 @@ export async function logoutAction() {
 
 export async function saveProductAction(formData: FormData) {
   await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const ip = await clientIp();
   const input = {
     name: String(formData.get("name") ?? ""),
@@ -150,7 +152,7 @@ export async function saveProductAction(formData: FormData) {
 
 export async function toggleProductStatusAction(formData: FormData) {
   await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const id = Number(formData.get("id") ?? 0);
   const status = String(formData.get("status") ?? "on") === "off" ? "off" : "on";
   setProductStatus(id, status);
@@ -161,7 +163,7 @@ export async function toggleProductStatusAction(formData: FormData) {
 
 export async function deleteProductAction(formData: FormData) {
   await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const id = Number(formData.get("id") ?? 0);
   const result = deleteProduct(id);
   logAdmin("product.delete", String(id), result.message, await clientIp());
@@ -173,7 +175,7 @@ export async function deleteProductAction(formData: FormData) {
 
 export async function importCardsAction(formData: FormData) {
   await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const productId = Number(formData.get("productId") ?? 0);
   const raw = String(formData.get("content") ?? "");
   const result = importCards(productId, raw);
@@ -184,7 +186,7 @@ export async function importCardsAction(formData: FormData) {
 
 export async function deleteCardsAction(formData: FormData) {
   await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const productId = Number(formData.get("productId") ?? 0);
   const ids = formData.getAll("ids").map(Number).filter(Number.isInteger);
   const n = deleteAvailableCards(productId, ids);
@@ -195,7 +197,7 @@ export async function deleteCardsAction(formData: FormData) {
 
 export async function clearCardsAction(formData: FormData) {
   await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const productId = Number(formData.get("productId") ?? 0);
   const n = clearAvailableCards(productId);
   logAdmin("cards.clear", String(productId), `清空未使用卡密 ${n} 张`, await clientIp());
@@ -207,7 +209,7 @@ export async function clearCardsAction(formData: FormData) {
 
 export async function manualDeliverAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const orderNo = String(formData.get("orderNo") ?? "");
   const content = String(formData.get("content") ?? "");
   const result = manualDeliver(orderNo, content);
@@ -218,7 +220,7 @@ export async function manualDeliverAction(formData: FormData) {
 
 export async function retryDeliveryAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const orderNo = String(formData.get("orderNo") ?? "");
   const result = retryAutoDelivery(orderNo);
   logAdmin("order.retry", orderNo, result.message, await clientIp(), session.u);
@@ -228,7 +230,7 @@ export async function retryDeliveryAction(formData: FormData) {
 
 export async function closeOrderAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const orderNo = String(formData.get("orderNo") ?? "");
   const result = closeOrder(orderNo);
   logAdmin("order.close", orderNo, result.message, await clientIp(), session.u);
@@ -255,7 +257,7 @@ async function withMailNote(
 /** 补发交付邮件（已完成订单，强制重发） */
 export async function resendDeliveryEmailAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const orderNo = String(formData.get("orderNo") ?? "");
   const mail = await sendOrderEmail(orderNo, "delivered", true);
   logAdmin(
@@ -273,7 +275,7 @@ export async function resendDeliveryEmailAction(formData: FormData) {
 
 export async function saveSiteSettingsAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const siteName = String(formData.get("siteName") ?? "").trim().slice(0, 60);
   const siteUrl = String(formData.get("siteUrl") ?? "").trim().slice(0, 200);
   const threshold = Math.max(0, Math.trunc(Number(formData.get("threshold") ?? 5)) || 0);
@@ -292,13 +294,18 @@ export async function saveSiteSettingsAction(formData: FormData) {
 
 export async function savePaymentConfigAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const provider = String(formData.get("provider") ?? "");
   if (provider !== "bepusdt") await back("/admin/settings", "未知支付渠道", false);
 
   const enabled = String(formData.get("enabled") ?? "") === "on";
   const apiBase = String(formData.get("apiBase") ?? "").trim();
-  const token = String(formData.get("token") ?? "").trim();
+  const submittedToken = String(formData.get("token") ?? "").trim();
+  // 表单不回显令牌 → 留空表示保持原值；__CLEAR__ 表示清除
+  const existingToken =
+    String((getPaymentConfig("bepusdt")?.configJson?.["token"] as string | undefined) ?? "").trim();
+  const token =
+    submittedToken === "__CLEAR__" ? "" : submittedToken === "" ? existingToken : submittedToken;
 
   // 启用却缺少必填项会导致全站无法下单（createPayment 抛错 → 每单都被补偿关单），
   // 因此在保存时就拦下，避免把站点置于「支付中断」状态。
@@ -330,7 +337,7 @@ export async function savePaymentConfigAction(formData: FormData) {
 
 export async function saveSmtpSettingsAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const enabled = String(formData.get("smtpEnabled") ?? "") === "on";
   const host = String(formData.get("smtpHost") ?? "").trim();
   const portRaw = String(formData.get("smtpPort") ?? "").trim();
@@ -369,7 +376,7 @@ export async function saveSmtpSettingsAction(formData: FormData) {
 
 export async function sendTestEmailAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const to = String(formData.get("testTo") ?? "").trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
     await back("/admin/settings", "请输入有效的测试收件邮箱", false);
@@ -383,10 +390,16 @@ export async function sendTestEmailAction(formData: FormData) {
 
 export async function saveTurnstileSettingsAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const enabled = String(formData.get("turnstileEnabled") ?? "") === "on";
   const siteKey = String(formData.get("turnstileSiteKey") ?? "").trim();
-  const secretKey = String(formData.get("turnstileSecretKey") ?? "").trim();
+  const submitted = String(formData.get("turnstileSecretKey") ?? "").trim();
+
+  // 表单不再回显 Secret Key，因此「留空 = 保持原值」而非清空。
+  // 需要清除时提交 __CLEAR__。（历史缺陷：回显会让密钥出现在页面源码中）
+  const existing = getSetting("turnstile_secret_key")?.trim() ?? "";
+  const secretKey = submitted === "__CLEAR__" ? "" : submitted === "" ? existing : submitted;
+
   if (enabled && (siteKey === "" || secretKey === "")) {
     await back("/admin/settings", "启用 Turnstile 需填写 Site Key 与 Secret Key", false);
   }
@@ -403,7 +416,7 @@ export async function saveTurnstileSettingsAction(formData: FormData) {
 
 export async function saveCopySettingsAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   let changed = 0;
   for (const key of COPY_KEYS) {
     const raw = formData.get(`copy_${key}`);
@@ -423,7 +436,7 @@ export async function saveCopySettingsAction(formData: FormData) {
 
 export async function changeAdminCredentialsAction(formData: FormData) {
   const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const currentPassword = String(formData.get("currentPassword") ?? "");
   const newUsername = String(formData.get("newUsername") ?? "");
   const newPassword = String(formData.get("newPassword") ?? "");

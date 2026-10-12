@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { csrfToken } from "@/lib/session";
+import { getSessionVersion } from "@/server/auth";
 import { getAdminBase } from "@/lib/admin-path";
 import { takeFlash } from "@/lib/flash-store";
 import {
@@ -40,7 +41,7 @@ export default async function AdminCardsPage({
 }) {
   const params = await searchParams;
   const flash = takeFlash(params.flash);
-  const csrf = await csrfToken();
+  const csrf = await csrfToken(getSessionVersion());
   const base = await getAdminBase();
   const products = listProducts().filter((p) => p.deliveryType === "auto");
 
