@@ -42,7 +42,7 @@ fi
 
 DEPLOY_ENV="$ROOT/.deploy.env"
 if [[ ! -f "$DEPLOY_ENV" ]]; then
-  echo "缺少 $DEPLOY_ENV（参考 .deploy.env.example）" >&2
+  echo "缺少 ${DEPLOY_ENV} (参考 .deploy.env.example)" >&2
   exit 1
 fi
 # shellcheck disable=SC1090
@@ -195,17 +195,42 @@ rm -f /tmp/liteshop-deploy.tar.gz
 if ! docker compose $COMPOSE_FILES up -d --build --wait --wait-timeout 180; then
   echo "✗ 构建或健康检查失败。上一个可用提交：\$PREV_SHA" >&2
   echo "  查看日志：docker compose $COMPOSE_FILES logs --tail 100 liteshop" >&2
-  echo "  回滚方式：git checkout \$PREV_SHA（在本地）后重新执行 deploy.sh" >&2
+  echo "  回滚方式：git checkout \$PREV_SHA (在本地) 后重新执行 deploy.sh" >&2
   docker compose $COMPOSE_FILES logs --tail 60 liteshop >&2 || true
   exit 1
 fi
 docker compose $COMPOSE_FILES ps
 
+# ── 3b. 校验运维脚本与定时任务（rsync --delete 曾删除过它们）──────────────
+# 教训：手工放在 $REMOTE_DIR 下的运维脚本会被 --delete 清除，
+# 导致超时清扫与自动备份静默失效。脚本现已入库，这里做部署后自检。
+for f in scripts/ops/expire-cron.sh scripts/ops/backup-cron.sh scripts/ops/install-cron.sh; do
+  if [ ! -f "\$f" ]; then
+    echo "✗ 部署后缺少运维脚本：\$f" >&2
+    exit 1
+  fi
+  chmod +x "\$f"
+done
+echo "✓ 运维脚本就位"
+
+# crontab 指向的路径必须真实存在，否则定时任务会静默失败
+if crontab -l 2>/dev/null | grep -q 'liteshop'; then
+  MISSING=0
+  for job in \$(crontab -l 2>/dev/null | grep 'liteshop' | grep -oE '/[^ ]+\.sh' | sort -u); do
+    [ -f "\$job" ] || { echo "✗ crontab 指向的脚本不存在：\$job" >&2; MISSING=1; }
+  done
+  if [ "\$MISSING" = "1" ]; then
+    echo "  修复：运行 scripts/ops/install-cron.sh 重新安装定时任务" >&2
+  else
+    echo "✓ 定时任务指向的脚本均存在"
+  fi
+fi
+
 # ── 4. 健康通过后才落盘部署标记（保存在目标目录之外）─────────────────────
 echo "\$PREV_SHA" > "\$RELEASE_DIR/previous"
 echo "$DEPLOY_SHA" > "\$RELEASE_DIR/current"
 date -Is > "\$RELEASE_DIR/deployed-at"
-echo "✓ 发布记录：$DEPLOY_SHA（上一版本：\$PREV_SHA）"
+echo "✓ 发布记录：${DEPLOY_SHA} (上一版本：\$PREV_SHA)"
 echo "  回滚：git checkout \$PREV_SHA 后重新执行 deploy.sh"
 EOF
 

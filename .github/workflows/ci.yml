@@ -57,14 +57,26 @@ jobs:
 
       # 部署脚本是上线路径的一部分：语法错误或归档异常应在 CI 暴露
       - name: Shell syntax check
-        run: bash -n scripts/deploy.sh
+        run: bash -n scripts/deploy.sh scripts/ops/*.sh
+
+      # 检测一个易犯的 bash 陷阱：变量名后紧跟全角字符时，bash 会把
+      # 全角字符并入变量名（如 $SHA（ → 变量 "SHA（"），触发 unbound variable。
+      # 这个 bug 已在 deploy.sh 与 install-cron.sh 上各犯过一次。
+      - name: Detect full-width char after variable
+        run: |
+          set -euo pipefail
+          if grep -rnE '\$[A-Za-z_][A-Za-z0-9_]*[（），。：；、！？]' scripts/ --include='*.sh'; then
+            echo "::error::变量名后紧跟全角字符会被 bash 并入变量名，请改用 \${VAR} 形式"
+            exit 1
+          fi
+          echo "✓ 未发现变量名后紧跟全角字符"
 
       - name: ShellCheck
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
           # SC1090/SC1091：动态 source .deploy.env（运行期才存在）
-          shellcheck --severity=error -e SC1090,SC1091 scripts/deploy.sh
+          shellcheck --severity=error -e SC1090,SC1091 scripts/deploy.sh scripts/ops/*.sh
 
       # 归档完整性：不得包含密钥文件或 macOS AppleDouble 条目
       - name: Deploy archive checks
