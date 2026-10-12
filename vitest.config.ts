@@ -11,7 +11,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    // 含 .tsx：组件级回归测试用 react-dom/server 渲染后断言 DOM
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     // SQLite 单文件 + 单写者：并行测试文件会互相抢锁（database is locked）。
     // 业务代码本身依赖 IMMEDIATE 事务串行化，因此测试也必须串行执行。
     fileParallelism: false,

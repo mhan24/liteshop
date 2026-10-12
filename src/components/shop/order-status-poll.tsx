@@ -14,7 +14,7 @@ import {
 } from "@/actions/shop";
 import { openPaymentWindow, toAbsoluteUrl } from "@/lib/open-payment-window";
 
-interface OrderStatusPayload {
+export interface OrderStatusPayload {
   orderNo: string;
   status: string;
   statusLabel: string;
@@ -155,7 +155,10 @@ export function OrderStatusPoll({
         <CancelOrder orderNo={order.orderNo} />
       ) : null}
 
-      {(order.status === "expired" || order.status === "closed") && payCTA ? (
+      {/* 重购资格一律以服务端计算的 canRepurchase 为准，不自行用 status 推断。
+          否则「已付款后被关闭」或「有待处理异常到账」的订单也会显示按钮，
+          买家填完邮箱提交才被拒绝（后端规则与前端展示漂移）。 */}
+      {order.canRepurchase === true && payCTA ? (
         <RepurchaseOrder
           orderNo={order.orderNo}
           productSlug={order.productSlug ?? null}
@@ -260,6 +263,8 @@ function RepurchaseOrder({
     null
   );
   const [asking, setAsking] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [blocked, setBlocked] = useState<string | null>(null);
   const router = useRouter();
   // 重新购买同样会创建订单：必须与商品页一致地过 Turnstile，
   // 否则开启验证码后该入口会被服务端守卫拒绝（且此前根本没渲染验证码）。
@@ -295,15 +300,40 @@ function RepurchaseOrder({
     );
   }
 
+  // 点击时**重新获取一次资格**：终态订单会停止轮询，若期间迟到了成功回调
+  // （登记为待处理异常到账），本地缓存的 canRepurchase 可能已过期。
+  // 服务端提交时仍会兜底校验，这里只是让提示更及时、更准确。
+  const onRepurchaseClick = async () => {
+    setChecking(true);
+    setBlocked(null);
+    try {
+      const res = await fetch(`/api/orders/status?order_no=${encodeURIComponent(orderNo)}`);
+      const json = (await res.json()) as { ok: boolean; order?: OrderStatusPayload };
+      if (json.ok && json.order && json.order.canRepurchase !== true) {
+        setBlocked(json.order.repurchaseBlockedReason ?? "该订单当前无法重新购买");
+        setChecking(false);
+        return;
+      }
+    } catch {
+      // 网络失败时继续走原流程，由服务端最终把关
+    }
+    setChecking(false);
+    setAsking(true);
+  };
+
   if (!asking) {
     return (
-      <button
-        type="button"
-        onClick={() => setAsking(true)}
-        className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-md bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-[#333333] active:scale-[0.98]"
-      >
-        重新购买
-      </button>
+      <>
+        {blocked ? <p className="mt-3 text-sm text-pastel-red-text">{blocked}</p> : null}
+        <button
+          type="button"
+          onClick={onRepurchaseClick}
+          disabled={checking}
+          className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-md bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-[#333333] active:scale-[0.98] disabled:opacity-60"
+        >
+          {checking ? "正在确认订单状态…" : "重新购买"}
+        </button>
+      </>
     );
   }
 
