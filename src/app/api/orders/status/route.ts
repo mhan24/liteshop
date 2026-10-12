@@ -20,6 +20,7 @@ export async function GET(request: Request) {
       emailMasked: view.emailMasked,
       paymentUrl: view.paymentUrl,
       expiresAtText: view.expiresAtText,
+      productSlug: view.productSlug,
     },
   });
 }

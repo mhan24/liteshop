@@ -55,6 +55,8 @@ export function getProductBySlug(slug: string): Product | undefined {
 
 export interface ProductInput {
   name: string;
+  /** 编辑场景下商品的原币种：币种留空时用它解析价格，避免与站点默认币种精度不一致 */
+  existingCurrency?: string;
   slug?: string;
   description: string;
   imageUrl: string;
@@ -71,12 +73,16 @@ export function validateProductInput(input: ProductInput): { ok: true; data: Omi
   if (!name || name.length > 100) return { ok: false, message: "商品名必填且不超过 100 字" };
   // toCents 对非法输入抛 MoneyParseError：此处必须捕获并转为可读校验错误，
   // 否则后台填错价格会让 Server Action 直接抛未处理异常（整页 500）。
-  // 币种需先确定，才能按对应「最小单位」解析价格（JPY 无小数）
+  // 币种需先确定，才能按对应「最小单位」解析价格（JPY 无小数）。
+  //
+  // 编辑已有商品时表单可能留空币种（表示"保持原值"），此时**必须用商品原币种**
+  // 解析价格，而不是站点默认币种：若商品是 JPY 而站点默认 USD，
+  // 用 USD 解析会把「1500 日元」误存为 150000（放大 100 倍）。
   const rawCurrency = (input.currency ?? "").trim().toUpperCase();
   const effectiveCurrency =
     rawCurrency !== "" && (SUPPORTED_CURRENCIES as readonly string[]).includes(rawCurrency)
       ? rawCurrency
-      : getSiteCurrency();
+      : (input.existingCurrency?.trim().toUpperCase() || getSiteCurrency());
   let price: bigint;
   try {
     price = toMinorUnits(input.priceCentsText.trim(), effectiveCurrency);
@@ -132,10 +138,11 @@ export function createProduct(input: ProductInput): { ok: boolean; message: stri
 }
 
 export function updateProduct(id: number, input: ProductInput): { ok: boolean; message: string } {
-  const v = validateProductInput(input);
-  if (!v.ok) return v;
+  // 必须先取出原商品，才能在其币种留空时用原币种解析价格
   const existing = db.select().from(products).where(eq(products.id, id)).get();
   if (!existing) return { ok: false, message: "商品不存在" };
+  const v = validateProductInput({ ...input, existingCurrency: existing.currency });
+  if (!v.ok) return v;
   const dup = db
     .select({ id: products.id })
     .from(products)

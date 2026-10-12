@@ -30,6 +30,7 @@ export default async function PayReturnPage({
         emailMasked: order.emailMasked,
         paymentUrl: order.paymentUrl,
         expiresAtText: order.expiresAtText,
+        productSlug: order.productSlug,
       } : null} />
     </main>
   );

@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orders } from "@/db/schema";
+import { orders, products } from "@/db/schema";
 import type { Order, OrderStatus } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
 import { formatDateTime } from "@/lib/datetime";
@@ -21,6 +21,8 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
 export interface PublicOrderView {
   orderNo: string;
   productName: string;
+  /** 商品标识：过期/关闭后用于「重新购买」跳回商品页 */
+  productSlug: string | null;
   quantity: number;
   totalFormatted: string;
   currency: string;
@@ -65,9 +67,15 @@ export function getOrderStatusView(orderNo: string): PublicOrderView | null {
 
 function toPublicView(order: Order, opts?: { includeDelivery?: boolean }): PublicOrderView {
   const includeDelivery = opts?.includeDelivery ?? true;
+  // 商品可能已被删除（productId 为空），此时无法提供重新购买入口
+  const productSlug = order.productId
+    ? (db.select({ slug: products.slug }).from(products).where(eq(products.id, order.productId)).get()
+        ?.slug ?? null)
+    : null;
   return {
     orderNo: order.orderNo,
     productName: order.productName,
+    productSlug,
     quantity: order.quantity,
     totalFormatted: formatMoney(BigInt(order.totalCents), order.currency),
     currency: order.currency,

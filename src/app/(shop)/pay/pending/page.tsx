@@ -41,6 +41,7 @@ export default async function PayPendingPage({
                 emailMasked: view.emailMasked,
                 paymentUrl: view.paymentUrl,
                 expiresAtText: view.expiresAtText,
+                productSlug: view.productSlug,
               }
             : null
         }

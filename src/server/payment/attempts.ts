@@ -28,6 +28,8 @@ export interface PaymentAttemptRow {
   status: PaymentAttemptStatusType;
   isCurrent: boolean;
   paidAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface CreateAttemptInput {
@@ -123,4 +125,17 @@ export function isCurrentTrade(tx: DbTransaction, orderNo: string, tradeId: stri
   if (!tradeId) return false;
   const cur = getCurrentAttempt(orderNo, tx);
   return cur?.tradeId === tradeId;
+}
+
+/** 订单最新的一条支付尝试（不论是否 current）——用于并发抢占判定 */
+export function getLatestAttempt(
+  orderNo: string,
+  tx: DbTransaction = db as unknown as DbTransaction
+): PaymentAttemptRow | undefined {
+  return tx
+    .select()
+    .from(paymentAttempts)
+    .where(eq(paymentAttempts.orderNo, orderNo))
+    .orderBy(desc(paymentAttempts.id))
+    .get() as PaymentAttemptRow | undefined;
 }

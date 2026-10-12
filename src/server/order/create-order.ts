@@ -1,12 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
-import { notifyLogs, orders, products } from "@/db/schema";
+import { notifyLogs, orders, paymentAttempts, products } from "@/db/schema";
 import type { OrderStatus, Product } from "@/db/schema";
 import { generateOrderNo } from "@/lib/order-no";
 import { getSiteUrl } from "@/server/settings";
 import { resolvePaymentProvider } from "@/server/payment";
 import { getDeliveryStrategy } from "@/server/delivery";
-import { createAttempt } from "@/server/payment/attempts";
+import { createAttempt, getLatestAttempt } from "@/server/payment/attempts";
 import { sha256Hex } from "@/lib/signature";
 import { shouldChargeStock } from "@/lib/stock";
 
@@ -156,18 +156,47 @@ function isUnknownResultError(err: unknown): boolean {
 }
 
 /** 结果未知：保留订单但标记为待对账（不释放库存、不关单） */
+/**
+ * 结果未知：保留订单且**设置兜底有效期**。
+ *
+ * 关键：此路径没有拿到交易快照（trade_id/expirationTime 都为空）。
+ * 若不设 expirationTime，订单永远不会被超时清扫处理，
+ * 已锁定的卡密会一直保持 reserved 直到人工干预（库存静默泄漏）。
+ * 因此给出一个有界的对账窗口：到期后由清扫任务释放库存，
+ * 同时保留 notify_logs 中的对账线索供人工核对网关侧是否真的建了单。
+ */
+const UNKNOWN_RESULT_RECONCILE_MS = 30 * 60 * 1000; // 30 分钟
+
 function markOrderUnknown(orderNo: string, provider: string, err: unknown): void {
   const detail = err instanceof Error ? err.message : String(err);
-  db.insert(notifyLogs)
-    .values({
-      provider,
-      orderNo,
-      payloadHash: sha256Hex(`unknown:${orderNo}:${Date.now()}`),
-      payload: `支付创建结果未知（可能已在网关建单）：${detail}`.slice(0, 2000),
-      status: null,
-      handled: false,
-    })
-    .run();
+  const deadline = new Date(Date.now() + UNKNOWN_RESULT_RECONCILE_MS);
+  db.transaction(
+    (tx) => {
+      // 仅在订单仍无有效期时兜底，避免覆盖已知的更早到期时间
+      const order = tx.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
+      if (order && !order.expirationTime) {
+        tx.update(orders)
+          .set({ expirationTime: deadline, updatedAt: new Date() })
+          .where(eq(orders.orderNo, orderNo))
+          .run();
+      }
+      tx.insert(notifyLogs)
+        .values({
+          provider,
+          orderNo,
+          payloadHash: sha256Hex(`unknown:${orderNo}:${Date.now()}`),
+          payload:
+            `支付创建结果未知（可能已在网关建单），已设对账截止 ${deadline.toISOString()}：${detail}`.slice(
+              0,
+              2000
+            ),
+          status: null,
+          handled: false,
+        })
+        .run();
+    },
+    { behavior: "immediate" }
+  );
 }
 
 function insertOrderWithRetry(
@@ -277,6 +306,8 @@ export async function resumeOrderPayment(orderNo: string): Promise<ResumePayment
 
   const provider = resolvePaymentProvider();
   const siteUrl = getSiteUrl();
+  // 记录本次尝试的起点：用于识别「是否有更晚的并发尝试抢占了当前身份」
+  const startedAt = Date.now();
   let created;
   try {
     created = await provider.createPayment({
@@ -301,11 +332,31 @@ export async function resumeOrderPayment(orderNo: string): Promise<ResumePayment
     };
   }
 
-  // 条件更新：仅当订单仍是 pending 时才切换交易（防与并发回调节奏错位）
-  db.transaction(
+  // 条件更新：必须在事务内确认「本次尝试成为当前」后才把地址交给买家。
+  // 并发场景：两个重新支付请求几乎同时创建交易，只有先提交者能成为当前尝试；
+  // 后者若仍返回自己的地址，买家会拿着一个立刻失效的链接去付款（已失去当前身份）。
+  const becameCurrent = db.transaction(
     (tx) => {
       const fresh = tx.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
-      if (!fresh || fresh.status !== "pending") return;
+      // 订单已不在 pending（例如被并发关闭）→ 本次尝试作废，不得返回地址
+      if (!fresh || fresh.status !== "pending") return false;
+      // 并发判定：若已存在「比本次创建更晚」的支付尝试，说明另一个并发请求
+      // 已经抢先完成切换，本次创建的交易已失去当前身份 → 作废，不得交给买家。
+      // 注意不能与「订单原先的当前尝试」比较：每次 resume 前都必然存在旧的当前尝试。
+      const latest = getLatestAttempt(orderNo, tx);
+      if (
+        latest &&
+        created.tradeId &&
+        latest.tradeId !== created.tradeId &&
+        latest.createdAt &&
+        latest.createdAt.getTime() > startedAt
+      ) {
+        tx.update(paymentAttempts)
+          .set({ status: "expired", isCurrent: false, updatedAt: new Date() })
+          .where(eq(paymentAttempts.tradeId, created.tradeId))
+          .run();
+        return false;
+      }
       tx.update(orders)
         .set({
           tradeId: created.tradeId,
@@ -327,9 +378,56 @@ export async function resumeOrderPayment(orderNo: string): Promise<ResumePayment
         expirationTime: created.expirationTime,
         raw: created.raw,
       });
+      return true;
     },
     { behavior: "immediate" }
   );
 
+  if (!becameCurrent) {
+    // 本次交易未成为当前：返回最新有效地址（而不是已失效的那个）
+    const fresh = db.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
+    if (fresh?.status === "pending" && fresh.paymentUrl) {
+      return { ok: true, message: "已获取当前支付地址", paymentUrl: fresh.paymentUrl };
+    }
+    return { ok: false, message: "订单状态已变化，请返回订单查询页查看最新状态" };
+  }
+
   return { ok: true, message: "已重新发起支付", paymentUrl: created.paymentUrl };
+}
+
+/* ===== 重新购买（过期/关闭订单）===== */
+
+/**
+ * 依据历史订单创建一笔**全新订单**。
+ *
+ * 为什么不让过期订单原地恢复为 pending：
+ * - 过期时库存已释放（reserved 卡密回到 available、manual 库存已回补），
+ *   原地恢复需重新预留，且要与旧交易的延迟回调竞争同一订单；
+ * - 旧交易若随后到账，会成为「合法入账路径」，与已释放的库存状态冲突。
+ * 新订单走完全相同的安全路径（重新校验库存、重新建立支付尝试）。
+ *
+ * 双因子：调用方已用订单号 + 邮箱确认归属。
+ */
+export async function createOrderForRepurchase(
+  sourceOrderNo: string,
+  email: string
+): Promise<CreateOrderResult> {
+  const src = db.select().from(orders).where(eq(orders.orderNo, sourceOrderNo)).get();
+  if (!src) throw new OrderError("ORDER_NOT_FOUND", "原订单不存在");
+  if (src.email.trim().toLowerCase() !== email.trim().toLowerCase()) {
+    throw new OrderError("INVALID_INPUT", "订单号与邮箱不匹配");
+  }
+  if (!src.productId) {
+    throw new OrderError("PRODUCT_NOT_FOUND", "原商品已删除，请重新选择商品");
+  }
+  const product = db.select().from(products).where(eq(products.id, src.productId)).get();
+  if (!product || product.status !== "on") {
+    throw new OrderError("PRODUCT_NOT_FOUND", "原商品已下架，请返回商品列表重新选择");
+  }
+  return createOrder({
+    slug: product.slug,
+    email: src.email,
+    quantity: src.quantity,
+    note: src.note ?? "",
+  });
 }

@@ -142,3 +142,39 @@ export function countRecentOrdersByEmail(email: string, sinceMs = 86_400_000): n
       .get()?.c ?? 0
   );
 }
+
+/* ================= 回调限流观测 ================= */
+
+/**
+ * 被限流拒绝的回调计数。
+ *
+ * 这是**需要人工关注**的信号：回调被限流意味着可能有一笔真实支付
+ * 的通知未能及时处理（已回 fail 让网关重试，但仍应可见）。
+ * 若该计数持续增长，说明限流阈值过低或正在遭受刷量。
+ */
+const notifyRejects = { total: 0, byIp: new Map<string, number>(), lastAt: 0 };
+
+export function recordRejectedNotify(ip: string): void {
+  notifyRejects.total += 1;
+  notifyRejects.byIp.set(ip, (notifyRejects.byIp.get(ip) ?? 0) + 1);
+  notifyRejects.lastAt = Date.now();
+  // 限制 map 规模，避免自身成为内存放大点
+  if (notifyRejects.byIp.size > 1000) {
+    const trimmed = [...notifyRejects.byIp.entries()].sort((a, b) => b[1] - a[1]).slice(0, 500);
+    notifyRejects.byIp = new Map(trimmed);
+  }
+}
+
+export function getNotifyRejectStats(): { total: number; topIps: [string, number][]; lastAt: number } {
+  return {
+    total: notifyRejects.total,
+    topIps: [...notifyRejects.byIp.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
+    lastAt: notifyRejects.lastAt,
+  };
+}
+
+export function resetNotifyRejectStats(): void {
+  notifyRejects.total = 0;
+  notifyRejects.byIp.clear();
+  notifyRejects.lastAt = 0;
+}

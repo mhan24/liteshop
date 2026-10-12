@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { and, eq, isNotNull, lt, lte, sql } from "drizzle-orm";
+import { and, eq, isNotNull, lt, lte, or, sql } from "drizzle-orm";
 import { db, } from "@/db";
 import { mailLogs, orders } from "@/db/schema";
 import type { Order } from "@/db/schema";
@@ -179,15 +179,27 @@ function claimForSending(
  * 只处理：status=failed 且已到 nextRetryAt 且未超最大次数。
  */
 export async function retryFailedMails(limit = 20): Promise<{ retried: number; succeeded: number }> {
+  // 两类可恢复记录：
+  // 1) failed 且已到退避时间且未超最大次数
+  // 2) sending 且租约已过期 —— 容器在发送过程中重启会留下这种记录，
+  //    若不回收将永远卡住（历史缺陷：定时任务只查 failed）
+  const leaseCutoff = new Date(Date.now() - SENDING_LEASE_MS);
   const rows = db
     .select()
     .from(mailLogs)
     .where(
-      and(
-        eq(mailLogs.status, "failed"),
-        lt(mailLogs.attempts, MAX_ATTEMPTS),
-        isNotNull(mailLogs.nextRetryAt),
-        lte(mailLogs.nextRetryAt, new Date())
+      or(
+        and(
+          eq(mailLogs.status, "failed"),
+          lt(mailLogs.attempts, MAX_ATTEMPTS),
+          isNotNull(mailLogs.nextRetryAt),
+          lte(mailLogs.nextRetryAt, new Date())
+        ),
+        and(
+          eq(mailLogs.status, "sending"),
+          lt(mailLogs.updatedAt, leaseCutoff),
+          lt(mailLogs.attempts, MAX_ATTEMPTS)
+        )
       )
     )
     .limit(limit)

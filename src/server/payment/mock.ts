@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { epusdtSign, epusdtVerify, parseJsonObject } from "@/lib/signature";
+import { minorUnitsToNumber } from "@/lib/money";
 import type {
   CreatePaymentInput,
   CreatedPayment,
@@ -69,18 +70,26 @@ export function mockProvider(): PaymentProvider {
   };
 }
 
-/** mock 收银台页构造带签名的回调报文（服务端 action 调用） */
+/**
+ * mock 收银台页构造带签名的回调报文（服务端 action 调用）。
+ *
+ * amount 必须按订单币种换算：JPY 是零小数币种，回调应给 1500（日元），
+ * 而不是 15.00。否则 mock 链路会与真实网关行为不一致，
+ * 既掩盖 JPY 相关缺陷，也会让测试通过却线上失败。
+ */
 export function buildMockNotifyBody(params: {
   orderNo: string;
   tradeId: string;
   amountCents: bigint;
   status: NotifyStatus;
+  currency?: string;
 }): string {
+  const amount = minorUnitsToNumber(params.amountCents, params.currency ?? "USD");
   const body: Record<string, unknown> = {
     trade_id: params.tradeId,
     order_id: params.orderNo,
-    amount: Number(params.amountCents) / 100,
-    actual_amount: (Number(params.amountCents) / 100).toFixed(6),
+    amount,
+    actual_amount: amount.toFixed(6),
     token: "0xmock",
     block_transaction_id: `0xmock_${randomBytes(8).toString("hex")}`,
     status: params.status,

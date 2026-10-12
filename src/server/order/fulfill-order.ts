@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
 import { notifyLogs, orders, paymentAttempts, products } from "@/db/schema";
 import type { Order, OrderStatus } from "@/db/schema";
-import { normalizeAmountString, toCents } from "@/lib/money";
+import { normalizeAmountString, toMinorUnits } from "@/lib/money";
 import { sha256Hex } from "@/lib/signature";
 import { getProvider } from "@/server/payment";
 import { autoDelivery, getDeliveryStrategy } from "@/server/delivery";
@@ -175,18 +175,24 @@ function processNotify(
     return { handled: false, retryable: false, message: "trade_id 与订单快照不匹配" };
   }
 
-  // 法币金额必须与订单一致（整数分比较，禁浮点运算）
+  // 法币金额必须与订单一致（整数最小单位比较，禁浮点运算）。
+  // 必须按订单币种解析：JPY 是零小数币种，回调 amount=1500 表示 1500 日元，
+  // 而 toCents(1500) 会得到 150000（误当作分），导致日元订单永远无法入账。
   if (payload.amount == null) {
     return { handled: false, retryable: false, message: "回调缺少金额字段" };
   }
-  let amountCents: bigint;
+  let amountMinor: bigint;
   try {
-    amountCents = toCents(payload.amount);
+    amountMinor = toMinorUnits(payload.amount, order.currency);
   } catch {
     return { handled: false, retryable: false, message: `回调金额非法: ${String(payload.amount)}` };
   }
-  if (amountCents !== BigInt(order.totalCents)) {
-    return { handled: false, retryable: false, message: `金额不匹配: 回调 ${String(payload.amount)}，订单 ${order.totalCents} 分` };
+  if (amountMinor !== BigInt(order.totalCents)) {
+    return {
+      handled: false,
+      retryable: false,
+      message: `金额不匹配: 回调 ${String(payload.amount)} ${order.currency}，订单 ${order.totalCents}（最小单位）`,
+    };
   }
 
   // actual_amount 与创建交易快照一致（位数可不同的等值字符串）

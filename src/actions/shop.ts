@@ -1,6 +1,6 @@
 "use server";
 
-import { createOrder, OrderError } from "@/server/order/create-order";
+import { createOrder, createOrderForRepurchase, OrderError } from "@/server/order/create-order";
 import type { CreateOrderResult } from "@/server/order/create-order";
 import { lookupOrder, type PublicOrderView } from "@/server/order/query-order";
 import { cancelPendingOrder } from "@/server/order/fulfill-order";
@@ -116,26 +116,32 @@ export async function cancelOrderAction(
   return { ok: true, message: result.message };
 }
 
-/* ===== 过期订单重新发起支付 ===== */
+/* ===== 过期/关闭订单：重新下单 ===== */
 
-export interface ResumePaymentState {
+export interface RepurchaseState {
   error?: string;
   ok?: boolean;
   paymentUrl?: string;
+  orderNo?: string;
   message?: string;
 }
 
 /**
- * 重新发起支付（仅限 pending 且已过期的订单）。
+ * 过期订单「重新购买」。
  *
- * 双因子校验订单号 + 邮箱，避免凭订单号替他人发起支付。
- * 重新发起会登记一条新的支付尝试；旧交易保留但对订单不再有影响
- * （其延迟回调因「非当前尝试」被拒绝，见 fulfill-order status=3 分支）。
+ * 业务规则（方案 A）：过期订单**不恢复**。原因：
+ * - 过期时库存已释放（卡密回到 available、manual 库存已回补），
+ *   原地恢复需要重新预留，且要与旧交易的可能回调竞争；
+ * - 旧通道的收银台地址虽已失效，但延迟回调仍可能到达，
+ *   恢复成 pending 会让「旧交易到账」变成合法入账路径，复杂且易错。
+ * 因此改为**创建一笔新订单**：语义清晰，库存与支付都走既有安全路径。
+ *
+ * 需要双因子（订单号 + 邮箱）确认归属，避免凭订单号替他人下单。
  */
-export async function resumePaymentAction(
-  _prev: ResumePaymentState | null,
+export async function repurchaseOrderAction(
+  _prev: RepurchaseState | null,
   formData: FormData
-): Promise<ResumePaymentState> {
+): Promise<RepurchaseState> {
   const orderNo = String(formData.get("orderNo") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
 
@@ -143,24 +149,33 @@ export async function resumePaymentAction(
     return { error: "请填写订单号与下单邮箱" };
   }
 
-  // 双因子确认归属
+  // 双因子确认归属（lookupOrder 会顺带把超时订单惰性置为 expired）
   const view = lookupOrder(orderNo, email);
   if (!view) return { error: "订单号与邮箱不匹配" };
-  if (view.status === "completed") return { error: "订单已完成，无需重新支付" };
-  if (view.status === "paid" || view.status === "delivering") {
-    return { error: "支付已确认，请勿重复支付" };
+
+  if (view.status === "completed" || view.status === "paid" || view.status === "delivering") {
+    return { error: "该订单已支付，无需重新购买" };
   }
-  if (view.status === "closed") {
-    return { error: "订单已关闭，请重新下单" };
+  if (view.status === "pending") {
+    return { error: "该订单仍在待支付状态，请直接前往收银台完成支付" };
   }
-  if (view.status !== "pending") {
-    return { error: `当前状态（${view.statusLabel}）无法重新发起支付` };
+  // 仅 expired / closed 允许重新购买
+  if (!view.productSlug) {
+    return { error: "原商品已下架或删除，请返回商品列表重新选择" };
   }
 
-  const { resumeOrderPayment } = await import("@/server/order/create-order");
-  const result = await resumeOrderPayment(orderNo);
-  if (!result.ok || !result.paymentUrl) {
-    return { error: result.message };
+  try {
+    // 通过原始订单反查下单参数，创建一笔全新订单
+    const fresh = await createOrderForRepurchase(orderNo, email);
+    return {
+      ok: true,
+      orderNo: fresh.orderNo,
+      paymentUrl: fresh.paymentUrl,
+      message: "已为你创建新订单",
+    };
+  } catch (err) {
+    if (err instanceof OrderError) return { error: err.message };
+    console.error("[repurchaseOrderAction]", err);
+    return { error: "重新下单失败，请稍后重试或联系客服" };
   }
-  return { ok: true, message: result.message, paymentUrl: result.paymentUrl };
 }
