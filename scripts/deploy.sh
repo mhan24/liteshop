@@ -2,18 +2,43 @@
 #
 # 部署脚本：把当前工作区同步到服务器并重建容器。
 #
+# ⚠️ 这是**上线操作**，会直接影响正在服务真实交易的生产环境。
+#    按项目约定，代码改动应先只推送 GitHub，等用户明确下达部署指令后才运行本脚本。
+#
 # 凭证与运行时配置分离：
 #   - .env        应用运行时配置（会被 docker compose 读取）
 #   - .deploy.env 仅本脚本读取的 SSH 凭证（不进容器、不参与 compose）
 #
 # 用法：
-#   ./scripts/deploy.sh            # 同步 + 重建
-#   ./scripts/deploy.sh --dry-run  # 只显示将要同步的内容
+#   ./scripts/deploy.sh --dry-run   # 预览（不做任何改动，无需确认）
+#   ./scripts/deploy.sh --yes       # 直接部署（用于已获授权的自动化）
+#   ./scripts/deploy.sh             # 交互确认后部署
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+DRY_RUN=false
+ASSUME_YES=false
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    --yes|-y)  ASSUME_YES=true ;;
+    *) echo "未知参数: $arg" >&2; exit 2 ;;
+  esac
+done
+
+# 非 dry-run 且未显式 --yes 时要求交互确认，避免误触上线
+if [[ "$DRY_RUN" != true && "$ASSUME_YES" != true ]]; then
+  if [[ ! -t 0 ]]; then
+    echo "✗ 非交互环境：请显式传入 --yes 以确认部署" >&2
+    exit 1
+  fi
+  echo "即将部署到生产环境（$ROOT → 服务器）。"
+  read -r -p "确认部署？输入 yes 继续：" reply
+  [[ "$reply" == "yes" ]] || { echo "已取消"; exit 0; }
+fi
 
 DEPLOY_ENV="$ROOT/.deploy.env"
 if [[ ! -f "$DEPLOY_ENV" ]]; then

@@ -42,6 +42,27 @@ docker compose up -d --build
 
 生产必须通过反向代理（Nginx / Caddy）提供 **HTTPS**：会话 Cookie 依赖 `Secure`，支付回调也要求公网可达。
 
+### 发布流程
+
+代码改动与上线**分离**：
+
+```bash
+# 1) 只提交代码（不改动生产）
+npm test && npx tsc --noEmit && npm run lint
+git push
+
+# 2) 确认要上线时，再执行部署（脚本会同步源码并重建容器）
+./scripts/deploy.sh --dry-run   # 预览将要同步的文件
+./scripts/deploy.sh             # 交互确认后部署；CI 等自动化场景用 --yes
+```
+
+部署脚本会：
+- 只同步源码（`node_modules`/`.next`/`data`/`.env*` 一律排除）
+- 解包前后比对 `.env` 指纹，**防止覆盖生产配置**（不一致即中止）
+- 重建镜像并重启，随后由健康检查判定结果
+
+凭证放在 `.deploy.env`（参考 `.deploy.env.example`，勿入库）。
+
 ### docker-compose 要点
 
 - 数据卷 `liteshop-data` 挂载 `/app/data`：SQLite 数据库 + 自动备份目录
