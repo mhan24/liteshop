@@ -4,6 +4,92 @@
 
 ---
 
+## 2026-10-12 · `92a607b`（当前生产）
+
+**状态**：已上线并通过验收（发布候选版本）
+
+### 提交
+
+| 项 | 值 |
+|---|---|
+| SHA | `92a607b4aca8bb698b584f1b02d3a969d68cbd44` |
+| 短 SHA | `92a607b` |
+| 部署时间 | 2026-10-12T23:20+08:00 |
+| 上一版本 | `8d5d4590ea15ee526c908f6a8c87ea0573b0ec98` |
+| CI | ✅ success |
+| 追赶提交 | 7 个（b91401d、293496e、c3b9c3a、b2163fd、38fb675、7d0768e、92a607b） |
+
+### 本次包含的修复
+
+| 级别 | 内容 |
+|---|---|
+| P1 | 不限库存（-1）不再被数量回补成 0（意外售罄） |
+| P1 | 异常到账补发改用订单 `deliveryType` 快照；后台列表展示快照 |
+| P1 | 登录限流增加 IP 维度（防轮换用户名绕过）+ TTL + 批量淘汰 |
+| P1 | 伪造 `X-Forwarded-For` 绕过 IP 限流（改取受信段） |
+| P1 | 支付创建与回调的状态同步窗口（写回前校验） |
+| P2 | 重购状态白名单（expired/closed），服务层 + Action 双重校验 |
+| P2 | 重购排除已收款（`paidAt`）与有待处理异常到账的订单 |
+| P2 | 库存模式切换（有限↔不限）重置历史订单占用 |
+| P2 | 重购资格由服务端统一计算，前台按钮不再自行推断 |
+| P2 | 支付回跳页补齐 turnstile 与重购资格配置 |
+| — | 订单号冲突重试加 SAVEPOINT（防重复扣库存） |
+| — | 惰性清扫在写事务内重新读取；改凭据改为原子提交 |
+
+### 数据库
+
+| 项 | 值 |
+|---|---|
+| 迁移数 | **9**（本次新增 `0008_order-delivery-type-reconcile`） |
+| 0008 预演 | 生产副本上校正 **0 行**（现有数据本已正确，属安全网） |
+| integrity_check | ok |
+| foreign_key_check | ok |
+| 数据 | orders 5 / products 1 / cards 2 / payment_attempts 5 / payment_anomalies 0 |
+
+### 部署前备份
+
+- `pre-92a607b-20261012-232011.db`（212K，VACUUM INTO）
+- `env-pre-92a607b-20261012-232011.bak`
+
+### 验收项目
+
+| 项目 | 结果 |
+|---|---|
+| 容器健康 | 应用 + Caddy 双 healthy（`--wait` 门控） |
+| 部署自检 | ✅ 运维脚本就位、cron 指向有效 |
+| 迁移 0008 | ✅ 副本预演 0 行校正，生产迁移数 9 |
+| 站点 | `/` `/orders` `/products/voxi` `/admin/login` 全 200 |
+| 安全响应头 | 3/3（CSP / HSTS / Permissions-Policy） |
+| mock 回调入口 | 404 |
+| **支付回跳页** | ✅ 200（本轮补齐 turnstile 与资格配置） |
+| **真实网关建单** | ✅ `expiration_time=899` |
+| **冷启动** | ✅ 停容器后重启，健康通过 |
+| cron 脚本 | ✅ expire-cron.sh / backup-cron.sh 均存在可执行 |
+| **重购资格** | ✅ 已收款订单 canRepurchase=false；未收款 closed 可重购 |
+| **服务器 vs git** | ✅ 153 个文件逐文件 sha256 完全一致 |
+
+### 重购资格在生产上的实际取值
+
+| 订单 | 状态 | 收款 | canRepurchase |
+|---|---|---|---|
+| LS202610119G3V8759SP | completed | 已收款 | false |
+| LS20261011WZCY7VBBKQ | closed | 未收款 | true |
+| LS20261011AY9TFWV6XD | closed | 未收款 | true |
+| LS20261012SUJ4V6TMS | closed | 未收款 | true |
+| LS20261012S8JVGSPFQZ | closed | 未收款 | true |
+
+### 回滚方式
+
+```bash
+git checkout 8d5d4590ea15ee526c908f6a8c87ea0573b0ec98
+./scripts/deploy.sh
+```
+
+> 回滚代码不会撤销迁移 0007 / 0008；`orders.delivery_type` 列会保留
+> （旧代码不读它，无副作用）。
+
+---
+
 ## 2026-10-12 · `8d5d459`（当前生产）
 
 **状态**：已上线并通过验收
