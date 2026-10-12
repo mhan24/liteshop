@@ -17,11 +17,12 @@ jobs:
     timeout-minutes: 20
 
     env:
-      # 测试环境变量（vitest.config.ts 亦会设置；此处保证 lint/build 阶段可解析）
-      NODE_ENV: test
-      AUTH_SECRET: ci-secret-not-used-in-production
-      PAYMENT_DRIVER: mock
       NEXT_TELEMETRY_DISABLED: "1"
+      # 注意：不要在这里设 PAYMENT_DRIVER=mock。
+      # next build 会以 NODE_ENV=production 收集页面数据，
+      # 此时 assertProductionSafety() 会（正确地）拒绝 mock 驱动。
+      PAYMENT_DRIVER: auto
+      AUTH_SECRET: ci-secret-not-used-in-production
 
     steps:
       - uses: actions/checkout@v4
@@ -44,8 +45,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # 测试需要 mock 渠道来跑通「下单 → 回调 → 发货」全链路；
+      # vitest.config.ts 也会设置 PAYMENT_DRIVER=mock（此处显式重申）
       - name: Test
         run: npm test
+        env:
+          PAYMENT_DRIVER: mock
 
       - name: Build
         run: npm run build
