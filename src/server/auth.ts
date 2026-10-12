@@ -46,16 +46,35 @@ function attemptKey(ip: string, username: string): string {
   return `${ip}|${username}`;
 }
 
-/** 回收过期记录；返回是否执行了清理 */
+/**
+ * 回收过期记录。
+ *
+ * 每次记录失败都全量遍历会带来 O(n) 开销，因此按时间节流：
+ * 至多每 SWEEP_INTERVAL_MS 扫一次（内存里最多多留一会儿过期项，无功能影响）。
+ */
+const SWEEP_INTERVAL_MS = 60_000;
+let lastSweepAt = 0;
+
 function sweepExpired(now = Date.now()): void {
+  if (now - lastSweepAt < SWEEP_INTERVAL_MS) return;
+  lastSweepAt = now;
   for (const [k, v] of attempts) {
     if (now - v.updatedAt > RECORD_TTL_MS && v.lockedUntil <= now) attempts.delete(k);
   }
 }
 
-/** 容量保护：仍超出上限时，淘汰最旧的记录 */
+/**
+ * 容量保护：超出上限时淘汰最旧记录。
+ *
+ * 关键：**不能每次插入都排序**（O(n log n)）。攻击者高频失败时，
+ * 每请求一次全量排序本身就是一种 CPU 放大。改为按批淘汰：
+ * 仅在超过上限一定比例时清理一次，且一次性削到上限，
+ * 把摊销成本降到 O(1)。
+ */
+const EVICT_BATCH_RATIO = 1.25; // 超出上限 25% 才触发一次批量淘汰
+
 function enforceCapacity(): void {
-  if (attempts.size <= MAX_RECORDS) return;
+  if (attempts.size <= MAX_RECORDS * EVICT_BATCH_RATIO) return;
   const sorted = [...attempts.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
   const toRemove = attempts.size - MAX_RECORDS;
   for (let i = 0; i < toRemove; i++) attempts.delete(sorted[i][0]);

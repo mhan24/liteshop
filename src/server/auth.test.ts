@@ -40,13 +40,16 @@ describe("登录限流", () => {
     expect(locked("198.51.100.1", "admin")).toBe(0);
   });
 
-  it("记录数不会被大量不同用户名撑爆（容量上限）", async () => {
+  it("记录数不会被大量不同用户名撑爆（容量上限 + 批量淘汰）", async () => {
     const { recordFailure: rec, _attemptRecordsSize: size } = await import("./auth");
-    for (let i = 0; i < 20000; i++) {
+    // 轮换用户名刷记录：键空间随请求线性增长
+    for (let i = 0; i < 8000; i++) {
       rec(`10.0.${Math.floor(i / 250)}.${i % 250}`, `u${i}`);
     }
-    // 上限 5000（含 IP 维度记录），必须被强制约束
-    expect(size()).toBeLessThanOrEqual(5000);
+    // 上限 5000，允许 25% 的批量淘汰余量 → 实际不超过 6250
+    expect(size()).toBeLessThanOrEqual(6250);
+    // 且必须真的发生过淘汰（否则说明容量保护失效）
+    expect(size()).toBeLessThan(8000 * 2);
   });
 });
 
