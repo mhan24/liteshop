@@ -50,6 +50,13 @@ export interface RateLimitResult {
 const SWEEP_THROTTLE_MS = 60_000;
 /** 容量上限：超出后批量淘汰最旧的记录，防止内存无界增长 */
 const MAX_BUCKETS = 20_000;
+/** 淘汰目标水位：一次清理到这个数量，避免每个新键都触发排序 */
+const EVICT_TARGET = 15_000;
+
+/** 供测试：读取阈值配置 */
+export function _rateLimits(): { max: number; target: number } {
+  return { max: MAX_BUCKETS, target: EVICT_TARGET };
+}
 
 export function consume(key: string, rule: RateLimitRule): RateLimitResult {
   const now = Date.now();
@@ -60,9 +67,14 @@ export function consume(key: string, rule: RateLimitRule): RateLimitResult {
     lastSweepAt = now;
     sweepRateBuckets(now);
   }
+  // 容量保护：**批量**淘汰，而不是每超一条就删一条。
+  // 早期实现是「删掉超出的那几条」，在持续高基数流量下会退化成
+  // 「每个新键触发一次全量排序」——限流本身成了 CPU 放大。
+  // 现改为允许适度超出，达到触发点后一次清理到低水位，
+  // 把排序的摊销成本降到 O(1)。（与管理员登录限流同一思路。）
   if (buckets.size > MAX_BUCKETS) {
     const sorted = [...buckets.entries()].sort((a, b) => a[1].resetAt - b[1].resetAt);
-    for (let i = 0; i < buckets.size - MAX_BUCKETS; i++) buckets.delete(sorted[i][0]);
+    for (let i = 0; i < buckets.size - EVICT_TARGET; i++) buckets.delete(sorted[i][0]);
   }
 
   const rec = buckets.get(key);

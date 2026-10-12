@@ -320,8 +320,10 @@ function insertOrderWithRetry(
  * better-sqlite3 的 SQLITE_CONSTRAINT_UNIQUE 会带消息：
  *   "UNIQUE constraint failed: orders.order_no"
  * 据此精确匹配，避免把其它约束/IO 错误误判为可重试冲突。
+ *
+ * 导出以便单独测试（纯函数），避免"测试只复制了判别条件"却未覆盖真实调用路径。
  */
-function isOrderNoCollision(err: unknown): boolean {
+export function isOrderNoCollision(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const code = (err as { code?: string }).code;
   const msg = err.message ?? "";

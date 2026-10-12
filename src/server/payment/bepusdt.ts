@@ -128,12 +128,19 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
         signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) {
-        // 5xx 表示网关**可能已经建单**（例如写完库后返回失败、或前置代理报错），
-        // 因此归为 unknown：不得据此关单释放库存。
-        // 4xx 是明确的请求侧拒绝（参数/鉴权），可以安全判定为未建单。
-        const outcome = res.status >= 500 ? "unknown" : "rejected";
+        // 结果分类（决定上层是否补偿关单、释放库存）：
+        //
+        // unknown = 「无法证明网关未建单」→ 保留订单待对账
+        // rejected = 「明确是本次请求被拒」→ 可安全关单
+        //
+        // - 5xx：网关可能已建单（写完库后报错、前置代理故障）→ unknown
+        // - 408 / 429：请求超时或被限流。上游可能**已接受**该请求，
+        //   只是由中间层返回了这类错误 → 不能证明未建单 → unknown
+        // - 其它 4xx（400 参数错误、401 鉴权失败、404 等）：
+        //   是明确的请求侧拒绝 → rejected
+        const AMBIGUOUS = res.status >= 500 || res.status === 408 || res.status === 429;
         throw new PaymentCreationError(
-          outcome,
+          AMBIGUOUS ? "unknown" : "rejected",
           `bepusdt 创建订单 HTTP ${res.status}`
         );
       }
