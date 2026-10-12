@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { sweepExpiredOrders, countOverduePending, purgeOldLogs } from "@/server/order/expire-orders";
 import { envConfig } from "@/lib/env";
+import { retryFailedMails } from "@/server/mail";
 
 /**
  * 超时订单清理（兜底定时器）。
@@ -30,7 +31,7 @@ function authorized(request: Request): boolean {
   return safeEqual(given, expected);
 }
 
-function handle(request: Request): Response {
+async function handle(request: Request): Promise<Response> {
   if (!authorized(request)) {
     return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
@@ -38,20 +39,28 @@ function handle(request: Request): Response {
   const result = sweepExpiredOrders();
   // 顺带执行日志保留策略：回调端点未认证，日志表增长需设上限（见 purgeOldLogs 注释）
   const purged = purgeOldLogs();
+  // 重试失败的交易邮件（送信失败不应永久丢失）
+  let mails = { retried: 0, succeeded: 0 };
+  try {
+    mails = await retryFailedMails();
+  } catch (err) {
+    console.error("[cron-mail-retry]", err);
+  }
   return Response.json({
     ok: true,
     expired: result.expired,
     orderNos: result.orderNos,
     overdueBefore,
     purged,
+    mails,
   });
 }
 
 export async function POST(request: Request): Promise<Response> {
-  return handle(request);
+  return await handle(request);
 }
 
 /** GET 便于简单 cron（如 cron-job.org / curl）；同样强制密钥 */
 export async function GET(request: Request): Promise<Response> {
-  return handle(request);
+  return await handle(request);
 }

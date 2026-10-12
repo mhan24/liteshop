@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currencySymbol, formatCents, formatMoney, MoneyParseError, normalizeAmountString, toCents } from "./money";
+import { currencySymbol, formatCents, formatMoney, MoneyParseError, normalizeAmountString, toCents, toMinorUnits, minorUnitsToNumber, isZeroDecimalCurrency } from "./money";
 
 describe("toCents（整数分转换，禁浮点）", () => {
   it("整数字符串", () => {
@@ -81,5 +81,43 @@ describe("formatMoney / currencySymbol（全站统一展示）", () => {
 
   it("大小写不敏感", () => {
     expect(formatMoney(990n, "usd")).toBe("$9.90");
+  });
+});
+
+describe("零小数币种（JPY）", () => {
+  it("JPY 展示不带小数", () => {
+    expect(formatMoney(1500n, "JPY")).toBe("¥1500");
+    expect(formatMoney(0n, "JPY")).toBe("¥0");
+    // 其它币种仍保留两位
+    expect(formatMoney(1500n, "USD")).toBe("$15.00");
+  });
+
+  it("JPY 价格按整数日元解析（不做 /100）", () => {
+    expect(toMinorUnits("1500", "JPY")).toBe(1500n);
+    expect(toMinorUnits(900, "JPY")).toBe(900n);
+    // 两位小数币种照常
+    expect(toMinorUnits("9.90", "USD")).toBe(990n);
+    expect(toMinorUnits("1500", "USD")).toBe(150000n);
+  });
+
+  it("JPY 拒绝小数金额（日元没有分）", () => {
+    expect(() => toMinorUnits("15.5", "JPY")).toThrow();
+    expect(() => toMinorUnits("15.05", "JPY")).toThrow();
+    // .00 允许（等价整数）
+    expect(toMinorUnits("15.00", "JPY")).toBe(15n);
+  });
+
+  it("传给网关的数值按币种换算", () => {
+    expect(minorUnitsToNumber(1500n, "JPY")).toBe(1500);
+    expect(minorUnitsToNumber(1500n, "USD")).toBe(15);
+  });
+});
+
+describe("按币种区分最小单位（回归：跨币种直接相加）", () => {
+  it("isZeroDecimalCurrency 判定正确", () => {
+    expect(isZeroDecimalCurrency("JPY")).toBe(true);
+    expect(isZeroDecimalCurrency("jpy")).toBe(true);
+    expect(isZeroDecimalCurrency("USD")).toBe(false);
+    expect(isZeroDecimalCurrency("CNY")).toBe(false);
   });
 });

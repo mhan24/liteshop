@@ -2,7 +2,7 @@ import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { cards, orders, products } from "@/db/schema";
 import type { NewProduct, Product } from "@/db/schema";
-import { SUPPORTED_CURRENCIES, toCents } from "@/lib/money";
+import { SUPPORTED_CURRENCIES, toMinorUnits, isZeroDecimalCurrency } from "@/lib/money";
 import { getSiteCurrency } from "@/server/settings";
 import { normalizeStockLimit } from "@/lib/stock";
 import { slugify } from "@/lib/slug";
@@ -71,11 +71,22 @@ export function validateProductInput(input: ProductInput): { ok: true; data: Omi
   if (!name || name.length > 100) return { ok: false, message: "商品名必填且不超过 100 字" };
   // toCents 对非法输入抛 MoneyParseError：此处必须捕获并转为可读校验错误，
   // 否则后台填错价格会让 Server Action 直接抛未处理异常（整页 500）。
+  // 币种需先确定，才能按对应「最小单位」解析价格（JPY 无小数）
+  const rawCurrency = (input.currency ?? "").trim().toUpperCase();
+  const effectiveCurrency =
+    rawCurrency !== "" && (SUPPORTED_CURRENCIES as readonly string[]).includes(rawCurrency)
+      ? rawCurrency
+      : getSiteCurrency();
   let price: bigint;
   try {
-    price = toCents(input.priceCentsText.trim());
+    price = toMinorUnits(input.priceCentsText.trim(), effectiveCurrency);
   } catch {
-    return { ok: false, message: "价格格式不正确，请填写如 9.90 的数字" };
+    return {
+      ok: false,
+      message: isZeroDecimalCurrency(effectiveCurrency)
+        ? `${effectiveCurrency} 为无小数币种，请填写整数金额（如 1500）`
+        : "价格格式不正确，请填写如 9.90 的数字",
+    };
   }
   if (price <= 0n) return { ok: false, message: "价格必须大于 0" };
   if (Number(price) > 90_000_000_000) return { ok: false, message: "价格过大" };
@@ -256,17 +267,24 @@ export function clearAvailableCards(productId: number): number {
 
 export interface DashboardStats {
   todayOrders: number;
-  todayRevenueCents: number;
+  /** 按币种分组的今日营收（禁止跨币种直接相加） */
+  todayRevenue: CurrencyRevenue[];
   totalOrders: number;
-  totalRevenueCents: number;
+  /** 按币种分组的累计营收 */
+  totalRevenue: CurrencyRevenue[];
   pendingManual: number; // paid（待人工发货）
   delivering: number;
   lowStockProducts: { id: number; name: string; slug: string; availableCards: number }[];
 }
 
+export interface CurrencyRevenue {
+  currency: string;
+  orders: number;
+  amount: number;
+}
+
 export function getDashboardStats(threshold: number): DashboardStats {
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
+  const dayStart = startOfTodayBeijing();
 
   /**
    * 营收口径：以 paidAt 是否为 NULL 判定「是否真的收到过钱」。
@@ -274,21 +292,28 @@ export function getDashboardStats(threshold: number): DashboardStats {
    * 不能用 status IN (paid,delivering,completed)——已付款订单被管理员关闭后
    * status 变为 closed，会从营收中凭空消失（少计已收款项）。
    * paidAt 只在 pending→paid 的真实入账时刻写入，是「收过钱」的可靠事实。
+   *
+   * 必须按 currency 分组：totalCents 是「最小单位」，随币种不同（JPY 无小数），
+   * 直接把 USD 与 CNY 的金额相加会得出无意义的数字。
    */
-  const revenueRow = (from?: Date) =>
+  const revenueByCurrency = (from?: Date): CurrencyRevenue[] =>
     db
       .select({
-        n: sql<number>`count(*)`,
-        sum: sql<number>`coalesce(sum(${orders.totalCents}), 0)`,
+        currency: orders.currency,
+        orders: sql<number>`count(*)`,
+        amount: sql<number>`coalesce(sum(${orders.totalCents}), 0)`,
       })
       .from(orders)
       .where(
         from ? and(isNotNull(orders.paidAt), gte(orders.paidAt, from)) : isNotNull(orders.paidAt)
       )
-      .get()!;
+      .groupBy(orders.currency)
+      .all();
 
-  const today = revenueRow(dayStart);
-  const total = revenueRow();
+  const today = revenueByCurrency(dayStart);
+  const total = revenueByCurrency();
+  const todayOrderCount = today.reduce((s, r) => s + r.orders, 0);
+  const totalOrderCount = db.select({ n: sql<number>`count(*)` }).from(orders).get()?.n ?? 0;
 
   const statusCount = (status: string) =>
     db.select({ n: sql<number>`count(*)` }).from(orders).where(eq(orders.status, status)).get()?.n ?? 0;
@@ -306,14 +331,28 @@ export function getDashboardStats(threshold: number): DashboardStats {
   }
 
   return {
-    todayOrders: today.n,
-    todayRevenueCents: today.sum,
-    totalOrders: total.n,
-    totalRevenueCents: total.sum,
+    todayOrders: todayOrderCount,
+    todayRevenue: today,
+    totalOrders: totalOrderCount,
+    totalRevenue: total,
     pendingManual: statusCount("paid"),
     delivering: statusCount("delivering"),
     lowStockProducts: lowStock,
   };
+}
+
+/**
+ * 「今天」的起点（北京时间）。
+ *
+ * 站点所有面向用户的日期展示都用 Asia/Shanghai（见 lib/datetime），
+ * 但 new Date().setHours(0,0,0,0) 按**服务器时区**切分——容器默认 UTC，
+ * 会让「今日营收」与后台显示的北京时间错开 8 小时。
+ */
+export function startOfTodayBeijing(now: Date = new Date()): Date {
+  const TZ_OFFSET_MS = 8 * 60 * 60 * 1000; // Asia/Shanghai 无夏令时，固定 UTC+8
+  const shifted = new Date(now.getTime() + TZ_OFFSET_MS);
+  shifted.setUTCHours(0, 0, 0, 0);
+  return new Date(shifted.getTime() - TZ_OFFSET_MS);
 }
 
 /** 订单列表（后台）：状态筛选 + 关键字（订单号/邮箱） */

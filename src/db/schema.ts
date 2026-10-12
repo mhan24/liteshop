@@ -130,9 +130,61 @@ export const orders = sqliteTable(
   },
   (t) => [
     uniqueIndex("orders_order_no_uq").on(t.orderNo),
-    uniqueIndex("orders_trade_id_uq").on(t.tradeId),
+    // 注意：不再对 trade_id 建唯一索引——同一订单可多次发起支付（每次一个新 trade_id），
+    // 唯一性改由 payment_attempts.trade_id 保证。
+    index("orders_trade_id_idx").on(t.tradeId),
     index("orders_status_idx").on(t.status),
     index("orders_email_idx").on(t.email),
+  ]
+);
+
+/** 支付尝试状态机 */
+export const PaymentAttemptStatus = {
+  /** 已创建，等待买家支付 */
+  pending: "pending",
+  /** 已确认到账（该尝试成功） */
+  paid: "paid",
+  /** 超时/被替换，不再有效 */
+  expired: "expired",
+  /** 结果未知（创建超时等），需对账确认 */
+  unknown: "unknown",
+} as const;
+export type PaymentAttemptStatusType =
+  (typeof PaymentAttemptStatus)[keyof typeof PaymentAttemptStatus];
+
+/**
+ * 支付尝试（每次「发起支付」一行）。
+ *
+ * 解决的问题：订单原先把 trade_id/paymentUrl 直接存在 orders 上并被覆盖，
+ * 导致旧交易的延迟回调无法识别、可能误关一张已有新交易的订单。
+ * 现在每个 trade_id 独立成行，回调先按 trade_id 定位到具体尝试再决定影响。
+ */
+export const paymentAttempts = sqliteTable(
+  "payment_attempts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    orderNo: text("order_no").notNull(),
+    provider: text("provider").notNull(),
+    /** 渠道交易号；唯一，是回调归属的判据 */
+    tradeId: text("trade_id"),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    paymentUrl: text("payment_url").notNull().default(""),
+    expectedActualAmount: text("expected_actual_amount"),
+    expirationTime: integer("expiration_time", { mode: "timestamp_ms" }),
+    status: text("status").notNull().default(PaymentAttemptStatus.pending),
+    /** 是否仍是订单的当前有效尝试（只有它能把订单推向 paid/completed） */
+    isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(true),
+    /** 渠道原始响应快照（对账） */
+    raw: text("raw"),
+    paidAt: integer("paid_at", { mode: "timestamp_ms" }),
+    createdAt: ts(),
+    updatedAt: tsUpdated(),
+  },
+  (t) => [
+    uniqueIndex("payment_attempts_trade_id_uq").on(t.tradeId),
+    index("payment_attempts_order_idx").on(t.orderNo),
+    index("payment_attempts_status_idx").on(t.status),
   ]
 );
 
@@ -196,9 +248,22 @@ export const mailLogs = sqliteTable(
     orderNo: text("order_no").notNull(),
     kind: text("kind").notNull(),
     email: text("email").notNull(),
+    /**
+     * sent   = 已成功送达
+     * failed = 尝试过但失败（可被定时重试）
+     * sending = 发送中（租约状态，防止并发重复发送）
+     */
     status: text("status").notNull().default("sent"),
     error: text("error").notNull().default(""),
+    /** 已尝试次数（含成功那次） */
+    attempts: integer("attempts").notNull().default(0),
+    /** 下次可重试时间；NULL = 无需重试 */
+    nextRetryAt: integer("next_retry_at", { mode: "timestamp_ms" }),
     createdAt: ts(),
+    updatedAt: tsUpdated(),
   },
-  (t) => [uniqueIndex("mail_logs_order_kind_uq").on(t.orderNo, t.kind)]
+  (t) => [
+    uniqueIndex("mail_logs_order_kind_uq").on(t.orderNo, t.kind),
+    index("mail_logs_retry_idx").on(t.status, t.nextRetryAt),
+  ]
 );

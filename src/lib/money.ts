@@ -60,9 +60,48 @@ export function centsToNumber(cents: bigint): number {
   return Number(formatCents(cents));
 }
 
+/**
+ * 按币种的「最小单位」解析金额（边界转换的唯一正确入口）。
+ *
+ * - 两位小数币种（USD/CNY/EUR/GBP）：输入 9.9 → 990（分）
+ * - 零小数币种（JPY）：输入 1500 → 1500（日元，不做 /100）
+ *
+ * 历史缺陷：商品价格一律走 toCents，导致 JPY 商品「1500 日元」被存成
+ * 150000（误当作分），展示与传给网关的金额都放大 100 倍。
+ */
+export function toMinorUnits(input: string | number, currency: string): bigint {
+  if (!isZeroDecimalCurrency(currency)) return toCents(input);
+  // 零小数币种：直接按整数解析，拒绝小数（日元没有 0.5 日元）
+  const s = (typeof input === "number" ? String(input) : input).trim();
+  const m = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(s);
+  if (!m) throw new MoneyParseError(`非法金额: ${input}`);
+  const [, sign, intPart, frac = ""] = m;
+  if (frac !== "" && /[1-9]/.test(frac)) {
+    throw new MoneyParseError(`${currency} 不支持小数金额: ${input}`);
+  }
+  const v = BigInt(intPart);
+  return sign === "-" ? -v : v;
+}
+
+/** 最小单位 → 传输给网关的数值（JPY 直接输出日元数，不除 100） */
+export function minorUnitsToNumber(minor: bigint, currency: string): number {
+  return isZeroDecimalCurrency(currency) ? Number(minor) : centsToNumber(minor);
+}
+
 /** 站点支持的币种（与 bepusdt fiat 对齐：CNY/USD/EUR/GBP/JPY） */
 export const SUPPORTED_CURRENCIES = ["USD", "CNY", "EUR", "GBP", "JPY"] as const;
 export type CurrencyCode = (typeof SUPPORTED_CURRENCIES)[number];
+
+/**
+ * 零小数币种（无「分」概念）。JPY 最小单位就是 1 日元。
+ * 内部仍统一用「整数最小单位」存储（JPY 的 cents == 日元），
+ * 只是展示与传输时不能除以 100。
+ */
+const ZERO_DECIMAL_CURRENCIES = new Set(["JPY"]);
+
+export function isZeroDecimalCurrency(code: string): boolean {
+  return ZERO_DECIMAL_CURRENCIES.has(code.toUpperCase());
+}
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: "$",
@@ -76,11 +115,12 @@ export function currencySymbol(code: string): string {
   return CURRENCY_SYMBOLS[code.toUpperCase()] ?? "";
 }
 
-/** 金额展示统一入口："$9.90"；未知币种回退 "CODE 9.90" */
+/** 金额展示统一入口："$9.90"；JPY 无小数（"¥1500"）；未知币种回退 "CODE 9.90" */
 export function formatMoney(cents: bigint, currency: string): string {
   const code = currency.toUpperCase();
   const sym = CURRENCY_SYMBOLS[code];
-  const amount = formatCents(cents);
+  // 零小数币种：内部最小单位即主单位，不补两位小数
+  const amount = isZeroDecimalCurrency(code) ? cents.toString() : formatCents(cents);
   return sym ? `${sym}${amount}` : `${code} ${amount}`;
 }
 

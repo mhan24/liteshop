@@ -4,7 +4,6 @@ import { getAdminBase } from "@/lib/admin-path";
 import { takeFlash } from "@/lib/flash-store";
 import { getSetting, SETTING_KEYS } from "@/server/settings";
 import { formatMoney } from "@/lib/money";
-import { getSiteCurrency } from "@/server/settings";
 import { Flash } from "@/components/admin/flash";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -21,7 +20,6 @@ export default async function AdminDashboardPage({
   const threshold = Number(getSetting(SETTING_KEYS.cardLowStockThreshold) ?? "5") || 5;
   const stats = getDashboardStats(threshold);
   const base = await getAdminBase();
-  const siteCurrency = getSiteCurrency();
 
   return (
     <div className="space-y-6">
@@ -34,9 +32,9 @@ export default async function AdminDashboardPage({
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard title="今日订单" value={String(stats.todayOrders)} />
-        <StatCard title="今日销售额" value={formatMoney(BigInt(stats.todayRevenueCents), siteCurrency)} />
+        <StatCard title="今日销售额" value={formatRevenue(stats.todayRevenue)} />
         <StatCard title="累计订单" value={String(stats.totalOrders)} />
-        <StatCard title="累计销售额" value={formatMoney(BigInt(stats.totalRevenueCents), siteCurrency)} />
+        <StatCard title="累计销售额" value={formatRevenue(stats.totalRevenue)} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -118,4 +116,19 @@ function Row({ label, value, href }: { label: string; value: number; href: strin
       </span>
     </Link>
   );
+}
+
+/**
+ * 按币种展示营收：多币种时逐行列出，绝不跨币种相加。
+ * 单币种时与原展示一致（不引入额外视觉噪音）。
+ */
+function formatRevenue(rows: { currency: string; amount: number }[]): string {
+  const nonEmpty = rows.filter((r) => r.amount !== 0 || r.currency);
+  if (nonEmpty.length === 0) return "—";
+  if (nonEmpty.length === 1) {
+    return formatMoney(BigInt(nonEmpty[0].amount), nonEmpty[0].currency);
+  }
+  return nonEmpty
+    .map((r) => formatMoney(BigInt(r.amount), r.currency))
+    .join("  ");
 }

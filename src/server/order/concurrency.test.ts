@@ -138,3 +138,77 @@ describe("库存并发：不超卖", () => {
     expect(after.stockLimit).toBe(0);
   });
 });
+
+describe("P0 回归：重新支付后旧交易的延迟回调不得误关订单", () => {
+  it("旧 trade 的超时回调被忽略，订单保持 pending 以待新交易支付", async () => {
+    const p = seedAuto(["C1"]);
+    const r = await createOrder({ email: "a@test.dev", quantity: 1, slug: p.slug });
+    const oldTrade = getOrder(r.orderNo).tradeId!;
+
+    // 模拟订单超时后重新发起支付（新 trade）
+    db.update(orders)
+      .set({ expirationTime: new Date(Date.now() - 60_000), paymentUrl: null })
+      .where(eq(orders.orderNo, r.orderNo))
+      .run();
+    const { resumeOrderPayment } = await import("./create-order");
+    const resumed = await resumeOrderPayment(r.orderNo);
+    expect(resumed.ok).toBe(true);
+    const newTrade = getOrder(r.orderNo).tradeId!;
+    expect(newTrade).not.toBe(oldTrade);
+
+    // 旧交易的延迟超时回调到达（status=3）
+    const stale = handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo, tradeId: oldTrade,
+      amountCents: BigInt(getOrder(r.orderNo).totalCents), status: 3,
+    }));
+    expect(stale.message).toContain("非当前交易");
+    // 关键：订单不得被关掉，否则新交易的支付无法履约
+    expect(getOrder(r.orderNo).status).toBe("pending");
+    // 库存不得被释放
+    expect(cardsOf(p.id, "reserved")).toHaveLength(1);
+
+    // 新交易支付成功 → 正常履约
+    const ok = handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo, tradeId: newTrade,
+      amountCents: BigInt(getOrder(r.orderNo).totalCents), status: 2,
+    }));
+    expect(ok.handled).toBe(true);
+    expect(getOrder(r.orderNo).status).toBe("completed");
+  });
+
+  it("旧 trade 的支付成功回调被拒绝（不得为已替换的交易发货）", async () => {
+    const p = seedAuto(["C1", "C2"]);
+    const r = await createOrder({ email: "a@test.dev", quantity: 1, slug: p.slug });
+    const oldTrade = getOrder(r.orderNo).tradeId!;
+    db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000), paymentUrl: null })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    const { resumeOrderPayment } = await import("./create-order");
+    await resumeOrderPayment(r.orderNo);
+
+    const res = handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo, tradeId: oldTrade,
+      amountCents: BigInt(getOrder(r.orderNo).totalCents), status: 2,
+    }));
+    expect(res.handled).toBe(false);
+    expect(getOrder(r.orderNo).status).toBe("pending");
+    expect(cardsOf(p.id, "sold")).toHaveLength(0);
+  });
+
+  it("多次重新支付仅保留一个当前尝试，历史尝试可追溯", async () => {
+    const p = seedAuto(["C1"]);
+    const r = await createOrder({ email: "a@test.dev", quantity: 1, slug: p.slug });
+    const { resumeOrderPayment } = await import("./create-order");
+    const { listAttempts, getCurrentAttempt } = await import("@/server/payment/attempts");
+
+    for (let i = 0; i < 3; i++) {
+      db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000), paymentUrl: null })
+        .where(eq(orders.orderNo, r.orderNo)).run();
+      await resumeOrderPayment(r.orderNo);
+    }
+
+    const all = listAttempts(r.orderNo);
+    expect(all.length).toBe(4); // 首次下单 + 3 次重发
+    expect(all.filter((a) => a.isCurrent)).toHaveLength(1);
+    expect(getCurrentAttempt(r.orderNo)!.tradeId).toBe(getOrder(r.orderNo).tradeId);
+  });
+});

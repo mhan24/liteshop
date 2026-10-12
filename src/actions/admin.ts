@@ -29,8 +29,22 @@ import { setSetting, upsertPaymentConfig, SETTING_KEYS } from "@/server/settings
 import { clampBepusdtTimeout } from "@/server/payment/bepusdt";
 import { COPY_KEYS, setCopy } from "@/server/copy";
 import { SUPPORTED_CURRENCIES } from "@/lib/money";
+import { STOCK_UNLIMITED } from "@/lib/stock";
 
 /** 后台 Server Actions：全部经 session 鉴权 + CSRF 校验 + 审计日志 + service 层落库 */
+
+/**
+ * 解析商品表单的库存输入。
+ * 表单留空提交的是空字符串（不是 null），而 Number("") === 0
+ * 会被当成「售罄」——必须先判空，留空/非法一律返回 -1（不限）。
+ */
+function parseStockLimitInput(raw: FormDataEntryValue | null): number {
+  const s = String(raw ?? "").trim();
+  if (s === "") return STOCK_UNLIMITED;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return STOCK_UNLIMITED;
+  return Math.trunc(n) < 0 ? STOCK_UNLIMITED : Math.trunc(n);
+}
 
 async function requireSession() {
   const jar = await cookies();
@@ -117,9 +131,12 @@ export async function saveProductAction(formData: FormData) {
     description: String(formData.get("description") ?? ""),
     imageUrl: String(formData.get("imageUrl") ?? ""),
     priceCentsText: String(formData.get("price") ?? ""),
+    // 币种必须从表单读取，否则弹窗里选的币种不会保存（新建恒为站点默认）
+    currency: String(formData.get("currency") ?? ""),
     deliveryType: String(formData.get("deliveryType") ?? "auto"),
-    // 留空 = 不限（-1）；由 normalizeStockLimit 统一归一化
-    stockLimit: formData.get("stockLimit") === null ? -1 : Number(formData.get("stockLimit")),
+    // 留空 = 不限（-1）。注意表单留空提交的是空字符串 ""（不是 null），
+    // 而 Number("") === 0 会被误解为「售罄」，因此必须先判空再转数字。
+    stockLimit: parseStockLimitInput(formData.get("stockLimit")),
     status: String(formData.get("status") ?? "on"),
     sort: Number(formData.get("sort") ?? 0),
   };

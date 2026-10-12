@@ -1,4 +1,4 @@
-import { centsToNumber } from "@/lib/money";
+import { minorUnitsToNumber } from "@/lib/money";
 import { epusdtSign, epusdtVerify, parseJsonObject } from "@/lib/signature";
 import type {
   CreatePaymentInput,
@@ -111,7 +111,8 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
         order_id: input.orderNo,
         notify_url: input.notifyUrl,
         redirect_url: input.redirectUrl,
-        amount: centsToNumber(input.amountCents),
+        // 按币种输出：JPY 直接给日元数，不除以 100
+        amount: minorUnitsToNumber(input.amountCents, input.currency),
         // fiat 跟随订单币种（站点统一币种：USD/CNY/EUR/GBP/JPY）
         fiat: input.currency,
         name: input.subject,

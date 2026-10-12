@@ -1,11 +1,12 @@
 import { and, eq } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
-import { notifyLogs, orders, products } from "@/db/schema";
+import { notifyLogs, orders, paymentAttempts, products } from "@/db/schema";
 import type { Order, OrderStatus } from "@/db/schema";
 import { normalizeAmountString, toCents } from "@/lib/money";
 import { sha256Hex } from "@/lib/signature";
 import { getProvider } from "@/server/payment";
 import { autoDelivery, getDeliveryStrategy } from "@/server/delivery";
+import { getCurrentAttempt, isCurrentTrade } from "@/server/payment/attempts";
 import type { MailKind } from "@/server/mail";
 import { assertTransition } from "./state-machine";
 
@@ -90,6 +91,20 @@ function markHandled(id: number, handled: boolean): void {
   db.update(notifyLogs).set({ handled }).where(eq(notifyLogs.id, id)).run();
 }
 
+/** 更新指定 trade_id 的支付尝试状态（回调处理时调用，必须传 tx 以保持原子性） */
+function markAttemptStatus(
+  tx: DbTransaction,
+  tradeId: string | null,
+  status: "paid" | "expired",
+  paidAt?: Date
+): void {
+  if (!tradeId) return;
+  tx.update(paymentAttempts)
+    .set({ status, paidAt: paidAt ?? null, updatedAt: new Date() })
+    .where(eq(paymentAttempts.tradeId, tradeId))
+    .run();
+}
+
 function processNotify(
   tx: DbTransaction,
   payload: import("@/server/payment").NotifyPayload
@@ -102,24 +117,35 @@ function processNotify(
     return { handled: true, retryable: false, message: "等待支付通知，忽略" };
   }
 
-  // status=3 支付超时：pending → expired
+  // status=3 支付超时：仅当该 trade_id 是订单「当前有效尝试」时才关闭订单。
+  // 关键：订单可能已重新发起支付（新 trade_id）。此时旧交易的延迟超时回调
+  // 若直接关单，会误杀一张已在新地址待支付的订单（买家随后付款成功却无法履约）。
   if (payload.status === 3) {
-    if (order.status === "pending") {
-      assertTransition("pending", "expired");
-      const product = order.productId
-        ? tx.select().from(products).where(eq(products.id, order.productId)).get()
-        : null;
-      if (product) {
-        // 未支付超时：回补 manual 库存等占用
-        getDeliveryStrategy(product.deliveryType).release(tx, order, product);
-      }
-      tx.update(orders)
-        .set({ status: "expired" as OrderStatus, updatedAt: new Date() })
-        .where(eq(orders.id, order.id))
-        .run();
-      return { handled: true, retryable: false, message: "订单已超时关闭" };
+    if (order.status !== "pending") {
+      return { handled: true, retryable: false, message: `超时通知，订单状态为 ${order.status}，忽略` };
     }
-    return { handled: true, retryable: false, message: `超时通知，订单状态为 ${order.status}，忽略` };
+    if (!isCurrentTrade(tx, order.orderNo, payload.tradeId)) {
+      // 旧交易/无主交易：记录但不改变订单，同时对账留痕
+      return {
+        handled: false,
+        retryable: false,
+        message: "超时回调属于非当前交易，已忽略（保留对账记录）",
+      };
+    }
+    assertTransition("pending", "expired");
+    const product = order.productId
+      ? tx.select().from(products).where(eq(products.id, order.productId)).get()
+      : null;
+    if (product) {
+      // 未支付超时：回补 manual 库存等占用
+      getDeliveryStrategy(product.deliveryType).release(tx, order, product);
+    }
+    tx.update(orders)
+      .set({ status: "expired" as OrderStatus, updatedAt: new Date() })
+      .where(eq(orders.id, order.id))
+      .run();
+    markAttemptStatus(tx, payload.tradeId, "expired");
+    return { handled: true, retryable: false, message: "订单已超时关闭" };
   }
 
   // ===== status=2 支付成功 =====
@@ -130,15 +156,23 @@ function processNotify(
     return { handled: false, retryable: false, message: `订单状态 ${order.status} 不接受支付通知` };
   }
 
-  // trade_id 必须与创建交易快照一致（防跨订单伪造）。
+  // trade_id 必须与订单「当前有效尝试」一致（防跨订单伪造 + 防旧交易误入账）。
   // 注意：不能因回调未携带 trade_id 就放行——否则攻击者可省略该字段绕过校验。
-  if (order.tradeId) {
-    if (!payload.tradeId) {
-      return { handled: false, retryable: false, message: "回调缺少 trade_id，拒绝入账" };
+  if (!payload.tradeId) {
+    return { handled: false, retryable: false, message: "回调缺少 trade_id，拒绝入账" };
+  }
+  const current = getCurrentAttempt(order.orderNo, tx);
+  if (current) {
+    if (current.tradeId !== payload.tradeId) {
+      return {
+        handled: false,
+        retryable: false,
+        message: "trade_id 非当前交易，拒绝入账（旧交易到账请走人工对账）",
+      };
     }
-    if (order.tradeId !== payload.tradeId) {
-      return { handled: false, retryable: false, message: "trade_id 与订单快照不匹配" };
-    }
+  } else if (order.tradeId && order.tradeId !== payload.tradeId) {
+    // 兼容迁移前的历史订单（尚无 attempt 记录）
+    return { handled: false, retryable: false, message: "trade_id 与订单快照不匹配" };
   }
 
   // 法币金额必须与订单一致（整数分比较，禁浮点运算）
@@ -180,6 +214,8 @@ function processNotify(
       .run();
     statusNow = "paid";
   }
+  // 标记本次支付尝试已到账
+  markAttemptStatus(tx, payload.tradeId, "paid", new Date());
 
   if (product.deliveryType === "auto") {
     const outcome = getDeliveryStrategy("auto").fulfill(tx, order, product);

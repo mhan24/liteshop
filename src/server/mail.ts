@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, lt, lte, sql } from "drizzle-orm";
 import { db, } from "@/db";
 import { mailLogs, orders } from "@/db/schema";
 import type { Order } from "@/db/schema";
@@ -40,6 +40,13 @@ export function getSmtpConfig(): SmtpConfig {
   };
 }
 
+/** 最大尝试次数（超过则不再自动重试，避免对坏地址无限发信） */
+const MAX_ATTEMPTS = 5;
+/** 重试退避（分钟）：第 n 次失败后等待的时长 */
+const RETRY_BACKOFF_MINUTES = [1, 5, 30, 120, 360];
+/** 「发送中」租约时长：超时后视为上次发送已崩溃，允许重新认领 */
+const SENDING_LEASE_MS = 5 * 60 * 1000;
+
 export interface MailSendResult {
   ok: boolean;
   skipped?: boolean;
@@ -47,8 +54,15 @@ export interface MailSendResult {
 }
 
 /**
- * 发送订单邮件（每订单每类只发一次：mail_logs 唯一约束幂等）。
- * force=true 用于后台「补发邮件」（删除旧记录后重发）。
+ * 发送订单邮件（幂等 + 失败可重试 + 防并发重复）。
+ *
+ * 状态机：无记录 → sending（租约）→ sent / failed（带 nextRetryAt）
+ *
+ * 关键点：
+ * - 只有 sent 才永久跳过；failed 会在退避到期后被重试（历史缺陷：
+ *   任何已存在的记录都会导致跳过，首次失败后永远不再尝试）。
+ * - 抢占式认领（条件 UPDATE 到 sending）保证并发调用只有一个真正发送。
+ * - delivered 邮件必须订单已 completed，避免给未交付订单发「已完成」通知。
  */
 export async function sendOrderEmail(orderNo: string, kind: MailKind, force = false): Promise<MailSendResult> {
   const smtp = getSmtpConfig();
@@ -59,38 +73,132 @@ export async function sendOrderEmail(orderNo: string, kind: MailKind, force = fa
   const order = db.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
   if (!order) return { ok: false, error: "订单不存在" };
 
-  // 幂等：已成功发过且非强制 → 跳过
+  // 交付邮件必须确认订单确实已交付（防止误导买家/泄露空内容）
+  if (kind === MAIL_KINDS.delivered && order.status !== "completed") {
+    return { ok: false, skipped: true, error: `订单尚未完成（当前 ${order.status}），不发送交付邮件` };
+  }
+
   const existing = db
     .select()
     .from(mailLogs)
     .where(and(eq(mailLogs.orderNo, orderNo), eq(mailLogs.kind, kind)))
     .get();
+
   if (existing && !force) {
-    return { ok: false, skipped: true, error: existing.status === "sent" ? "该邮件已发送过" : existing.error };
+    if (existing.status === "sent") {
+      return { ok: false, skipped: true, error: "该邮件已发送过" };
+    }
+    // sending 且租约未过期 → 另一进程正在发，避免重复
+    if (existing.status === "sending") {
+      const claimedAt = existing.updatedAt?.getTime() ?? 0;
+      if (Date.now() - claimedAt < SENDING_LEASE_MS) {
+        return { ok: false, skipped: true, error: "该邮件正在发送中" };
+      }
+    }
+    // failed：未到重试时间则跳过；超过最大次数则放弃
+    if (existing.status === "failed" && !force) {
+      if (existing.attempts >= MAX_ATTEMPTS) {
+        return { ok: false, skipped: true, error: `已达最大重试次数（${MAX_ATTEMPTS}）` };
+      }
+      if (existing.nextRetryAt && existing.nextRetryAt.getTime() > Date.now()) {
+        return { ok: false, skipped: true, error: "尚未到重试时间" };
+      }
+    }
   }
 
+  // 抢占式认领：只有把状态成功改为 sending 的调用者才继续发送
+  const claimed = claimForSending(existing?.id ?? null, orderNo, kind, order.email, force);
+  if (!claimed) {
+    return { ok: false, skipped: true, error: "该邮件正由其他任务发送" };
+  }
+
+  const attempts = (existing?.attempts ?? 0) + 1;
   const mail = renderOrderMail(order, kind);
   try {
     await deliver(smtp, order.email, mail.subject, mail.text, mail.html);
-    db.insert(mailLogs)
-      .values({ orderNo, kind, email: order.email, status: "sent", error: "" })
-      .onConflictDoUpdate({
-        target: [mailLogs.orderNo, mailLogs.kind],
-        set: { status: "sent", error: "", createdAt: new Date() },
-      })
+    db.update(mailLogs)
+      .set({ status: "sent", error: "", attempts, nextRetryAt: null, updatedAt: new Date() })
+      .where(and(eq(mailLogs.orderNo, orderNo), eq(mailLogs.kind, kind)))
       .run();
     return { ok: true };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    db.insert(mailLogs)
-      .values({ orderNo, kind, email: order.email, status: "failed", error: message.slice(0, 500) })
-      .onConflictDoUpdate({
-        target: [mailLogs.orderNo, mailLogs.kind],
-        set: { status: "failed", error: message.slice(0, 500), createdAt: new Date() },
-      })
+    const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+    const backoff = RETRY_BACKOFF_MINUTES[Math.min(attempts - 1, RETRY_BACKOFF_MINUTES.length - 1)];
+    const nextRetryAt =
+      attempts >= MAX_ATTEMPTS ? null : new Date(Date.now() + backoff * 60_000);
+    db.update(mailLogs)
+      .set({ status: "failed", error: message, attempts, nextRetryAt, updatedAt: new Date() })
+      .where(and(eq(mailLogs.orderNo, orderNo), eq(mailLogs.kind, kind)))
       .run();
     return { ok: false, error: message };
   }
+}
+
+/**
+ * 认领发送权：插入新记录，或把已有 failed/sending(租约过期) 记录原子地置为 sending。
+ * 返回 false 表示未被本调用者认领（并发安全）。
+ */
+function claimForSending(
+  existingId: number | null,
+  orderNo: string,
+  kind: MailKind,
+  email: string,
+  force: boolean
+): boolean {
+  const now = new Date();
+  if (existingId == null) {
+    try {
+      db.insert(mailLogs)
+        .values({ orderNo, kind, email, status: "sending", attempts: 0, updatedAt: now })
+        .run();
+      return true;
+    } catch {
+      // 唯一约束冲突：并发插入，交给对方
+      return false;
+    }
+  }
+
+  // 条件更新：仅当仍处于可发送状态时才认领
+  const leaseCutoff = new Date(Date.now() - SENDING_LEASE_MS);
+  const cond = force
+    ? eq(mailLogs.id, existingId)
+    : and(
+        eq(mailLogs.id, existingId),
+        sql`(${mailLogs.status} = 'failed' OR (${mailLogs.status} = 'sending' AND ${mailLogs.updatedAt} < ${leaseCutoff.getTime()}))`
+      );
+  const res = db
+    .update(mailLogs)
+    .set({ status: "sending", updatedAt: now })
+    .where(cond)
+    .run();
+  return Number(res.changes ?? 0) > 0;
+}
+
+/**
+ * 定时重试失败的邮件（由 cron 调用）。
+ * 只处理：status=failed 且已到 nextRetryAt 且未超最大次数。
+ */
+export async function retryFailedMails(limit = 20): Promise<{ retried: number; succeeded: number }> {
+  const rows = db
+    .select()
+    .from(mailLogs)
+    .where(
+      and(
+        eq(mailLogs.status, "failed"),
+        lt(mailLogs.attempts, MAX_ATTEMPTS),
+        isNotNull(mailLogs.nextRetryAt),
+        lte(mailLogs.nextRetryAt, new Date())
+      )
+    )
+    .limit(limit)
+    .all();
+
+  let succeeded = 0;
+  for (const r of rows) {
+    const res = await sendOrderEmail(r.orderNo, r.kind as MailKind);
+    if (res.ok) succeeded += 1;
+  }
+  return { retried: rows.length, succeeded };
 }
 
 /** 后台测试发信（发送到指定地址） */

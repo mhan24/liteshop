@@ -1,11 +1,13 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
-import { orders, products } from "@/db/schema";
+import { notifyLogs, orders, products } from "@/db/schema";
 import type { OrderStatus, Product } from "@/db/schema";
 import { generateOrderNo } from "@/lib/order-no";
 import { getSiteUrl } from "@/server/settings";
 import { resolvePaymentProvider } from "@/server/payment";
 import { getDeliveryStrategy } from "@/server/delivery";
+import { createAttempt } from "@/server/payment/attempts";
+import { sha256Hex } from "@/lib/signature";
 import { shouldChargeStock } from "@/lib/stock";
 
 /** 下单服务：库存校验 → 建单（商品快照）→ 渠道创建支付 → 回写交易快照 */
@@ -69,8 +71,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     { behavior: "immediate" }
   );
 
+  let created;
   try {
-    const created = await provider.createPayment({
+    created = await provider.createPayment({
       orderNo,
       amountCents: totalCents,
       currency: product.currency,
@@ -78,32 +81,93 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       notifyUrl: `${siteUrl}/api/pay/notify/${provider.name}`,
       redirectUrl: `${siteUrl}/pay/return?order_no=${orderNo}`,
     });
-    db.update(orders)
-      .set({
-        tradeId: created.tradeId,
-        expectedActualAmount: created.expectedActualAmount,
-        expirationTime: created.expirationTime,
-        paymentUrl: created.paymentUrl,
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.orderNo, orderNo))
-      .run();
-    return {
-      orderNo,
-      paymentUrl: created.paymentUrl,
-      totalCents,
-      currency: product.currency,
-      expiresAt: created.expirationTime,
-      provider: provider.name,
-    };
   } catch (err) {
-    // 渠道创建失败：补偿关单并回补库存（manual 型），向上抛可读错误
+    // 区分「明确失败」与「结果未知」：
+    // 网络超时/中断不代表网关没建单——若此时关单并释放卡密，
+    // 网关侧支付地址可能仍然有效，买家付款后无法履约（资损）。
+    // 因此结果未知时保留订单为「待对账」，不释放库存。
+    if (isUnknownResultError(err)) {
+      markOrderUnknown(orderNo, provider.name, err);
+      throw new OrderError(
+        "PAYMENT_UNKNOWN",
+        "支付渠道响应超时，订单已保留待对账。请勿重复支付，稍后可在订单查询页查看状态或联系客服。"
+      );
+    }
+    // 明确失败（参数错误/业务拒绝/HTTP 4xx 等）：补偿关单并回补库存
     compensateFailedOrder(orderNo, product);
     throw new OrderError(
       "PAYMENT_FAILED",
       `支付渠道创建失败: ${err instanceof Error ? err.message : String(err)}`
     );
   }
+
+  // 交易快照回写 + 记录本次支付尝试（原子）
+  db.transaction(
+    (tx) => {
+      tx.update(orders)
+        .set({
+          tradeId: created.tradeId,
+          expectedActualAmount: created.expectedActualAmount,
+          expirationTime: created.expirationTime,
+          paymentUrl: created.paymentUrl,
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.orderNo, orderNo))
+        .run();
+      createAttempt(tx, {
+        orderNo,
+        provider: provider.name,
+        tradeId: created.tradeId,
+        amountCents: Number(totalCents),
+        currency: product.currency,
+        paymentUrl: created.paymentUrl,
+        expectedActualAmount: created.expectedActualAmount,
+        expirationTime: created.expirationTime,
+        raw: created.raw,
+      });
+    },
+    { behavior: "immediate" }
+  );
+
+  return {
+    orderNo,
+    paymentUrl: created.paymentUrl,
+    totalCents,
+    currency: product.currency,
+    expiresAt: created.expirationTime,
+    provider: provider.name,
+  };
+}
+
+/**
+ * 判断渠道错误是否属于「结果未知」（网关可能已建单，只是我们没拿到响应）。
+ * 这类错误必须与业务拒绝区分：前者不能关单释放库存。
+ */
+function isUnknownResultError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const name = err.name;
+  const msg = err.message;
+  // AbortSignal.timeout 触发 TimeoutError；网络层失败为 TypeError
+  if (name === "TimeoutError" || name === "AbortError") return true;
+  if (/timed? ?out|timeout|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|socket hang up|fetch failed/i.test(msg)) {
+    return true;
+  }
+  return false;
+}
+
+/** 结果未知：保留订单但标记为待对账（不释放库存、不关单） */
+function markOrderUnknown(orderNo: string, provider: string, err: unknown): void {
+  const detail = err instanceof Error ? err.message : String(err);
+  db.insert(notifyLogs)
+    .values({
+      provider,
+      orderNo,
+      payloadHash: sha256Hex(`unknown:${orderNo}:${Date.now()}`),
+      payload: `支付创建结果未知（可能已在网关建单）：${detail}`.slice(0, 2000),
+      status: null,
+      handled: false,
+    })
+    .run();
 }
 
 function insertOrderWithRetry(
@@ -194,7 +258,10 @@ export interface ResumePaymentResult {
 /**
  * 继续支付：
  * - pending 且未过期 → 复用已存收银台地址（不轮换 trade_id，避免在途回调验签失败）
- * - 已过期/无地址 → 重新发起（渠道对同单号已失效交易会新建，回调 trade_id 同步更新）
+ * - 已过期/无地址 → 重新发起，并把新交易登记为「当前有效尝试」
+ *
+ * 重新发起不会丢弃旧交易：旧尝试保留在 payment_attempts 中（状态置 expired），
+ * 其延迟回调将因「非当前尝试」而被拒绝改变订单状态，避免误关已重新支付的订单。
  */
 export async function resumeOrderPayment(orderNo: string): Promise<ResumePaymentResult> {
   const order = db.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
@@ -210,8 +277,9 @@ export async function resumeOrderPayment(orderNo: string): Promise<ResumePayment
 
   const provider = resolvePaymentProvider();
   const siteUrl = getSiteUrl();
+  let created;
   try {
-    const created = await provider.createPayment({
+    created = await provider.createPayment({
       orderNo,
       amountCents: BigInt(order.totalCents),
       currency: order.currency,
@@ -219,21 +287,49 @@ export async function resumeOrderPayment(orderNo: string): Promise<ResumePayment
       notifyUrl: `${siteUrl}/api/pay/notify/${provider.name}`,
       redirectUrl: `${siteUrl}/pay/return?order_no=${orderNo}`,
     });
-    db.update(orders)
-      .set({
-        tradeId: created.tradeId,
-        expectedActualAmount: created.expectedActualAmount,
-        expirationTime: created.expirationTime,
-        paymentUrl: created.paymentUrl,
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.orderNo, orderNo))
-      .run();
-    return { ok: true, message: "已重新发起支付", paymentUrl: created.paymentUrl };
   } catch (err) {
+    // 结果未知时保留原状态（可能有在途交易），不误导买家重复支付
+    if (isUnknownResultError(err)) {
+      return {
+        ok: false,
+        message: "支付渠道响应超时，请稍后在订单查询页确认状态，避免重复支付",
+      };
+    }
     return {
       ok: false,
       message: `支付渠道创建失败: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+
+  // 条件更新：仅当订单仍是 pending 时才切换交易（防与并发回调节奏错位）
+  db.transaction(
+    (tx) => {
+      const fresh = tx.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
+      if (!fresh || fresh.status !== "pending") return;
+      tx.update(orders)
+        .set({
+          tradeId: created.tradeId,
+          expectedActualAmount: created.expectedActualAmount,
+          expirationTime: created.expirationTime,
+          paymentUrl: created.paymentUrl,
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.orderNo, orderNo))
+        .run();
+      createAttempt(tx, {
+        orderNo,
+        provider: provider.name,
+        tradeId: created.tradeId,
+        amountCents: order.totalCents,
+        currency: order.currency,
+        paymentUrl: created.paymentUrl,
+        expectedActualAmount: created.expectedActualAmount,
+        expirationTime: created.expirationTime,
+        raw: created.raw,
+      });
+    },
+    { behavior: "immediate" }
+  );
+
+  return { ok: true, message: "已重新发起支付", paymentUrl: created.paymentUrl };
 }

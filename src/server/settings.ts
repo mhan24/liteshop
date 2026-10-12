@@ -48,11 +48,30 @@ export function getSiteUrl(): string {
   return raw.replace(/\/+$/, "");
 }
 
+/**
+ * Turnstile 是否应当强制校验（服务端唯一判据）。
+ *
+ * 必须同时满足：开关打开 + Site Key + Secret Key 三者齐备。
+ * 历史缺陷：下单/查单只检查 Secret Key 是否为空，不看开关，
+ * 于是「关闭 Turnstile 但保留 Secret」会让前端不再渲染验证码、
+ * 服务端却仍强制校验 → 正常买家永远无法下单/查单。
+ * 前端渲染与后端校验必须共用本函数，避免再次脱节。
+ */
+export function isTurnstileEnforced(): boolean {
+  const enabled = getSetting("turnstile_enabled") === "1";
+  if (!enabled) return false;
+  const siteKey = getSetting("turnstile_site_key")?.trim() ?? "";
+  const secretKey = getSetting("turnstile_secret_key")?.trim() ?? "";
+  return siteKey !== "" && secretKey !== "";
+}
+
 /** Turnstile 前台配置（仅站点 Key，Secret 只在服务端使用） */
 export function getTurnstileClientConfig(): { enabled: boolean; siteKey: string } {
-  const enabled = getSetting("turnstile_enabled") === "1";
-  const siteKey = getSetting("turnstile_site_key")?.trim() ?? "";
-  return { enabled: enabled && siteKey !== "", siteKey };
+  const enforced = isTurnstileEnforced();
+  return {
+    enabled: enforced,
+    siteKey: enforced ? (getSetting("turnstile_site_key")?.trim() ?? "") : "",
+  };
 }
 
 export function getTurnstileSecretKey(): string {

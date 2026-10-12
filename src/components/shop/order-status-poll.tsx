@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useState, useActionState } from "react";
+import { useEffect, useRef, useState, useActionState } from "react";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cancelOrderAction, type CancelOrderState } from "@/actions/shop";
+import {
+  cancelOrderAction,
+  resumePaymentAction,
+  type CancelOrderState,
+  type ResumePaymentState,
+} from "@/actions/shop";
 import { openPaymentWindow, toAbsoluteUrl } from "@/lib/open-payment-window";
 
 interface OrderStatusPayload {
@@ -113,7 +118,7 @@ export function OrderStatusPoll({
         ) : order.status === "delivering" ? (
           <>支付已到账，正在为你发货；如卡密紧张可能稍有延迟。</>
         ) : order.status === "expired" ? (
-          <>订单已超时未支付。如已付款请联系客服核实。</>
+          <>订单已超时未支付。如已付款请联系客服核实；如需继续购买可重新发起支付。</>
         ) : (
           <>订单已关闭。如已付款请联系客服核实。</>
         )}
@@ -132,6 +137,8 @@ export function OrderStatusPoll({
       {order.status === "pending" && payCTA ? (
         <CancelOrder orderNo={order.orderNo} />
       ) : null}
+
+      {order.status === "expired" && payCTA ? <ResumePayment orderNo={order.orderNo} /> : null}
 
       {done ? (
         <a
@@ -203,6 +210,56 @@ function CancelOrder({ orderNo }: { orderNo: string }) {
           onClick={() => setAsking(false)}
           disabled={pending}
         >
+          返回
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** 过期订单重新发起支付：需邮箱确认归属，成功后在新窗口打开收银台 */
+function ResumePayment({ orderNo }: { orderNo: string }) {
+  const [state, formAction, pending] = useActionState<ResumePaymentState | null, FormData>(
+    resumePaymentAction,
+    null
+  );
+  const [asking, setAsking] = useState(false);
+  const openedRef = useRef(false);
+
+  // 重新发起成功后自动打开收银台（仅在状态变化时触发一次）
+  useEffect(() => {
+    if (state?.ok && state.paymentUrl && !openedRef.current) {
+      openedRef.current = true;
+      openPaymentWindow(toAbsoluteUrl(state.paymentUrl));
+    }
+  }, [state]);
+
+  if (!asking) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAsking(true)}
+        className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-md bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-[#333333] active:scale-[0.98]"
+      >
+        重新发起支付
+      </button>
+    );
+  }
+
+  return (
+    <form action={formAction} className="mt-4 space-y-3 rounded-lg border border-border p-4">
+      <input type="hidden" name="orderNo" value={orderNo} />
+      <p className="text-sm text-muted-foreground">
+        将为你生成新的支付地址（原地址已失效）。请填写下单邮箱以确认。
+      </p>
+      <Input name="email" type="email" required placeholder="下单时填写的邮箱" autoComplete="email" />
+      {state?.error ? <p className="text-sm text-pastel-red-text">{state.error}</p> : null}
+      {state?.ok ? <p className="text-sm text-muted-foreground">已生成新支付地址，正在打开收银台…</p> : null}
+      <div className="flex gap-2">
+        <Button type="submit" className="flex-1" disabled={pending}>
+          {pending ? "正在重新发起…" : "确认并前往支付"}
+        </Button>
+        <Button type="button" variant="ghost" className="flex-1" onClick={() => setAsking(false)} disabled={pending}>
           返回
         </Button>
       </div>
