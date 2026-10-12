@@ -4,6 +4,68 @@
 
 ---
 
+## 2026-10-12 · `f6350cd`（当前生产）
+
+**状态**：已上线并通过验收（版本对齐部署）
+
+### 提交
+
+| 项 | 值 |
+|---|---|
+| SHA | `f6350cda36667b60fd902657a85bf4ad97e7f295` |
+| 短 SHA | `f6350cd` |
+| 消息 | `docs: 记录部署后稳定性排查的三个问题与恢复演练结果` |
+| 部署时间 | 2026-10-12T19:23+08:00 |
+| 上一版本 | `8f9ab2c1f15c7a03ac6801bc00caee5d7efe74eb`（已记入 `previous`） |
+
+### 本次对齐的提交
+
+| SHA | 内容 |
+|---|---|
+| `f6350cd` | 部署记录文档 |
+| `e3752af` | 构建期不打开数据库、单例全环境缓存 |
+| `f3fcce4` | **运维脚本纳入仓库** + 运维手册 + 部署记录 |
+
+### 数据库
+
+| 项 | 值 |
+|---|---|
+| 迁移数 | 7（本次无新增迁移） |
+| integrity_check | ok |
+| foreign_key_check | ok |
+| 数据 | orders 5 / products 1 / cards 2 / payment_attempts 5 / payment_anomalies 0 |
+
+### 部署前备份
+
+- `pre-f6350cd-20261012-192311.db`（196K，VACUUM INTO）
+- `env-pre-f6350cd-20261012-192311.bak`
+
+### 验收项目
+
+| 项目 | 结果 |
+|---|---|
+| 容器健康 | 应用 healthy、Caddy healthy（`--wait` 门控） |
+| **运维脚本自检** | ✅「运维脚本就位」「定时任务指向的脚本均存在」 |
+| **cron 脚本存活** | ✅ `scripts/ops/*.sh` 部署后仍在，逐个执行验证通过 |
+| 站点 | `/` `/orders` `/products/voxi` `/admin/login` 全 200 |
+| 安全响应头 | 3/3（CSP / HSTS / Permissions-Policy） |
+| mock 回调入口 | 404 |
+| cron 端点 | 正常 |
+| **真实网关建单** | ✅ `expiration_time=899` |
+| **冷启动** | ✅ 停容器后重启，健康通过 |
+| **服务器 vs git** | ✅ 139 个文件逐文件 sha256 完全一致 |
+| 目录卫生 | 0 个 AppleDouble，`.env` 保留 |
+| 发布记录 | `current=f6350cd`、`previous=8f9ab2c` |
+
+### 回滚方式
+
+```bash
+git checkout 8f9ab2c1f15c7a03ac6801bc00caee5d7efe74eb
+./scripts/deploy.sh
+```
+
+---
+
 ## 2026-10-12 · `8f9ab2c`（当前生产）
 
 **状态**：已上线并通过验收
