@@ -69,23 +69,54 @@ fi
 
 TARGET="$SSH_USER@$SSH_HOST"
 
-# 打包源码（排除本地/构建/运行时产物与凭证）
+# ── 打包：用 git archive 而非 tar ───────────────────────────────────────────
+#
+# 为什么不用 tar：
+#   macOS 的 tar（bsdtar）会把扩展属性写成 AppleDouble 条目，并且**在自己的
+#   列表里隐藏它们**（tar tzf 看不到），但 Linux 的 GNU tar 会把它们全部
+#   物化成 ._xxx 文件。结果是生产目录里混入上百个未入库的垃圾文件，
+#   服务端与仓库不再一致（曾出现 190 个 ._ 文件）。
+#   --no-xattrs 并不足以阻止这一行为。
+#
+# git archive 的好处：
+#   - 只包含**已追踪**文件 → 服务端严格等于某个提交
+#   - 完全不带 macOS 扩展属性
+#   - 与「先推 GitHub、再部署」的流程天然一致
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "✗ 当前目录不是 git 仓库；deploy.sh 依赖 git archive 保证与提交一致" >&2
+  exit 1
+fi
+
+DEPLOY_SHA="$(git rev-parse HEAD)"
+DEPLOY_SHA_SHORT="$(git rev-parse --short HEAD)"
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "⚠ 工作区有未提交改动；将只部署已提交的 ${DEPLOY_SHA_SHORT}" >&2
+fi
+
+# 与远端比对：部署未推送的提交会造成「线上领先于 GitHub」，难以追溯
+if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+  if ! git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+    echo "⚠ HEAD (${DEPLOY_SHA_SHORT}) 尚未推送到 origin/main" >&2
+    echo "  建议先 git push，再部署；继续将以本地提交部署。" >&2
+  fi
+fi
+
 TARBALL="$(mktemp -t liteshop-deploy-XXXXXX.tar.gz)"
 trap 'rm -f "$TARBALL"' EXIT
+git archive --format=tar.gz -o "$TARBALL" HEAD
 
-tar czf "$TARBALL" --no-xattrs \
-  --exclude=node_modules --exclude=.next --exclude=data --exclude=.git \
-  --exclude='*.tsbuildinfo' --exclude='.env*' --exclude='.deploy.env' \
-  src drizzle public scripts \
-  package.json package-lock.json next.config.ts tsconfig.json \
-  drizzle.config.ts eslint.config.mjs vitest.config.ts components.json \
-  Dockerfile docker-compose.yml docker-compose.caddy.yml Caddyfile \
-  README.md PLAN.md AGENTS.md
+# 防御性检查：归档中不得出现 AppleDouble 条目
+if tar tzf "$TARBALL" | grep -qE '(^|/)\._'; then
+  echo "✗ 归档中检测到 AppleDouble 条目，中止部署" >&2
+  exit 1
+fi
 
-echo "→ 上传 $(du -h "$TARBALL" | cut -f1) 到 $TARGET:$REMOTE_DIR"
-if [[ "${1:-}" == "--dry-run" ]]; then
+TARBALL_SIZE="$(du -h "$TARBALL" | cut -f1)"
+echo "→ 部署提交 ${DEPLOY_SHA_SHORT} (${TARBALL_SIZE}) 到 ${TARGET}:${REMOTE_DIR}"
+if [[ "$DRY_RUN" == true ]]; then
   tar tzf "$TARBALL" | head -20
-  echo "(dry-run：未实际部署)"
+  echo "(dry-run：未实际部署，共 $(tar tzf "$TARBALL" | wc -l | tr -d ' ') 个条目)"
   exit 0
 fi
 
@@ -94,18 +125,32 @@ fi
 "${SSH[@]}" "$TARGET" bash -s <<EOF
 set -euo pipefail
 cd "$REMOTE_DIR"
-# 部署前先校验 .env 指纹，确保解包不会覆盖应用配置
+
+# 解包前校验 .env 指纹，确保不覆盖生产配置
 BEFORE=\$(sha256sum .env | cut -d' ' -f1)
+
 tar xzf /tmp/liteshop-deploy.tar.gz -C "$REMOTE_DIR"
+
 AFTER=\$(sha256sum .env | cut -d' ' -f1)
 if [ "\$BEFORE" != "\$AFTER" ]; then
   echo "✗ .env 被意外修改，中止部署" >&2
   exit 1
 fi
 echo "✓ .env 未被改动"
+
+# 清理历史遗留的 AppleDouble 垃圾（早期用 tar 部署时混入）
+CLEANED=\$(find . -path ./node_modules -prune -o -name '._*' -type f -print 2>/dev/null | wc -l | tr -d ' ')
+if [ "\$CLEANED" != "0" ]; then
+  find . -path ./node_modules -prune -o -name '._*' -type f -print0 2>/dev/null | xargs -0 rm -f
+  echo "✓ 已清理 \$CLEANED 个 AppleDouble 残留文件"
+fi
+
+# 记录本次部署的提交，便于线上追溯
+echo "$DEPLOY_SHA" > .deployed-commit
+
 rm -f /tmp/liteshop-deploy.tar.gz
 docker compose $COMPOSE_FILES up -d --build
 docker compose $COMPOSE_FILES ps
 EOF
 
-echo "✓ 部署完成：https://${DOMAIN:-$SSH_HOST}"
+echo "✓ 部署完成 (${DEPLOY_SHA_SHORT})：https://${DOMAIN:-$SSH_HOST}"
