@@ -304,11 +304,29 @@ function insertOrderWithRetry(
       tx.run(sql.raw(`ROLLBACK TO ${SAVEPOINT}`));
       tx.run(sql.raw(`RELEASE ${SAVEPOINT}`));
       if (err instanceof OrderError) throw err;
-      // 订单号撞唯一索引（或其它可重试冲突）→ 换号重试；
-      // 副作用已被保存点回滚，下一轮从干净状态开始。
+      // 仅对「订单号唯一索引冲突」重试。
+      // 早期做法是把所有非 OrderError 都当重试条件，导致 DB I/O 错误、
+      // 其它约束冲突等不可恢复异常也被连续重试 5 次，
+      // 最后统一报成 ORDER_NO_COLLISION —— 掩盖真实故障且放大 DB 压力。
+      if (!isOrderNoCollision(err)) throw err;
     }
   }
   throw new OrderError("ORDER_NO_COLLISION", `订单号生成失败: ${String(lastErr)}`);
+}
+
+/**
+ * 是否为 `orders.order_no` 唯一索引冲突。
+ *
+ * better-sqlite3 的 SQLITE_CONSTRAINT_UNIQUE 会带消息：
+ *   "UNIQUE constraint failed: orders.order_no"
+ * 据此精确匹配，避免把其它约束/IO 错误误判为可重试冲突。
+ */
+function isOrderNoCollision(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as { code?: string }).code;
+  const msg = err.message ?? "";
+  if (code !== "SQLITE_CONSTRAINT_UNIQUE" && code !== "SQLITE_CONSTRAINT_PRIMARYKEY") return false;
+  return /orders\.order_no|order_no/.test(msg);
 }
 
 function compensateFailedOrder(orderNo: string): void {

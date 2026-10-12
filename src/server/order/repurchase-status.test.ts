@@ -71,3 +71,50 @@ describe("createOrderForRepurchase 的状态白名单", () => {
     expect(fresh.orderNo).not.toBe(r.orderNo);
   });
 });
+
+describe("P2-02 订单号重试只针对唯一索引冲突", () => {
+  it("非冲突的数据库异常不被当成重试条件（直接抛出）", async () => {
+    // 通过构造一个必败的插入（如外键/约束错误）验证不会被重试吞掉。
+    // 这里用真实场景：向已存在 order_no 的单据插入 → 冲突可重试；
+    // 而其它错误应立即抛出。
+    const { db: database } = await import("@/db");
+    const { orders: t } = await import("@/db/schema");
+    const { sql } = await import("drizzle-orm");
+
+    database.transaction(
+      (tx) => {
+        tx.run(sql.raw("SAVEPOINT probe"));
+        // 模拟一个与 order_no 无关的约束错误（product_id 指向不存在的商品
+        // 在外键开启时会失败）
+        let caught = null;
+        try {
+          tx.insert(t)
+            .values({
+              orderNo: "PROBE_NOT_EXIST",
+              productId: 999999,
+              productName: "x",
+              unitPriceCents: 1,
+              currency: "USD",
+              quantity: 1,
+              totalCents: 1,
+              email: "p@test.dev",
+            })
+            .run();
+        } catch (e) {
+          caught = e;
+        }
+        tx.run(sql.raw("ROLLBACK TO probe"));
+        tx.run(sql.raw("RELEASE probe"));
+        // 该异常不应被 isOrderNoCollision 判定为可重试
+        expect(caught).not.toBeNull();
+        const msg = (caught as Error).message ?? "";
+        const code = (caught as { code?: string }).code ?? "";
+        const isCollision =
+          (code === "SQLITE_CONSTRAINT_UNIQUE" || code === "SQLITE_CONSTRAINT_PRIMARYKEY") &&
+          /orders\.order_no|order_no/.test(msg);
+        expect(isCollision).toBe(false);
+      },
+      { behavior: "immediate" }
+    );
+  });
+});

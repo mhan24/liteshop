@@ -201,7 +201,7 @@ describe("bepusdtProvider.createPayment（收银台模式 create-order）", () =
         notifyUrl: "https://shop.example.com/n",
         redirectUrl: "https://shop.example.com/r",
       })
-    ).rejects.toThrow(/创建订单失败/);
+    ).rejects.toThrow(/响应不完整/);
   });
 });
 
@@ -272,5 +272,103 @@ describe("api_base 协议校验（SSRF 纵深防御）", () => {
         redirectUrl: "https://s.example.com/r",
       })
     ).rejects.toThrow(/未配置/);
+  });
+});
+
+describe("网关异常响应的结果分类（P1-02）", () => {
+  const CONFIG2 = { api_base: "https://pay.example.com", token: "tok" };
+
+  it("HTTP 200 但缺 trade_id → unknown（不能证明未建单，保留待对账）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ status_code: 200, message: "success", data: { trade_id: "gw_1" } }), {
+          status: 200,
+        })
+      )
+    );
+    const provider = bepusdtProvider(CONFIG2);
+    await expect(
+      provider.createPayment({
+        orderNo: "LS20261012CLS0000001",
+        amountCents: 100n,
+        currency: "CNY",
+        subject: "T",
+        notifyUrl: "https://s/n",
+        redirectUrl: "https://s/r",
+      })
+    ).rejects.toMatchObject({ outcome: "unknown" });
+  });
+
+  it("HTTP 200 但缺 payment_url → unknown", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ status_code: 200, data: { trade_id: "gw_2" } }), { status: 200 })
+      )
+    );
+    const provider = bepusdtProvider(CONFIG2);
+    await expect(
+      provider.createPayment({
+        orderNo: "LS20261012CLS0000002",
+        amountCents: 100n,
+        currency: "CNY",
+        subject: "T",
+        notifyUrl: "https://s/n",
+        redirectUrl: "https://s/r",
+      })
+    ).rejects.toMatchObject({ outcome: "unknown" });
+  });
+
+  it("明确业务拒绝（status_code>=400 且有 message）→ rejected", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ status_code: 400, message: "参数错误", data: {} }), { status: 200 })
+      )
+    );
+    const provider = bepusdtProvider(CONFIG2);
+    await expect(
+      provider.createPayment({
+        orderNo: "LS20261012CLS0000003",
+        amountCents: 100n,
+        currency: "CNY",
+        subject: "T",
+        notifyUrl: "https://s/n",
+        redirectUrl: "https://s/r",
+      })
+    ).rejects.toMatchObject({ outcome: "rejected" });
+  });
+
+  it("响应体无法解析 → unknown", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>gateway error</html>", { status: 200 })));
+    const provider = bepusdtProvider(CONFIG2);
+    await expect(
+      provider.createPayment({
+        orderNo: "LS20261012CLS0000004",
+        amountCents: 100n,
+        currency: "CNY",
+        subject: "T",
+        notifyUrl: "https://s/n",
+        redirectUrl: "https://s/r",
+      })
+    ).rejects.toMatchObject({ outcome: "unknown" });
+  });
+
+  it("HTTP 5xx → unknown；4xx → rejected", async () => {
+    for (const [code, expected] of [[500, "unknown"], [502, "unknown"], [400, "rejected"], [401, "rejected"]] as const) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("err", { status: code })));
+      const provider = bepusdtProvider(CONFIG2);
+      await expect(
+        provider.createPayment({
+          orderNo: `LS20261012CLS00000${code}`,
+          amountCents: 100n,
+          currency: "CNY",
+          subject: "T",
+          notifyUrl: "https://s/n",
+          redirectUrl: "https://s/r",
+        })
+      ).rejects.toMatchObject({ outcome: expected });
+    }
   });
 });

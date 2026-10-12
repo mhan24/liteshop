@@ -146,11 +146,23 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
       }
       const data = json.data;
       if (!data?.trade_id || !data.payment_url) {
-        // 网关明确回了一个「业务失败」结构（有 status_code/message），
-        // 视为 rejected：它没有给出交易号，即未建单。
+        // HTTP 200 但缺少 trade_id / payment_url —— **不能**断定未建单。
+        // 网关可能已创建交易，只是响应数据不完整（异常回包、代理截断等）。
+        // 若按 rejected 处理，上层会补偿关单并释放库存，
+        // 而网关侧交易仍有效 → 买家付款后无法履约。
+        // 因此归为 unknown：保留订单进入待对账，由人工核对。
+        //
+        // 例外：报文里带了明确的业务失败信息（status_code >= 400 且有 message），
+        // 说明是网关拒绝本次请求，可按 rejected 处理。
+        const bizRejected =
+          typeof json.status_code === "number" &&
+          json.status_code >= 400 &&
+          json.message != null;
         throw new PaymentCreationError(
-          "rejected",
-          `bepusdt 创建订单失败: ${json.message ?? JSON.stringify(json).slice(0, 200)}`
+          bizRejected ? "rejected" : "unknown",
+          `bepusdt 创建订单响应不完整（缺 ${
+            !data?.trade_id ? "trade_id" : "payment_url"
+          }）: ${json.message ?? JSON.stringify(json).slice(0, 200)}`
         );
       }
       // 注意：bepusdt 的 expiration_time 是「剩余有效期（秒）」，不是 Unix 时间戳。

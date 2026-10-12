@@ -12,6 +12,36 @@ import type { MailKind } from "@/server/mail";
 import { assertTransition } from "./state-machine";
 
 /**
+ * 验签失败的回调计数（内存聚合，**不落库**）。
+ *
+ * 回调接口公网可访问，若逐条持久化失败报文，未认证请求就能持续写满磁盘。
+ * 这里仅做按渠道/按小时的聚合计数，保留攻击可见性，写入成本恒定。
+ */
+const rejectedNotify = new Map<string, number>();
+let rejectedNotifyWindow = 0;
+const REJECTED_NOTIFY_WINDOW_MS = 3600_000;
+const REJECTED_NOTIFY_MAX_KEYS = 200;
+
+function recordRejectedNotify(providerName: string): void {
+  const hour = Math.floor(Date.now() / REJECTED_NOTIFY_WINDOW_MS);
+  if (hour !== rejectedNotifyWindow) {
+    rejectedNotify.clear();
+    rejectedNotifyWindow = hour;
+  }
+  const key = `${providerName}|${hour}`;
+  rejectedNotify.set(key, (rejectedNotify.get(key) ?? 0) + 1);
+  if (rejectedNotify.size > REJECTED_NOTIFY_MAX_KEYS) {
+    const oldest = rejectedNotify.keys().next().value;
+    if (oldest !== undefined) rejectedNotify.delete(oldest);
+  }
+}
+
+/** 供监控/测试读取验签失败计数 */
+export function getRejectedNotifyStats(): Record<string, number> {
+  return Object.fromEntries(rejectedNotify);
+}
+
+/**
  * 支付回调处理（PLAN §6-①②）：
  * - 履约只信服务器间回调；验签失败仅记录、应答 success 终止无意义重试
  * - 幂等：同 payload_hash 已处理直接跳过 + 状态机守卫 + IMMEDIATE 事务串行化
@@ -50,16 +80,21 @@ export function handlePaymentNotify(providerName: string, rawBody: string): Hand
     status = verification.payload.status;
   }
 
+  // 验签失败的请求**不逐条落库完整报文**：该接口公网可访问，
+  // 逐条写库会让未认证请求持续消耗交易数据库的存储（DB 文件与 WAL 增长）。
+  // 这里只保留**轻量聚合计数**，既足以发现攻击，又无法被用来写满磁盘。
+  // 验签成功的通知才写入完整审计记录（见下方 verified 分支）。
+  if (!verificationOk || !verification.payload) {
+    recordRejectedNotify(providerName);
+    return { handled: false, retryable: false, message: message || "回调验签失败" };
+  }
+  const payload = verification.payload;
+
   const logId = db
     .insert(notifyLogs)
     .values({ provider: providerName, orderNo, payloadHash, payload: rawBody.slice(0, 10000), status, handled: false })
     .returning({ id: notifyLogs.id })
     .get()?.id;
-
-  if (!verificationOk || !verification.payload) {
-    return { handled: false, retryable: false, message: message || "回调验签失败" };
-  }
-  const payload = verification.payload;
 
   // 重复通知去重 + 履约必须在同一个 IMMEDIATE 事务内完成。
   // 若把去重查询放在事务外，两个并发的相同回调会同时通过检查（都还没标记 handled），

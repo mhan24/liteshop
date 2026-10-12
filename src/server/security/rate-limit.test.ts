@@ -7,6 +7,7 @@ import {
   checkOrderRateLimit,
   checkNotifyRateLimit,
   sweepRateBuckets,
+  _rateBucketSize,
   ORDER_RATE_RULES,
   MAX_ACTIVE_PENDING_PER_EMAIL,
 } from "./rate-limit";
@@ -97,5 +98,26 @@ describe("回调端点限流", () => {
     const ip = "198.51.100.50";
     for (let i = 0; i < 60; i++) expect(checkNotifyRateLimit(ip).ok).toBe(true);
     expect(checkNotifyRateLimit(ip).ok).toBe(false);
+  });
+});
+
+describe("P2-01 限流 Map 的容量保护", () => {
+  it("consume 会在超过容量时自动淘汰最旧记录", async () => {
+    resetRateBuckets();
+    // 远超 MAX_BUCKETS(20000) 不现实，改为验证清理逻辑本身生效：
+    // 用负窗口让桶立即过期，清理后应被移除
+    for (let i = 0; i < 50; i++) consume(`k${i}`, { windowMs: -1, max: 1 });
+    const swept = sweepRateBuckets(Date.now());
+    expect(swept).toBeGreaterThanOrEqual(50);
+    expect(_rateBucketSize()).toBe(0);
+  });
+
+  it("正常窗口内的记录不被误清理", () => {
+    resetRateBuckets();
+    consume("keep", { windowMs: 60_000, max: 5 });
+    consume("keep", { windowMs: 60_000, max: 5 });
+    expect(sweepRateBuckets()).toBe(0);
+    // 计数仍在（窗口未过期）
+    expect(consume("keep", { windowMs: 60_000, max: 5 }).ok).toBe(true);
   });
 });

@@ -21,3 +21,22 @@ export function seedAuto(contents: string[], priceCents = 100) {
   }
   return { id: p.id, slug };
 }
+
+/** 测试辅助：建一个有限库存的人工发货商品 */
+export function seedManual(stockLimit: number, priceCents = 100) {
+  const slug = `man-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const p = db
+    .insert(products)
+    .values({
+      name: "人工商品",
+      slug,
+      description: "d",
+      priceCents,
+      deliveryType: "manual",
+      stockLimit,
+      status: "on",
+    })
+    .returning({ id: products.id })
+    .get()!;
+  return { id: p.id, slug };
+}

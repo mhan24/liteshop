@@ -9,6 +9,7 @@ import {
   retryAutoDelivery,
   closeOrder,
   cancelPendingOrder,
+  getRejectedNotifyStats,
 } from "./fulfill-order";
 import { importCards } from "@/server/admin/catalog";
 import { createOrder } from "./create-order";
@@ -170,7 +171,7 @@ describe("mock 全链路：下单 → 支付回调 → 自动发卡", () => {
     expect(getOrder(r.orderNo).status).toBe("pending");
   });
 
-  it("签名错误被拒绝且留痕", async () => {
+  it("签名错误被拒绝，且不落库（防止未认证请求写满磁盘）", async () => {
     const p = seedAutoProduct(["C1"]);
     const r = await createOrder({ email: "buyer@test.dev", quantity: 1, slug: p.slug });
     const body = JSON.parse(paySuccess(r.orderNo)) as Record<string, unknown>;
@@ -178,9 +179,22 @@ describe("mock 全链路：下单 → 支付回调 → 自动发卡", () => {
     const result = handlePaymentNotify("mock", JSON.stringify(body));
     expect(result.handled).toBe(false);
     expect(result.message).toContain("签名");
+    // 关键：验签失败的请求不写入 notify_logs
+    expect(db.select().from(notifyLogs).all()).toHaveLength(0);
+    // 但保留轻量计数，保证攻击可见
+    const stats = getRejectedNotifyStats();
+    const total = Object.values(stats).reduce((a, b) => a + b, 0);
+    expect(total).toBeGreaterThan(0);
+  });
+
+  it("验签成功的通知仍写入完整审计记录", async () => {
+    const p = seedAutoProduct(["C1"]);
+    const r = await createOrder({ email: "buyer@test.dev", quantity: 1, slug: p.slug });
+    handlePaymentNotify("mock", paySuccess(r.orderNo));
     const logs = db.select().from(notifyLogs).all();
-    expect(logs).toHaveLength(1);
-    expect(logs[0].handled).toBe(false);
+    expect(logs.length).toBeGreaterThanOrEqual(1);
+    // 完整报文保留，供对账
+    expect(logs[0].payload.length).toBeGreaterThan(10);
   });
 
   it("支付超时回调：pending → expired", async () => {

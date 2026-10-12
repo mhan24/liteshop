@@ -43,8 +43,28 @@ export interface RateLimitResult {
 }
 
 /** 消费一次配额；超限返回 ok=false */
+/**
+ * 单次调用内触发清理的最小间隔（毫秒）。
+ * 清理是 O(n) 遍历，不能每次请求都做（否则限流本身成了 CPU 放大）。
+ */
+const SWEEP_THROTTLE_MS = 60_000;
+/** 容量上限：超出后批量淘汰最旧的记录，防止内存无界增长 */
+const MAX_BUCKETS = 20_000;
+
 export function consume(key: string, rule: RateLimitRule): RateLimitResult {
   const now = Date.now();
+
+  // 节流式清理 + 容量保护（曾缺失：sweepRateBuckets 已导出但无人调用，
+  // Map 也无容量上限，导致过期记录长期滞留内存）。
+  if (now - lastSweepAt >= SWEEP_THROTTLE_MS) {
+    lastSweepAt = now;
+    sweepRateBuckets(now);
+  }
+  if (buckets.size > MAX_BUCKETS) {
+    const sorted = [...buckets.entries()].sort((a, b) => a[1].resetAt - b[1].resetAt);
+    for (let i = 0; i < buckets.size - MAX_BUCKETS; i++) buckets.delete(sorted[i][0]);
+  }
+
   const rec = buckets.get(key);
 
   if (!rec || rec.resetAt <= now) {
@@ -75,8 +95,16 @@ export function sweepRateBuckets(now = Date.now()): number {
 }
 
 /** 仅供测试：重置内存计数 */
+let lastSweepAt = 0;
+
+/** 供测试：读取当前记录数 */
+export function _rateBucketSize(): number {
+  return buckets.size;
+}
+
 export function resetRateBuckets(): void {
   buckets.clear();
+  lastSweepAt = 0;
 }
 
 /**

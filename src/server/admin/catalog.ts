@@ -151,13 +151,35 @@ export function updateProduct(id: number, input: ProductInput): { ok: boolean; m
   if (dup) return { ok: false, message: `标识已被占用: ${v.data.slug}` };
 
   // 检测「有限库存 ↔ 不限库存」的模式切换。
-  // 切换意味着管理员在手动接管库存数量：此时旧订单持有的占用已失去意义，
-  // 必须在同一事务内清除其 stockCharged，否则订单过期时会按旧的占用再加回来，
-  // 造成库存虚高（实测「有限→不限→有限」后 3 变 4，潜在超卖）。
   // validateProductInput 已通过 normalizeStockLimit 保证 stockLimit 为数字
   const nextStockLimit = v.data.stockLimit ?? STOCK_UNLIMITED;
   const modeChanged =
     isUnlimitedStock(existing.stockLimit) !== isUnlimitedStock(nextStockLimit);
+
+  // 模式切换守卫：存在未结束的人工订单时**禁止**切换库存模式。
+  //
+  // 早期做法是在切换时清除旧订单的 stockCharged，但那只是把问题转移：
+  // 旧订单仍然有效、仍可能付款并要求交付，库存系统却不再承认其占用，
+  // 于是切回有限库存后可再次卖出 → 实际承诺超过可用库存（超卖）。
+  // 正确做法是要求管理员先完成、取消或核对相关订单，再做模式切换。
+  if (modeChanged && existing.deliveryType === "manual") {
+    const activeOrder = db
+      .select({ orderNo: orders.orderNo })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.productId, id),
+          inArray(orders.status, ["pending", "reconciling", "paid", "delivering"])
+        )
+      )
+      .get();
+    if (activeOrder) {
+      return {
+        ok: false,
+        message: `该商品存在未结束订单（${activeOrder.orderNo}），请先完成或取消后再切换库存模式`,
+      };
+    }
+  }
 
   db.transaction(
     (tx) => {
@@ -171,23 +193,11 @@ export function updateProduct(id: number, input: ProductInput): { ok: boolean; m
         .where(eq(products.id, id))
         .run();
 
-      if (modeChanged) {
-        // 只影响仍标记为「占用中」的订单；已释放的订单该字段本就是 false
-        tx.update(orders)
-          .set({ stockCharged: false, updatedAt: new Date() })
-          .where(and(eq(orders.productId, id), eq(orders.stockCharged, true)))
-          .run();
-      }
     },
     { behavior: "immediate" }
   );
 
-  return {
-    ok: true,
-    message: modeChanged
-      ? "商品已更新；库存模式变更，历史订单的库存占用已重置"
-      : "商品已更新",
-  };
+  return { ok: true, message: "商品已更新" };
 }
 
 /** 下架（软删，交易数据保留）；存在订单时禁止硬删 */

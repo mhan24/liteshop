@@ -1,0 +1,76 @@
+import { eq } from "drizzle-orm";
+import { describe, expect, it } from "vitest";
+import { db } from "@/db";
+import { orders, products } from "@/db/schema";
+import { seedManual } from "./test-helpers";
+
+/**
+ * P1-01 复现：库存模式切换会清除旧订单的占用标志，
+ * 导致实际库存承诺可能超过可用库存（超卖）。
+ */
+
+const stockOf = (id: number) =>
+  db.select().from(products).where(eq(products.id, id)).get()!.stockLimit;
+
+const baseInput = (slug: string) => ({
+  name: "库存承诺",
+  slug,
+  description: "d",
+  imageUrl: "",
+  priceCentsText: "1.00",
+  currency: "USD",
+  deliveryType: "manual",
+  status: "on",
+  sort: 0,
+});
+
+describe("P1-01 库存模式切换导致超卖", () => {
+  it("存在未结束订单时禁止切换，保证库存承诺不被破坏（修复后）", async () => {
+    const { createOrder } = await import("./create-order");
+    const { updateProduct } = await import("@/server/admin/catalog");
+    const p = seedManual(1);
+
+    // 买家 A 下单，占用唯一 1 件
+    const a = await createOrder({ email: "a@test.dev", quantity: 1, slug: p.slug });
+    expect(stockOf(p.id)).toBe(0);
+    expect(db.select().from(orders).where(eq(orders.orderNo, a.orderNo)).get()!.stockCharged).toBe(true);
+
+    // 修复后：A 订单仍未结束 → 不允许切换到不限
+    const switchRes = updateProduct(p.id, { ...baseInput(p.slug), stockLimit: -1 });
+    expect(switchRes.ok).toBe(false);
+    expect(switchRes.message).toContain("未结束订单");
+
+    // 库存承诺未被破坏：仍是 0，占用标志保留
+    expect(stockOf(p.id)).toBe(0);
+    expect(db.select().from(orders).where(eq(orders.orderNo, a.orderNo)).get()!.stockCharged).toBe(true);
+
+    // 无法再卖出第二件（不会超卖）
+    await expect(
+      createOrder({ email: "b@test.dev", quantity: 1, slug: p.slug })
+    ).rejects.toThrow(/库存不足/);
+
+    // A 取消/过期后，占用释放、库存回到 1
+    const { cancelPendingOrder } = await import("./fulfill-order");
+    expect(cancelPendingOrder(a.orderNo, "a@test.dev").ok).toBe(true);
+    expect(stockOf(p.id)).toBe(1);
+
+    // 此时才允许切换模式
+    expect(updateProduct(p.id, { ...baseInput(p.slug), stockLimit: -1 }).ok).toBe(true);
+    expect(stockOf(p.id)).toBe(-1);
+  });
+
+  it("存在未结束订单时禁止切换库存模式（修复后）", async () => {
+    const { createOrder } = await import("./create-order");
+    const { updateProduct } = await import("@/server/admin/catalog");
+    const p = seedManual(1);
+    const a = await createOrder({ email: "c@test.dev", quantity: 1, slug: p.slug });
+
+    const res = updateProduct(p.id, { ...baseInput(p.slug), stockLimit: -1 });
+    expect(res.ok).toBe(false);
+    expect(res.message).toMatch(/未结束|未完成|待支付|占用/);
+
+    // 占用标志不被清除
+    expect(db.select().from(orders).where(eq(orders.orderNo, a.orderNo)).get()!.stockCharged).toBe(true);
+    expect(stockOf(p.id)).toBe(0);
+  });
+});
