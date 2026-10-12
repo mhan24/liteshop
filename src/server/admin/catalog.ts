@@ -419,7 +419,12 @@ export function listOrdersForAdmin(opts: {
       currency: orders.currency,
       email: orders.email,
       status: orders.status,
-      deliveryType: products.deliveryType,
+      // 展示**订单快照**（下单时的发货方式），而非商品当前配置：
+      // 商品类型可被修改，用当前值会与订单的实际履约方式不符，
+      // 也会误导后台操作（如错误地提供「重试自动发货」）。
+      deliveryType: orders.deliveryType,
+      /** 商品当前类型，仅用于在两者不一致时给出提示 */
+      productDeliveryType: products.deliveryType,
       deliveryContent: orders.deliveryContent,
       tradeId: orders.tradeId,
       createdAt: orders.createdAt,
@@ -432,7 +437,11 @@ export function listOrdersForAdmin(opts: {
     .orderBy(desc(orders.id))
     .limit(limit)
     .all();
-  return rows.map((r) => ({ ...r, deliveryType: r.deliveryType ?? "auto" }));
+  // 历史订单快照可能为空（迁移前的旧数据），回落商品当前值
+  return rows.map((r) => ({
+    ...r,
+    deliveryType: r.deliveryType ?? r.productDeliveryType ?? "auto",
+  }));
 }
 
 /** 异常到账待处理数（超时后到账，需人工补发或退款） */

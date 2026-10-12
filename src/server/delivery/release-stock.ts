@@ -51,12 +51,15 @@ export function releaseOrderStock(
       return { released: true, restoredQuantity: 0 };
     }
     if (!order.stockCharged) return { released: false, restoredQuantity: 0 };
-    getDeliveryStrategy("manual").release(tx, order, product);
+    // 策略决定是否真的回补（库存模式若已改为「不限」，则不应做数量回补）
+    const outcome = getDeliveryStrategy("manual").release(tx, order, product);
+    // 无论策略是否回补，都要清除占用标志：本单不再持有库存占用。
+    // 这样后续任何释放路径都会直接跳过，保持幂等。
     tx.update(orders)
       .set({ stockCharged: false, updatedAt: new Date() })
       .where(eq(orders.id, order.id))
       .run();
-    return { released: true, restoredQuantity: order.quantity };
+    return { released: true, restoredQuantity: outcome.restoredQuantity ?? 0 };
   }
 
   // auto（或商品已删除）：按 order_id 精确释放仍处于 reserved 的卡密。

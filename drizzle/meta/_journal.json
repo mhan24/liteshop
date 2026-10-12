@@ -57,6 +57,13 @@
       "when": 1791783000000,
       "tag": "0007_order-delivery-type-snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791784000000,
+      "tag": "0008_order-delivery-type-reconcile",
+      "breakpoints": true
     }
   ]
 }

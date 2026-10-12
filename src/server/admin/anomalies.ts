@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { orders, paymentAnomalies, paymentAttempts, products } from "@/db/schema";
 import type { AnomalyStatusType } from "@/db/schema";
 import { getDeliveryStrategy } from "@/server/delivery";
+import { getOrderDeliveryType } from "@/server/delivery/release-stock";
 import type { DbTransaction } from "@/db";
 import { shouldChargeStock } from "@/lib/stock";
 
@@ -97,7 +98,10 @@ export function reissueAnomaly(anomalyId: number, note: string): AnomalyOpResult
       if (!loaded.ok) return loaded;
       const { anomaly, order, product } = loaded;
 
-      if (product.deliveryType !== "auto") {
+      // 以**订单快照**为准（与普通履约一致）：商品类型可能已被后台修改，
+      // 历史订单不应被追溯改变性质。此前用 product.deliveryType 会导致
+      // 「原为自动发卡、商品后改人工」时无法补发。
+      if (getOrderDeliveryType(tx, order) !== "auto") {
         return {
           ok: false,
           message:
@@ -138,8 +142,9 @@ export function acceptAnomalyForManualDelivery(anomalyId: number, note: string):
       if (!loaded.ok) return loaded;
       const { order, product } = loaded;
 
-      if (product.deliveryType !== "manual") {
-        return { ok: false, message: "该商品为自动发卡，请使用「补发商品」" };
+      // 同样以订单快照为准
+      if (getOrderDeliveryType(tx, order) !== "manual") {
+        return { ok: false, message: "该订单为自动发卡，请使用「补发商品」" };
       }
 
       // stockCharged 语义：「本单当前是否占用着有限库存」。

@@ -7,6 +7,7 @@ import { handlePaymentNotify, closeOrder } from "./fulfill-order";
 import { lookupOrder } from "./query-order";
 import { buildMockNotifyBody } from "@/server/payment/mock";
 import { listAnomalies, reissueAnomaly, resolveAnomalyAs, countOpenAnomalies } from "@/server/admin/anomalies";
+import { sweepExpiredOrders } from "./expire-orders";
 
 /**
  * 回归：买家在支付有效期内完成付款，但成功回调在本地清扫之后才到达。
@@ -373,5 +374,91 @@ describe("人工发货商品的异常到账处置（P1-2）", () => {
     expect(acceptAnomalyForManualDelivery(anomalyId, "核实").ok).toBe(true);
     expect(db.select().from(products).where(eq(products.id, p.id)).get()!.stockLimit).toBe(-1);
     expect(getOrder(orderNo).status).toBe("paid");
+  });
+});
+
+describe("P1 回归：异常到账处置以订单快照为准", () => {
+  function seedAutoProduct(contents: string[]) {
+    const slug = `anom-snap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const p = db
+      .insert(products)
+      .values({ name: "快照商品", slug, description: "d", priceCents: 100, deliveryType: "auto", status: "on" })
+      .returning({ id: products.id })
+      .get()!;
+    for (const c of contents) db.insert(cards).values({ productId: p.id, content: c, status: "available" }).run();
+    return { id: p.id, slug };
+  }
+
+  it("原为自动发卡、商品后改人工：仍可用自动补发", async () => {
+    const p = seedAutoProduct(["C1", "C2"]);
+    const r = await createOrder({ email: "snap-anom@test.dev", quantity: 1, slug: p.slug });
+    const o = getOrder(r.orderNo);
+    db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000) })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    lookupOrder(r.orderNo, "snap-anom@test.dev"); // 触发清扫
+    handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo, tradeId: o.tradeId!, amountCents: BigInt(o.totalCents),
+      currency: o.currency, status: 2,
+    }));
+
+    // 商品被改为人工发货（订单快照仍是 auto）
+    db.update(products).set({ deliveryType: "manual" }).where(eq(products.id, p.id)).run();
+
+    const anomaly = listAnomalies({ status: "open" }).find((a) => a.orderNo === r.orderNo)!;
+    // 应走自动补发（依据订单快照），而不是被拒绝
+    const res = reissueAnomaly(anomaly.id, "按订单快照补发");
+    expect(res.ok).toBe(true);
+    expect(getOrder(r.orderNo).status).toBe("completed");
+    expect(getOrder(r.orderNo).deliveryContent).toBeTruthy();
+  });
+
+  it("原为人工发货、商品后改自动：仍走人工入口", async () => {
+    const { acceptAnomalyForManualDelivery } = await import("@/server/admin/anomalies");
+    const slug = `anom-man-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const p = db
+      .insert(products)
+      .values({ name: "人工快照", slug, description: "d", priceCents: 100, deliveryType: "manual", stockLimit: 3, status: "on" })
+      .returning({ id: products.id })
+      .get()!;
+
+    const r = await createOrder({ email: "snap-man@test.dev", quantity: 1, slug });
+    const o = getOrder(r.orderNo);
+    db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000) })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    lookupOrder(r.orderNo, "snap-man@test.dev");
+    handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo, tradeId: o.tradeId!, amountCents: BigInt(o.totalCents),
+      currency: o.currency, status: 2,
+    }));
+
+    // 商品改为自动发卡（订单快照仍是 manual）
+    db.update(products).set({ deliveryType: "auto" }).where(eq(products.id, p.id)).run();
+
+    const anomaly = listAnomalies({ status: "open" }).find((a) => a.orderNo === r.orderNo)!;
+    const res = acceptAnomalyForManualDelivery(anomaly.id, "按订单快照转入人工");
+    expect(res.ok).toBe(true);
+    expect(getOrder(r.orderNo).status).toBe("paid");
+  });
+});
+
+describe("P1 回归：有限库存改为不限后的释放", () => {
+  it("不把 -1 加成为 0（不意外售罄）", async () => {
+    const slug = `mode-fix-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const p = db
+      .insert(products)
+      .values({ name: "模式切换", slug, description: "d", priceCents: 100, deliveryType: "manual", stockLimit: 3, status: "on" })
+      .returning({ id: products.id })
+      .get()!;
+
+    const r = await createOrder({ email: "modefix@test.dev", quantity: 1, slug });
+    expect(db.select().from(products).where(eq(products.id, p.id)).get()!.stockLimit).toBe(2);
+
+    db.update(products).set({ stockLimit: -1 }).where(eq(products.id, p.id)).run();
+    db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000) })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    sweepExpiredOrders();
+
+    // 仍是不限，而不是 0（售罄）
+    expect(db.select().from(products).where(eq(products.id, p.id)).get()!.stockLimit).toBe(-1);
   });
 });
