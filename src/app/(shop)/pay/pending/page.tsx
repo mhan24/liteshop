@@ -1,5 +1,6 @@
 import { getOrderStatusView } from "@/server/order/query-order";
 import { getCopy } from "@/server/copy";
+import { getTurnstileClientConfig } from "@/server/settings";
 import { OrderStatusPoll } from "@/components/shop/order-status-poll";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,8 @@ export default async function PayPendingPage({
   const { order_no: orderNo } = await searchParams;
   const view = orderNo ? getOrderStatusView(orderNo) : null;
   const pendingHint = getCopy("pending_hint");
+  // 重新购买同样会创建订单，需与商品页一致地下发人机验证配置
+  const turnstile = getTurnstileClientConfig();
 
   return (
     <main
@@ -28,6 +31,7 @@ export default async function PayPendingPage({
     >
       <OrderStatusPoll
         orderNo={orderNo ?? ""}
+        turnstile={turnstile}
         payCTA
         initial={
           view

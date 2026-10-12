@@ -43,8 +43,15 @@ function ensureSeed(sqlite: Database.Database) {
 }
 
 function createDb() {
-  // 生产安全自检：配置错误立即失败，避免带病上线
-  assertProductionSafety();
+  // 生产安全自检：配置错误立即失败，避免带病上线。
+  //
+  // 但**构建期**（next build 收集页面数据）会以 NODE_ENV=production 求值本模块，
+  // 此时并无运行时配置——若在此抛错，构建就必须依赖真实 .env 才能通过，
+  // 那等于强迫把密钥放进构建上下文（曾因此让生产镜像构建依赖泄露的 .env）。
+  // 因此构建期跳过自检，真正的校验在运行时首次访问数据库时执行。
+  if (process.env.NEXT_PHASE !== "phase-production-build") {
+    assertProductionSafety();
+  }
   const sqlite = openDb();
   runMigrations(sqlite);
   ensureSeed(sqlite);

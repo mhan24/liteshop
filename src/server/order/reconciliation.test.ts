@@ -4,7 +4,11 @@ import { db } from "@/db";
 import { cards, orders, products } from "@/db/schema";
 import { createOrder } from "./create-order";
 import { sweepExpiredOrders, expireOrderIfOverdue, countOverduePending } from "./expire-orders";
-import { resolveReconcilingAsNotCreated, countReconciling } from "./fulfill-order";
+import {
+  resolveReconcilingAsNotCreated,
+  countReconciling,
+  handlePaymentNotify,
+} from "./fulfill-order";
 import { lookupOrder } from "./query-order";
 import { upsertPaymentConfig } from "@/server/settings";
 
@@ -171,5 +175,84 @@ describe("对账订单在前台的表现", () => {
     expect(view.status).toBe("reconciling");
     expect(view.statusLabel).toBe("待对账");
     expect(view.paymentUrl).toBeNull();
+  });
+});
+
+describe("P0 回归：reconciling 订单的到账恢复闭环", () => {
+  it("结果未知 → 收到合法成功回调 → 恢复履约并发货", async () => {
+    const p = seedProduct(["C1", "C2"]);
+    seedBepusdtConfig();
+    const restore = useBepusdt();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const e = new Error("timeout"); e.name = "TimeoutError"; throw e;
+    }));
+    await expect(createOrder({ email: "rev@test.dev", quantity: 1, slug: p.slug })).rejects.toThrow();
+    restore();
+    vi.unstubAllGlobals();
+
+    const o = db.select().from(orders).all().find((x) => x.email === "rev@test.dev")!;
+    expect(o.status).toBe("reconciling");
+    // 关键：此时订单没有 trade_id（创建响应丢失）
+    expect(o.tradeId).toBeNull();
+    expect(cardsOf(p.id, "reserved")).toHaveLength(1);
+
+    // 网关随后推送成功回调（携带真实 trade_id）→ 应恢复并发货
+    const { buildMockNotifyBody } = await import("@/server/payment/mock");
+    const res = handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: o.orderNo,
+      tradeId: "gateway_recovered_trade_1",
+      amountCents: BigInt(o.totalCents),
+      currency: o.currency,
+      status: 2,
+    }));
+
+    expect(res.handled).toBe(true);
+    expect(getOrder(o.orderNo).status).toBe("completed");
+    expect(cardsOf(p.id, "sold")).toHaveLength(1);
+    // 恢复后必须补记 trade_id 与支付尝试（可追溯）
+    expect(getOrder(o.orderNo).tradeId).toBe("gateway_recovered_trade_1");
+    const { listAttempts } = await import("@/server/payment/attempts");
+    expect(listAttempts(o.orderNo).some((a) => a.tradeId === "gateway_recovered_trade_1")).toBe(true);
+  });
+
+  it("金额不符的回调不能恢复 reconciling 订单（防篡改）", async () => {
+    const p = seedProduct(["C1"]);
+    seedBepusdtConfig();
+    const restore = useBepusdt();
+    vi.stubGlobal("fetch", vi.fn(async () => { const e = new Error("timeout"); e.name = "TimeoutError"; throw e; }));
+    await expect(createOrder({ email: "rev2@test.dev", quantity: 1, slug: p.slug })).rejects.toThrow();
+    restore();
+    vi.unstubAllGlobals();
+
+    const o = db.select().from(orders).all().find((x) => x.email === "rev2@test.dev")!;
+    const { buildMockNotifyBody } = await import("@/server/payment/mock");
+    const res = handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: o.orderNo, tradeId: "t_evil",
+      amountCents: BigInt(o.totalCents) + 1n, currency: o.currency, status: 2,
+    }));
+    expect(res.handled).toBe(false);
+    expect(getOrder(o.orderNo).status).toBe("reconciling");
+    expect(cardsOf(p.id, "sold")).toHaveLength(0);
+  });
+});
+
+describe("P1 回归：通用关闭不得绕过对账流程", () => {
+  it("closeOrder 拒绝 reconciling 订单（防止误释放库存）", async () => {
+    const p = seedProduct(["C1"]);
+    seedBepusdtConfig();
+    const restore = useBepusdt();
+    vi.stubGlobal("fetch", vi.fn(async () => { const e = new Error("timeout"); e.name = "TimeoutError"; throw e; }));
+    await expect(createOrder({ email: "cl@test.dev", quantity: 1, slug: p.slug })).rejects.toThrow();
+    restore();
+    vi.unstubAllGlobals();
+
+    const o = db.select().from(orders).all().find((x) => x.email === "cl@test.dev")!;
+    const { closeOrder } = await import("@/server/order/fulfill-order");
+    const res = closeOrder(o.orderNo);
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("对账");
+    // 库存未被释放
+    expect(cardsOf(p.id, "reserved")).toHaveLength(1);
+    expect(getOrder(o.orderNo).status).toBe("reconciling");
   });
 });

@@ -27,16 +27,9 @@ export async function createOrderAction(
   const note = String(formData.get("note") ?? "");
   const quantity = Number(formData.get("quantity") ?? 1);
 
-  // 人机验证：仅当「开关开启 + Site/Secret 齐备」时强制（与前端渲染条件一致）
-  if (isTurnstileEnforced()) {
-    const token = String(formData.get("cfToken") ?? "");
-    const verify = await verifyTurnstileToken(token, getTurnstileSecretKey());
-    if (!verify.ok) {
-      return { error: "人机验证未通过，请重新完成验证后提交" };
-    }
-  }
-
-  // 统一入口防护（人机验证 + 频率限制）——与「重新购买」共用同一套检查
+  // 统一入口防护（人机验证 + 频率限制）。
+  // 注意：**不要**在此之外再做一次 Turnstile 校验——Token 是一次性的，
+  // 重复调用 siteverify 会失败，导致开启验证码后所有下单被拒。
   const guard = await guardOrderCreation(formData, email);
   if (!guard.ok) return { error: guard.error };
 

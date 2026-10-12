@@ -28,6 +28,8 @@ export const metadata = { title: "订单管理" };
 const TABS = [
   { key: "", label: "全部" },
   { key: "pending", label: "待支付" },
+  // 待对账需人工核对网关，独立标签便于快速定位
+  { key: "reconciling", label: "待对账" },
   { key: "paid", label: "待处理" },
   { key: "delivering", label: "发货中" },
   { key: "completed", label: "已完成" },

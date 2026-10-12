@@ -6,7 +6,7 @@ import { normalizeAmountString, toMinorUnits } from "@/lib/money";
 import { sha256Hex } from "@/lib/signature";
 import { getProvider } from "@/server/payment";
 import { autoDelivery, getDeliveryStrategy } from "@/server/delivery";
-import { getCurrentAttempt, isCurrentTrade } from "@/server/payment/attempts";
+import { createAttempt, getCurrentAttempt, isCurrentTrade } from "@/server/payment/attempts";
 import type { MailKind } from "@/server/mail";
 import { assertTransition } from "./state-machine";
 
@@ -152,7 +152,11 @@ function processNotify(
   if (order.status === "completed") {
     return { handled: true, retryable: false, message: "订单已完成（幂等重入）" };
   }
-  if (!["pending", "paid", "delivering"].includes(order.status)) {
+  // reconciling 表示「创建支付的结果未知」：网关可能已建单，此时收到
+  // 经签名与金额核实的成功回调，正是缺失的对账闭环，应当恢复履约。
+  // 但不能简单把它加进放行列表——reconciling 订单往往**没有 trade_id 快照**，
+  // 归属校验必须更严（见下方 requireFreshTradeOwnership）。
+  if (!["pending", "paid", "delivering", "reconciling"].includes(order.status)) {
     return { handled: false, retryable: false, message: `订单状态 ${order.status} 不接受支付通知` };
   }
 
@@ -210,14 +214,37 @@ function processNotify(
     : null;
   if (!product) return { handled: false, retryable: false, message: "订单关联商品不存在" };
 
-  // pending → paid
+  // pending / reconciling → paid
   let statusNow = order.status as OrderStatus;
-  if (statusNow === "pending") {
-    assertTransition("pending", "paid");
+  if (statusNow === "pending" || statusNow === "reconciling") {
+    assertTransition(statusNow, "paid");
     tx.update(orders)
-      .set({ status: "paid" as OrderStatus, paidAt: new Date(), updatedAt: new Date() })
+      .set({
+        status: "paid" as OrderStatus,
+        paidAt: new Date(),
+        updatedAt: new Date(),
+        // 对账恢复：此时才拿到可信的 trade_id 快照（创建响应曾丢失）
+        tradeId: payload.tradeId,
+        blockTxnId: payload.blockTxnId ?? order.blockTxnId,
+        // 已入账，清除对账标记所需的空有效期
+        expirationTime: null,
+      })
       .where(eq(orders.id, order.id))
       .run();
+    // reconciling 订单通常没有 attempt 记录：补建一条，保证 trade_id 可追溯
+    if (statusNow === "reconciling" && !getCurrentAttempt(order.orderNo, tx)) {
+      createAttempt(tx, {
+        orderNo: order.orderNo,
+        provider: payload.provider,
+        tradeId: payload.tradeId,
+        amountCents: order.totalCents,
+        currency: order.currency,
+        paymentUrl: order.paymentUrl ?? "",
+        expectedActualAmount: order.expectedActualAmount,
+        expirationTime: null,
+        raw: { recoveredFrom: "reconciling", amount: payload.amount },
+      });
+    }
     statusNow = "paid";
   }
   // 标记本次支付尝试已到账
@@ -347,6 +374,16 @@ export function closeOrder(orderNo: string): AdminOpResult {
       if (!order) return { ok: false, message: "订单不存在" };
       if (["completed", "closed"].includes(order.status)) {
         return { ok: false, message: `订单状态 ${order.status} 不能关闭` };
+      }
+      // reconciling（待对账）必须走专用的核对流程：它意味着「网关可能已建单」，
+      // 直接关闭会释放库存，造成买家付款后无法履约。
+      // 状态机虽允许 reconciling→closed，但那只应由 resolveReconcilingAsNotCreated()
+      // 在人工核对网关之后触发；这里显式拒绝，避免通用关闭按钮绕过该约束。
+      if (order.status === "reconciling") {
+        return {
+          ok: false,
+          message: "该订单待对账（网关可能已建单），请先核对 bepusdt 后台再决定是否关闭",
+        };
       }
       const product = order.productId
         ? tx.select().from(products).where(eq(products.id, order.productId)).get()

@@ -54,3 +54,29 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # 部署脚本是上线路径的一部分：语法错误或归档异常应在 CI 暴露
+      - name: Shell syntax check
+        run: bash -n scripts/deploy.sh
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          # SC1090/SC1091：动态 source .deploy.env（运行期才存在）
+          shellcheck --severity=error -e SC1090,SC1091 scripts/deploy.sh
+
+      # 归档完整性：不得包含密钥文件或 macOS AppleDouble 条目
+      - name: Deploy archive checks
+        run: |
+          set -euo pipefail
+          TARBALL="$(mktemp -t ci-deploy-XXXXXX.tar.gz)"
+          git archive --format=tar.gz -o "$TARBALL" HEAD
+          echo "归档条目数: $(tar tzf "$TARBALL" | wc -l)"
+          if tar tzf "$TARBALL" | grep -qE '(^|/)\.env$|(^|/)\.deploy\.env$'; then
+            echo "::error::归档中包含生产密钥文件"; exit 1
+          fi
+          if tar tzf "$TARBALL" | grep -qE '(^|/)\._'; then
+            echo "::error::归档中包含 AppleDouble 条目"; exit 1
+          fi
+          echo "✓ 归档检查通过"

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TurnstileWidget, useTurnstileToken } from "@/components/shop/turnstile-widget";
 import {
   cancelOrderAction,
   repurchaseOrderAction,
@@ -33,11 +34,14 @@ export function OrderStatusPoll({
   orderNo,
   initial,
   payCTA = false,
+  turnstile,
 }: {
   orderNo: string;
   initial: OrderStatusPayload | null;
   /** 待支付页模式：pending 时显示前往收银台按钮 */
   payCTA?: boolean;
+  /** 后台启用 Turnstile 时由服务端下发（重新购买表单需要渲染验证码） */
+  turnstile?: { enabled: boolean; siteKey: string };
 }) {
   const [order, setOrder] = useState<OrderStatusPayload | null>(initial);
   const [notFound, setNotFound] = useState(!initial);
@@ -55,7 +59,7 @@ export function OrderStatusPoll({
           if (json.ok && json.order) {
             setOrder(json.order);
             setNotFound(false);
-            if (!["pending", "paid", "delivering"].includes(json.order.status)) return; // 终态停轮询
+            if (!["pending", "paid", "delivering", "reconciling"].includes(json.order.status)) return; // 终态停轮询
           }
         } else if (res.status === 404) {
           setNotFound(true);
@@ -83,6 +87,7 @@ export function OrderStatusPoll({
   }
   if (!order) return null;
 
+  // reconciling 仍在等待人工/回调确认，不应视为终态停止轮询
   const done = ["completed", "expired", "closed"].includes(order.status);
 
   return (
@@ -122,6 +127,11 @@ export function OrderStatusPoll({
           <>支付已到账，正在为你发货；如卡密紧张可能稍有延迟。</>
         ) : order.status === "expired" ? (
           <>订单已超时未支付，占用的库存已释放。如已付款请联系客服核实。</>
+        ) : order.status === "reconciling" ? (
+          <>
+            支付状态待核实：我们未能确认本次支付是否已在网关创建。
+            <b className="mx-1">请勿重复付款</b>，客服核对后会尽快处理；也可稍后回到本页查看。
+          </>
         ) : (
           <>订单已关闭。如已付款请联系客服核实。</>
         )}
@@ -142,7 +152,11 @@ export function OrderStatusPoll({
       ) : null}
 
       {(order.status === "expired" || order.status === "closed") && payCTA ? (
-        <RepurchaseOrder orderNo={order.orderNo} productSlug={order.productSlug ?? null} />
+        <RepurchaseOrder
+          orderNo={order.orderNo}
+          productSlug={order.productSlug ?? null}
+          turnstile={turnstile}
+        />
       ) : null}
 
       {done ? (
@@ -228,13 +242,36 @@ function CancelOrder({ orderNo }: { orderNo: string }) {
  * 过期订单不恢复原单（库存已释放，且旧交易回调可能仍在途），
  * 而是创建一笔新订单 —— 语义与库存、支付路径都更清晰。
  */
-function RepurchaseOrder({ orderNo, productSlug }: { orderNo: string; productSlug: string | null }) {
+function RepurchaseOrder({
+  orderNo,
+  productSlug,
+  turnstile,
+}: {
+  orderNo: string;
+  productSlug: string | null;
+  turnstile?: { enabled: boolean; siteKey: string };
+}) {
   const [state, formAction, pending] = useActionState<RepurchaseState | null, FormData>(
     repurchaseOrderAction,
     null
   );
   const [asking, setAsking] = useState(false);
   const router = useRouter();
+  // 重新购买同样会创建订单：必须与商品页一致地过 Turnstile，
+  // 否则开启验证码后该入口会被服务端守卫拒绝（且此前根本没渲染验证码）。
+  const { token, setToken, resetToken } = useTurnstileToken();
+  const [captchaEpoch, setCaptchaEpoch] = useState(0);
+  const [lastError, setLastError] = useState<string | undefined>(undefined);
+  const captchaEnabled = !!turnstile?.enabled && !!turnstile.siteKey;
+
+  // 提交失败时 Turnstile token 已被消费，需重挂挑战
+  if (state?.error !== lastError) {
+    setLastError(state?.error);
+    if (state?.error && captchaEnabled) {
+      resetToken();
+      setCaptchaEpoch((e) => e + 1);
+    }
+  }
 
   // 与普通下单保持一致：先跳到新的「待支付页」，由买家点击按钮再打开收银台。
   // 好处：① 不会触发浏览器弹窗拦截；② 买家能看到并保存新的订单号。
@@ -273,6 +310,13 @@ function RepurchaseOrder({ orderNo, productSlug }: { orderNo: string; productSlu
         将为你创建一笔**新订单**（原订单已失效、库存已释放）。请填写下单邮箱以确认。
       </p>
       <Input name="email" type="email" required placeholder="下单时填写的邮箱" autoComplete="email" />
+      {captchaEnabled ? <input type="hidden" name="cfToken" value={token ?? ""} /> : null}
+      {captchaEnabled ? (
+        <div className="space-y-1">
+          <TurnstileWidget key={captchaEpoch} siteKey={turnstile!.siteKey} onToken={setToken} />
+          {!token ? <p className="text-xs text-muted-foreground">提交前请先完成人机验证</p> : null}
+        </div>
+      ) : null}
       {state?.error ? (
         <p className="text-sm text-pastel-red-text">
           {state.error}
@@ -287,7 +331,7 @@ function RepurchaseOrder({ orderNo, productSlug }: { orderNo: string; productSlu
         </p>
       ) : null}
       <div className="flex gap-2">
-        <Button type="submit" className="flex-1" disabled={pending}>
+        <Button type="submit" className="flex-1" disabled={pending || (captchaEnabled && !token)}>
           {pending ? "正在创建…" : "确认并前往支付"}
         </Button>
         <Button type="button" variant="ghost" className="flex-1" onClick={() => setAsking(false)} disabled={pending}>

@@ -120,37 +120,81 @@ if [[ "$DRY_RUN" == true ]]; then
   exit 0
 fi
 
+# 上传前检查归档内容：不得包含任何生产密钥文件
+if tar tzf "$TARBALL" | grep -qE '(^|/)\.env$|(^|/)\.deploy\.env$'; then
+  echo "✗ 归档中包含生产密钥文件，中止部署" >&2
+  exit 1
+fi
+
+ENV_HASH_BEFORE="$("${SSH[@]}" "$TARGET" "sha256sum $REMOTE_DIR/.env | cut -d' ' -f1")"
+
 "${SCP[@]}" "$TARBALL" "$TARGET:/tmp/liteshop-deploy.tar.gz"
 
 "${SSH[@]}" "$TARGET" bash -s <<EOF
 set -euo pipefail
-cd "$REMOTE_DIR"
 
-# 解包前校验 .env 指纹，确保不覆盖生产配置
-BEFORE=\$(sha256sum .env | cut -d' ' -f1)
+REMOTE_DIR="$REMOTE_DIR"
+STAGING="\$(mktemp -d /tmp/liteshop-release-XXXXXX)"
+trap 'rm -rf "\$STAGING"' EXIT
 
-tar xzf /tmp/liteshop-deploy.tar.gz -C "$REMOTE_DIR"
+# ── 1. 解包到全新 staging 目录（不原地覆盖）────────────────────────────────
+#
+# 为什么不在原地解压：tar 覆盖解压**不会删除**上一版本已移除的文件。
+# 例如某路由已从仓库删除，服务器上仍留着旧文件，下一次 \`COPY . .\` 可能
+# 把它重新编译进镜像，导致「线上有仓库里不存在的代码」。
+# 改用全新目录后，目录内容严格等于该提交。
+tar xzf /tmp/liteshop-deploy.tar.gz -C "\$STAGING"
+rm -f /tmp/liteshop-deploy.tar.gz
 
-AFTER=\$(sha256sum .env | cut -d' ' -f1)
-if [ "\$BEFORE" != "\$AFTER" ]; then
-  echo "✗ .env 被意外修改，中止部署" >&2
+# 防御：staging 中不得出现 AppleDouble 或密钥文件
+if find "\$STAGING" -name '._*' -type f | head -1 | grep -q .; then
+  echo "✗ staging 中发现 AppleDouble 文件，中止" >&2; exit 1
+fi
+if [ -e "\$STAGING/.env" ] || [ -e "\$STAGING/.deploy.env" ]; then
+  echo "✗ staging 中发现密钥文件，中止" >&2; exit 1
+fi
+
+# ── 2. 保留生产侧不入库的内容，再同步到目标目录 ─────────────────────────────
+cd "\$REMOTE_DIR"
+
+# 备份生产 .env（其内容不来自仓库，绝不能被覆盖）
+ENV_BACKUP="\$(mktemp)"
+cp .env "\$ENV_BACKUP"
+
+# 记录将被移除的旧文件（同步后不存在于新版本者）
+if command -v rsync >/dev/null 2>&1; then
+  # --delete 保证目标目录严格等于 staging（即该提交）
+  rsync -a --delete --exclude '.env' --exclude '.deploy.env' \
+        --exclude 'data' --exclude 'node_modules' --exclude '.next' \
+        --exclude '.git' --exclude 'backups' \
+        "\$STAGING"/ "\$REMOTE_DIR"/
+else
+  echo "✗ 目标机缺少 rsync（apt-get install rsync），中止以避免目录残留" >&2
+  exit 1
+fi
+
+# 恢复 .env 并校验指纹
+cp "\$ENV_BACKUP" .env
+rm -f "\$ENV_BACKUP"
+NEW_ENV_HASH="\$(sha256sum .env | cut -d' ' -f1)"
+if [ "\$NEW_ENV_HASH" != "$ENV_HASH_BEFORE" ]; then
+  echo "✗ .env 指纹异常，中止部署" >&2
   exit 1
 fi
 echo "✓ .env 未被改动"
 
-# 清理历史遗留的 AppleDouble 垃圾（早期用 tar 部署时混入）
-CLEANED=\$(find . -path ./node_modules -prune -o -name '._*' -type f -print 2>/dev/null | wc -l | tr -d ' ')
-if [ "\$CLEANED" != "0" ]; then
-  find . -path ./node_modules -prune -o -name '._*' -type f -print0 2>/dev/null | xargs -0 rm -f
-  echo "✓ 已清理 \$CLEANED 个 AppleDouble 残留文件"
-fi
-
-# 记录本次部署的提交，便于线上追溯
-echo "$DEPLOY_SHA" > .deployed-commit
-
+# ── 3. 构建并等待健康 ─────────────────────────────────────────────────────
 rm -f /tmp/liteshop-deploy.tar.gz
-docker compose $COMPOSE_FILES up -d --build
+if ! docker compose $COMPOSE_FILES up -d --build --wait --wait-timeout 180; then
+  echo "✗ 构建或健康检查失败；容器保持现状，请检查日志：" >&2
+  docker compose $COMPOSE_FILES logs --tail 60 liteshop >&2 || true
+  exit 1
+fi
 docker compose $COMPOSE_FILES ps
+
+# ── 4. 健康通过后才落盘部署标记 ───────────────────────────────────────────
+echo "$DEPLOY_SHA" > .deployed-commit
+echo "✓ 部署标记已写入：$DEPLOY_SHA"
 EOF
 
 echo "✓ 部署完成 (${DEPLOY_SHA_SHORT})：https://${DOMAIN:-$SSH_HOST}"
