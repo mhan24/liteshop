@@ -2,6 +2,8 @@ import { envConfig } from "@/lib/env";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { createSessionToken, SESSION_TTL_SECONDS, verifySessionToken } from "@/lib/session";
 import { getSetting, setSetting } from "@/server/settings";
+import { db } from "@/db";
+import { settings } from "@/db/schema";
 
 /** 管理员登录/登出/凭据修改（service 层；页面/Action 不得直连 DB） */
 
@@ -9,36 +11,105 @@ const SESSION_VERSION_KEY = "session_version";
 const ADMIN_USERNAME_KEY = "admin_username";
 const ADMIN_PASSWORD_HASH_KEY = "admin_password_hash";
 
-/* 登录限速：内存滑动窗口（单实例部署足够；PLAN §6-③：5 次失败锁 15 分钟） */
+/**
+ * 登录限速：内存滑动窗口（单实例部署足够；PLAN §6-③：5 次失败锁 15 分钟）。
+ *
+ * 两个维度都要限：
+ * - **IP + 用户名**：针对固定目标的爆破（5 次锁 15 分钟）
+ * - **仅 IP**：防止轮换用户名绕过 —— 攻击者用不同用户名时，
+ *   每个新用户名都会创建一条件独立记录，既绕过了按用户名的锁定，
+ *   又能无限扩张键空间（内存耗尽）。
+ *
+ * 记录带 TTL 与容量上限，避免内存无界增长。
+ */
 const MAX_FAILURES = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
-const attempts = new Map<string, { count: number; lockedUntil: number }>();
+
+/** 仅按 IP 的限速：同一 IP 15 分钟内最多 20 次失败（跨用户名累计） */
+const IP_MAX_FAILURES = 20;
+
+/** 记录保留时长：超过后视为过期可回收 */
+const RECORD_TTL_MS = 60 * 60 * 1000;
+/** 容量上限：超出时优先淘汰已过期、再淘汰最旧记录，防止内存被撑爆 */
+const MAX_RECORDS = 5000;
+
+interface AttemptRecord {
+  count: number;
+  lockedUntil: number;
+  /** 最近更新时间，用于 TTL 回收与容量淘汰 */
+  updatedAt: number;
+}
+
+const attempts = new Map<string, AttemptRecord>();
 
 function attemptKey(ip: string, username: string): string {
   return `${ip}|${username}`;
 }
 
-/** 剩余锁定秒数；0 = 未锁定 */
+/** 回收过期记录；返回是否执行了清理 */
+function sweepExpired(now = Date.now()): void {
+  for (const [k, v] of attempts) {
+    if (now - v.updatedAt > RECORD_TTL_MS && v.lockedUntil <= now) attempts.delete(k);
+  }
+}
+
+/** 容量保护：仍超出上限时，淘汰最旧的记录 */
+function enforceCapacity(): void {
+  if (attempts.size <= MAX_RECORDS) return;
+  const sorted = [...attempts.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+  const toRemove = attempts.size - MAX_RECORDS;
+  for (let i = 0; i < toRemove; i++) attempts.delete(sorted[i][0]);
+}
+
+/** 剩余锁定秒数；0 = 未锁定（取用户名维度与 IP 维度中较长者） */
 export function lockedForSeconds(ip: string, username: string): number {
+  const now = Date.now();
+  sweepExpired(now);
   const rec = attempts.get(attemptKey(ip, username));
-  if (!rec) return 0;
-  if (rec.lockedUntil > Date.now()) return Math.ceil((rec.lockedUntil - Date.now()) / 1000);
-  return 0;
+  const userLock = rec && rec.lockedUntil > now ? rec.lockedUntil : 0;
+  const ipRec = attempts.get(`ip:${ip}`);
+  const ipLock = ipRec && ipRec.lockedUntil > now ? ipRec.lockedUntil : 0;
+  const until = Math.max(userLock, ipLock);
+  return until > now ? Math.ceil((until - now) / 1000) : 0;
 }
 
 export function recordFailure(ip: string, username: string): void {
+  const now = Date.now();
+  sweepExpired(now);
+
+  // 维度 1：IP + 用户名
   const key = attemptKey(ip, username);
-  const rec = attempts.get(key) ?? { count: 0, lockedUntil: 0 };
+  const rec = attempts.get(key) ?? { count: 0, lockedUntil: 0, updatedAt: now };
   rec.count += 1;
+  rec.updatedAt = now;
   if (rec.count >= MAX_FAILURES) {
-    rec.lockedUntil = Date.now() + LOCKOUT_MS;
+    rec.lockedUntil = now + LOCKOUT_MS;
     rec.count = 0;
   }
   attempts.set(key, rec);
+
+  // 维度 2：仅 IP（跨用户名累计，防轮换绕过）
+  const ipKey = `ip:${ip}`;
+  const ipRec = attempts.get(ipKey) ?? { count: 0, lockedUntil: 0, updatedAt: now };
+  ipRec.count += 1;
+  ipRec.updatedAt = now;
+  if (ipRec.count >= IP_MAX_FAILURES) {
+    ipRec.lockedUntil = now + LOCKOUT_MS;
+    ipRec.count = 0;
+  }
+  attempts.set(ipKey, ipRec);
+
+  enforceCapacity();
 }
 
 function clearFailures(ip: string, username: string): void {
   attempts.delete(attemptKey(ip, username));
+  attempts.delete(`ip:${ip}`);
+}
+
+/** 仅供测试：读取当前记录数 */
+export function _attemptRecordsSize(): number {
+  return attempts.size;
 }
 
 export function getSessionVersion(): number {
@@ -126,7 +197,10 @@ export function changeAdminCredentials(input: ChangeCredentialsInput): ChangeCre
     return { ok: false, message: "当前密码不正确" };
   }
 
-  let changed = 0;
+  // ── 阶段 1：先**全部校验**，不写库 ────────────────────────────────────────
+  // 历史缺陷：逐项「校验→写入」，若用户名已写成功而密码校验失败，
+  // 会返回失败但配置已被部分修改（管理员看到失败却已生效，容易锁死自己）。
+  const pending: { key: string; value: string; note: string }[] = [];
   const notes: string[] = [];
 
   if (input.newUsername != null && input.newUsername.trim() !== "") {
@@ -134,18 +208,19 @@ export function changeAdminCredentials(input: ChangeCredentialsInput): ChangeCre
     if (!/^[a-zA-Z0-9_-]{3,32}$/.test(u)) {
       return { ok: false, message: "用户名需 3-32 位字母/数字/下划线/连字符" };
     }
-    setSetting(ADMIN_USERNAME_KEY, u);
-    changed += 1;
-    notes.push("用户名已更新");
+    pending.push({ key: ADMIN_USERNAME_KEY, value: u, note: "用户名已更新" });
   }
 
   if (input.newPassword != null && input.newPassword !== "") {
     if (input.newPassword.length < 8 || input.newPassword.length > 128) {
       return { ok: false, message: "新密码需 8-128 位" };
     }
-    setSetting(ADMIN_PASSWORD_HASH_KEY, hashPassword(input.newPassword));
-    changed += 1;
-    notes.push("密码已更新");
+    // 哈希计算放在事务外（scrypt 较慢，不应占用写事务）
+    pending.push({
+      key: ADMIN_PASSWORD_HASH_KEY,
+      value: hashPassword(input.newPassword),
+      note: "密码已更新",
+    });
   }
 
   if (input.newPath != null && input.newPath.trim() !== "") {
@@ -153,14 +228,31 @@ export function changeAdminCredentials(input: ChangeCredentialsInput): ChangeCre
     if (!/^[a-z0-9-]{3,32}$/.test(p) || RESERVED_ADMIN_PATHS.has(p)) {
       return { ok: false, message: "入口路径需 3-32 位小写字母/数字/连字符，且不能使用保留路径" };
     }
-    setSetting("admin_path", p);
-    changed += 1;
-    notes.push(`后台入口已改为 /${p}`);
+    pending.push({ key: "admin_path", value: p, note: `后台入口已改为 /${p}` });
   }
 
-  if (changed === 0) {
+  if (pending.length === 0) {
     return { ok: false, message: "没有需要修改的内容" };
   }
+
+  // ── 阶段 2：全部校验通过后，在一个事务内提交 ─────────────────────────────
+  // 任一项失败则整体回滚，不会出现"改了一半"的状态。
+  db.transaction(
+    (tx) => {
+      for (const item of pending) {
+        tx.insert(settings)
+          .values({ key: item.key, value: item.value, updatedAt: new Date() })
+          .onConflictDoUpdate({
+            target: settings.key,
+            set: { value: item.value, updatedAt: new Date() },
+          })
+          .run();
+        notes.push(item.note);
+      }
+    },
+    { behavior: "immediate" }
+  );
+
   // 凭据/入口变更 → 全部旧会话失效
   bumpSessionVersion();
   return {

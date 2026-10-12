@@ -6,6 +6,7 @@ import { normalizeAmountString, toMinorUnits } from "@/lib/money";
 import { sha256Hex } from "@/lib/signature";
 import { getProvider } from "@/server/payment";
 import { autoDelivery, getDeliveryStrategy } from "@/server/delivery";
+import { getOrderDeliveryType, releaseOrderStock } from "@/server/delivery/release-stock";
 import { createAttempt, getCurrentAttempt, isCurrentTrade } from "@/server/payment/attempts";
 import type { MailKind } from "@/server/mail";
 import { assertTransition } from "./state-machine";
@@ -241,13 +242,8 @@ function processNotify(
       };
     }
     assertTransition("pending", "expired");
-    const product = order.productId
-      ? tx.select().from(products).where(eq(products.id, order.productId)).get()
-      : null;
-    if (product) {
-      // 未支付超时：回补 manual 库存等占用
-      getDeliveryStrategy(product.deliveryType).release(tx, order, product);
-    }
+    // 统一释放入口：幂等回补并清除占用标志
+    releaseOrderStock(tx, order.orderNo);
     tx.update(orders)
       .set({ status: "expired" as OrderStatus, updatedAt: new Date() })
       .where(eq(orders.id, order.id))
@@ -337,7 +333,8 @@ function processNotify(
   // 标记本次支付尝试已到账
   markAttemptStatus(tx, payload.tradeId, "paid", new Date());
 
-  if (product.deliveryType === "auto") {
+  // 以订单快照为准（商品类型可能已被后台修改，历史订单不应被追溯改变）
+  if (getOrderDeliveryType(tx, order) === "auto") {
     const outcome = getDeliveryStrategy("auto").fulfill(tx, order, product);
     if (outcome.ok && outcome.content != null) {
       assertTransition(statusNow, "completed");
@@ -389,7 +386,8 @@ export function retryAutoDelivery(orderNo: string): AdminOpResult {
         ? tx.select().from(products).where(eq(products.id, order.productId)).get()
         : null;
       if (!product) return { ok: false, message: "订单关联商品不存在" };
-      if (product.deliveryType !== "auto") {
+      // 以订单快照为准，避免商品被改为 manual 后无法重试原本的自动发货
+      if (getOrderDeliveryType(tx, order) !== "auto") {
         return { ok: false, message: "人工发货商品请在后台录入交付内容" };
       }
       const outcome = getDeliveryStrategy("auto").fulfill(tx, order, product);
@@ -472,12 +470,8 @@ export function closeOrder(orderNo: string): AdminOpResult {
           message: "该订单待对账（网关可能已建单），请先核对 bepusdt 后台再决定是否关闭",
         };
       }
-      const product = order.productId
-        ? tx.select().from(products).where(eq(products.id, order.productId)).get()
-        : null;
-      if (product) {
-        getDeliveryStrategy(product.deliveryType).release(tx, order, product);
-      }
+      // 统一释放入口：幂等（已释放过的订单不会二次回补）
+      releaseOrderStock(tx, order.orderNo);
       assertTransition(order.status as OrderStatus, "closed");
       tx.update(orders)
         .set({ status: "closed" as OrderStatus, updatedAt: new Date() })
@@ -519,13 +513,8 @@ export function cancelPendingOrder(orderNo: string, email: string): AdminOpResul
         };
       }
 
-      const product = order.productId
-        ? tx.select().from(products).where(eq(products.id, order.productId)).get()
-        : null;
-      if (product) {
-        // 释放 reserved 卡密 / 回补 manual 库存
-        getDeliveryStrategy(product.deliveryType).release(tx, order, product);
-      }
+      // 统一释放入口：幂等回补
+      releaseOrderStock(tx, order.orderNo);
 
       assertTransition(order.status as OrderStatus, "closed");
       tx.update(orders)
@@ -561,12 +550,8 @@ export function resolveReconcilingAsNotCreated(orderNo: string): AdminOpResult {
       if (order.status !== "reconciling") {
         return { ok: false, message: `订单状态为 ${order.status}，无需此操作` };
       }
-      const product = order.productId
-        ? tx.select().from(products).where(eq(products.id, order.productId)).get()
-        : null;
-      if (product) {
-        getDeliveryStrategy(product.deliveryType).release(tx, order, product);
-      }
+      // 统一释放入口：幂等回补
+      releaseOrderStock(tx, order.orderNo);
       assertTransition("reconciling", "closed");
       tx.update(orders)
         .set({ status: "closed" as OrderStatus, updatedAt: new Date() })

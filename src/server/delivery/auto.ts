@@ -5,6 +5,7 @@ import type {
   DeliveryStrategy,
   OrderLike,
   ProductLike,
+  ReleaseOutcome,
 } from "./strategy";
 
 /**
@@ -56,10 +57,15 @@ export const autoDelivery: DeliveryStrategy = {
     return { ok: true, content: contents.join("\n") };
   },
 
-  release(tx: DbTransaction, order: OrderLike): void {
-    tx.run(
+  release(tx: DbTransaction, order: OrderLike): ReleaseOutcome {
+    // 条件更新天然幂等：只影响仍处于 reserved 的本单卡密。
+    // 受影响行数为 0 说明已释放过（或本就没占卡）→ 报告未释放，
+    // 调用方据此不再重复清理。
+    const res = tx.run(
       sql`UPDATE cards SET status = 'available', order_id = NULL, sold_at = NULL
           WHERE order_id = ${order.orderNo} AND status = 'reserved'`
     );
+    const changed = Number((res as { changes?: number }).changes ?? 0);
+    return { released: changed > 0 };
   },
 };

@@ -1,8 +1,8 @@
 import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
-import { adminLogs, notifyLogs, orders, products } from "@/db/schema";
+import { adminLogs, notifyLogs, orders } from "@/db/schema";
 import type { Order, OrderStatus } from "@/db/schema";
-import { getDeliveryStrategy } from "@/server/delivery";
+import { releaseOrderStock } from "@/server/delivery/release-stock";
 import { assertTransition } from "./state-machine";
 
 /**
@@ -38,13 +38,8 @@ function expireOne(tx: DbTransaction, order: Order): boolean {
   if (order.status !== "pending" || !exp || exp.getTime() > Date.now()) return false;
 
   assertTransition("pending", "expired");
-  const product = order.productId
-    ? tx.select().from(products).where(eq(products.id, order.productId)).get()
-    : null;
-  if (product) {
-    // 释放 reserved 卡密 / 回补 manual 库存
-    getDeliveryStrategy(product.deliveryType).release(tx, order, product);
-  }
+  // 统一释放入口：幂等地回补库存并清除占用标志
+  releaseOrderStock(tx, order.orderNo);
   tx.update(orders)
     .set({ status: "expired" as OrderStatus, updatedAt: new Date() })
     .where(eq(orders.id, order.id))
@@ -90,12 +85,23 @@ export function sweepExpiredOrders(limit = SWEEP_BATCH_LIMIT): ExpireSweepResult
  * 供订单读取路径（查单/状态轮询）调用，成本恒定且仅在必要时才开写事务。
  */
 export function expireOrderIfOverdue(orderNo: string): boolean {
-  const order = db.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
-  if (!order) return false;
-  if (order.status !== "pending" || !order.expirationTime) return false;
-  if (order.expirationTime.getTime() > Date.now()) return false;
+  // 先做一次无锁预检（绝大多数调用都不需要写事务，避免无谓加锁）
+  const peek = db.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
+  if (!peek) return false;
+  if (peek.status !== "pending" || !peek.expirationTime) return false;
+  if (peek.expirationTime.getTime() > Date.now()) return false;
 
-  return db.transaction((tx) => expireOne(tx, order), { behavior: "immediate" });
+  // 真正写入时在 IMMEDIATE 事务内**重新读取**：
+  // 预检到写入之间存在窗口，并发的支付回调可能已把订单推进为 paid/completed。
+  // 复用旧对象会基于过期快照判断，导致竞态。
+  return db.transaction(
+    (tx) => {
+      const fresh = tx.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
+      if (!fresh) return false;
+      return expireOne(tx, fresh);
+    },
+    { behavior: "immediate" }
+  );
 }
 
 /** 供后台/健康检查观测：当前已超时但仍为 pending 的订单数 */

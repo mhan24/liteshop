@@ -1,7 +1,7 @@
-import { headers } from "next/headers";
 import { getTurnstileSecretKey, isTurnstileEnforced } from "@/server/settings";
 import { verifyTurnstileToken } from "@/lib/turnstile";
 import { checkOrderRateLimit } from "@/server/security/rate-limit";
+import { clientIpFromHeaders } from "@/server/security/client-ip";
 
 /**
  * 下单入口的统一防护。
@@ -24,10 +24,9 @@ export interface OrderGuardResult {
   ip?: string;
 }
 
-/** 取请求来源 IP（经反向代理时取 XFF 首段） */
+/** 取请求来源 IP（经反向代理时取**受信代理写入的**那一段，防伪造） */
 export async function clientIp(): Promise<string> {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "-";
+  return clientIpFromHeaders();
 }
 
 /**

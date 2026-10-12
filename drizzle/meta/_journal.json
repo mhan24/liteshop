@@ -50,6 +50,13 @@
       "when": 1791782000000,
       "tag": "0006_payment-anomalies",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791783000000,
+      "tag": "0007_order-delivery-type-snapshot",
+      "breakpoints": true
     }
   ]
 }

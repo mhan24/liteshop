@@ -142,13 +142,15 @@ export function acceptAnomalyForManualDelivery(anomalyId: number, note: string):
         return { ok: false, message: "该商品为自动发卡，请使用「补发商品」" };
       }
 
-      // 防止重复占用：若此前已回补过库存，这里不再二次扣减，
-      // 仅复位标记，使后续 release() 不会重复回补。
-      const alreadyReleased = order.stockCharged === false;
+      // stockCharged 语义：「本单当前是否占用着有限库存」。
+      // 订单过期时清扫已释放并把它置为 false，因此这里需要**重新占用**一份，
+      // 使订单回到「占用中」的正常状态（与下单时一致）。
+      // 若标记仍为 true（说明库存尚未被释放），则无需重复扣减。
       const trackStock = shouldChargeStock(product.stockLimit);
+      const needRecharge = trackStock && !order.stockCharged;
 
-      if (!alreadyReleased && trackStock) {
-        // 重新占用一份库存（与下单时的条件扣减一致，不足则拒绝）
+      if (needRecharge) {
+        // 条件扣减：库存不足则拒绝，避免超卖或负库存
         const res = tx
           .update(products)
           .set({ stockLimit: sql`${products.stockLimit} - ${order.quantity}` })
@@ -168,8 +170,9 @@ export function acceptAnomalyForManualDelivery(anomalyId: number, note: string):
         .set({
           status: "paid",
           paidAt: order.paidAt ?? new Date(),
-          // 复位占用标记：库存要么已重新扣减（下面置 true），要么本就未占用
-          stockCharged: !alreadyReleased && trackStock,
+          // 占用状态与是否真的扣减保持一致：
+          // 有限库存 → 已（重新）占用；不限库存 → 无需占用
+          stockCharged: trackStock,
           expirationTime: null,
           updatedAt: new Date(),
         })

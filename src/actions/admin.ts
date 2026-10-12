@@ -15,6 +15,7 @@ import {
   getSessionVersion,
 } from "@/server/auth";
 import { logAdmin } from "@/server/admin-log";
+import { clientIpFromHeaders, parseClientIp } from "@/server/security/client-ip";
 import {
   clearAvailableCards,
   createProduct,
@@ -73,8 +74,9 @@ async function requireSession() {
 }
 
 async function clientIp(): Promise<string> {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip") ?? "-";
+  // 统一走 client-ip 解析：取 XFF 最后一段（受信代理写入），
+  // 而非客户端可控的第一段，避免伪造 IP 绕过限流
+  return clientIpFromHeaders();
 }
 
 /** 跳回来源页（/admin/... 内部路径自动换算为当前伪装入口）；提示走一次性 Flash（URL 仅含随机 ID） */
@@ -91,7 +93,7 @@ export async function loginAction(_prev: { error?: string } | null, formData: Fo
   const username = String(formData.get("username") ?? "");
   const password = String(formData.get("password") ?? "");
   const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "-";
+  const ip = parseClientIp(h.get("x-forwarded-for"), h.get("x-real-ip"));
 
   const locked = lockedForSeconds(ip, username);
   if (locked > 0) {

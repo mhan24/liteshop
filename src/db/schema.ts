@@ -121,6 +121,16 @@ export const orders = sqliteTable(
     status: text("status").notNull().default(OrderStatus.pending),
     /** manual 型下单时是否执行过库存扣减（关闭/过期时回补的依据） */
     stockCharged: integer("stock_charged", { mode: "boolean" }).notNull().default(false),
+    /**
+     * 下单时刻的发货方式快照（auto | manual）。
+     *
+     * 履约与库存释放必须以此为准，而非商品当前的 deliveryType：
+     * 后台允许修改商品的发货方式，若订单在创建后被"商品改成另一种类型"影响，
+     * 会出现「人工单按自动逻辑处理（不回补库存）」或
+     * 「自动单按人工逻辑处理（预留的卡密不释放）」等账实不一致。
+     * 历史数据可能为 NULL，读取时回落商品当前值（见 getOrderDeliveryType）。
+     */
+    deliveryType: text("delivery_type"),
     /** 交付内容：自动发卡的卡密或人工录入内容，仅在支付后对买家可见 */
     deliveryContent: text("delivery_content"),
     /** bepusdt 创建交易响应快照（对账依据） */

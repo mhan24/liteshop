@@ -28,10 +28,27 @@ export interface DeliveryOutcome {
   reason?: string;
 }
 
+export interface ReleaseOutcome {
+  /**
+   * 本次调用是否真的发生了回滚（释放了卡密或回补了库存）。
+   *
+   * 调用方**必须**在返回 true 时于**同一事务内**清除订单的占用标志
+   * （stockCharged），否则同一订单被多次释放会重复回补库存。
+   * 历史缺陷：释放只读 stockCharged 却从不清除它，
+   * 于是「超时清扫释放一次 + 管理员关闭再释放一次」使库存凭空增加。
+   */
+  released: boolean;
+  /** 回补的库存数量（manual 型有效） */
+  restoredQuantity?: number;
+}
+
 export interface DeliveryStrategy {
   readonly type: DeliveryType;
   /** 支付确认后执行（事务内）：占卡/校验，成功返回交付内容 */
   fulfill(tx: DbTransaction, order: OrderLike, product: ProductLike): DeliveryOutcome;
-  /** 订单关闭/过期时回滚占用（事务内）：释放 reserved 卡密或回补 manual 库存 */
-  release(tx: DbTransaction, order: OrderLike, product: ProductLike): void;
+  /**
+   * 订单关闭/过期时回滚占用（事务内）：释放 reserved 卡密或回补 manual 库存。
+   * 必须是**幂等**的：已释放过的订单再次调用应返回 released=false 且不改动库存。
+   */
+  release(tx: DbTransaction, order: OrderLike, product: ProductLike): ReleaseOutcome;
 }

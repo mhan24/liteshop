@@ -6,6 +6,7 @@ import type {
   DeliveryStrategy,
   OrderLike,
   ProductLike,
+  ReleaseOutcome,
 } from "./strategy";
 
 /**
@@ -21,14 +22,17 @@ export const manualDelivery: DeliveryStrategy = {
     return { ok: false, content: null, reason: "人工发货需在后台手动录入" };
   },
 
-  release(tx: DbTransaction, order: OrderLike, product: ProductLike): void {
-    // 从未交付且下单时真扣过库存才回补（硬约束：禁止硬删除已产生交易关联的数据）
-    if (order.deliveryContent != null) return;
-    if (!order.stockCharged) return;
+  release(tx: DbTransaction, order: OrderLike, product: ProductLike): ReleaseOutcome {
+    // 幂等守卫：
+    // 1) 已交付的订单不回补（禁止硬删除已产生交易关联的数据）
+    // 2) stockCharged=false 表示本单未占用库存，或**已经回补过**
+    if (order.deliveryContent != null) return { released: false };
+    if (!order.stockCharged) return { released: false };
     tx
       .update(products)
       .set({ stockLimit: sql`${products.stockLimit} + ${order.quantity}`, updatedAt: new Date() })
       .where(eq(products.id, product.id))
       .run();
+    return { released: true, restoredQuantity: order.quantity };
   },
 };

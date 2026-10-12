@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { isKnownProvider } from "@/server/payment";
 import { handlePaymentNotify } from "@/server/order/fulfill-order";
 import { sendOrderEmail } from "@/server/mail";
+import { clientIpFromRequest } from "@/server/security/client-ip";
 import {
   checkNotifyRateLimit,
   recordRejectedNotify,
@@ -35,8 +36,7 @@ export async function POST(
     return new Response("not found", { status: 404 });
   }
 
-  const fwd = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const ip = fwd || request.headers.get("x-real-ip") || "-";
+  const ip = clientIpFromRequest(request);
 
   // 报文大小：先判长度再读取，避免超大 body 占用内存
   const declaredLength = Number(request.headers.get("content-length") ?? "0");

@@ -5,8 +5,8 @@ import type { OrderStatus, Product } from "@/db/schema";
 import { generateOrderNo } from "@/lib/order-no";
 import { getSiteUrl } from "@/server/settings";
 import { resolvePaymentProvider, PaymentCreationError } from "@/server/payment";
-import { getDeliveryStrategy } from "@/server/delivery";
-import { createAttempt } from "@/server/payment/attempts";
+import { releaseOrderStock } from "@/server/delivery/release-stock";
+import { createAttempt, getLatestAttempt } from "@/server/payment/attempts";
 import { sha256Hex } from "@/lib/signature";
 import { shouldChargeStock } from "@/lib/stock";
 import { assertTransition } from "./state-machine";
@@ -65,6 +65,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
   const provider = resolvePaymentProvider();
   const siteUrl = getSiteUrl();
+  // 记录创建支付请求的起点，用于识别「期间是否有回调/并发路径推进了订单」
+  const startedAt = Date.now();
 
   // 建单：IMMEDIATE 事务（auto 型下单即锁定卡密；manual 型条件扣减库存；订单号撞唯一索引重试）
   const orderNo = db.transaction(
@@ -95,16 +97,36 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       );
     }
     // 明确失败（参数错误/业务拒绝/HTTP 4xx 等）：补偿关单并回补库存
-    compensateFailedOrder(orderNo, product);
+    compensateFailedOrder(orderNo);
     throw new OrderError(
       "PAYMENT_FAILED",
       `支付渠道创建失败: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
-  // 交易快照回写 + 记录本次支付尝试（原子）
-  db.transaction(
+  // 交易快照回写 + 记录本次支付尝试（原子）。
+  //
+  // 竞态防护：创建支付的网络往返期间（上面 await），订单可能已被回调推进
+  // （网关在响应返回前就推送了通知）。此时**不能**再无条件写入快照，
+  // 否则会把已完成的订单改回「待支付」并留下一条 pending 的支付尝试，
+  // 造成订单与支付尝试状态不一致。
+  const snapshotWritten = db.transaction(
     (tx) => {
+      const fresh = tx.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
+      if (!fresh) return false;
+
+      // 订单已进入非待支付状态（paid/delivering/completed/…）→
+      // 说明回调已处理，保留回调写入的权威快照，不再覆盖。
+      if (fresh.status !== "pending" && fresh.status !== "reconciling") {
+        return false;
+      }
+
+      // 已有更新的支付尝试（例如 resume 场景）→ 不覆盖当前交易
+      const existing = getLatestAttempt(orderNo, tx);
+      if (existing && existing.createdAt && existing.createdAt.getTime() > startedAt) {
+        return false;
+      }
+
       tx.update(orders)
         .set({
           tradeId: created.tradeId,
@@ -126,9 +148,23 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         expirationTime: created.expirationTime,
         raw: created.raw,
       });
+      return true;
     },
     { behavior: "immediate" }
   );
+
+  if (!snapshotWritten) {
+    // 订单已被其它路径推进：以数据库中的权威状态为准，不返回本地的陈旧快照
+    const fresh = db.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
+    return {
+      orderNo,
+      paymentUrl: fresh?.paymentUrl ?? created.paymentUrl,
+      totalCents,
+      currency: product.currency,
+      expiresAt: fresh?.expirationTime ?? created.expirationTime,
+      provider: provider.name,
+    };
+  }
 
   return {
     orderNo,
@@ -207,6 +243,13 @@ function insertOrderWithRetry(
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     const orderNo = generateOrderNo();
+    // 每次尝试包一个 SAVEPOINT：订单号撞唯一索引时需要回滚**本次尝试的全部副作用**
+    // （库存扣减、卡密占用），否则重试会在已扣减的基础上再扣一次，
+    // 造成库存凭空减少（实测 10 → 9 → 8，只该扣 1）。
+    // 普通语句失败只回滚该语句，不会撤销同一事务内先前成功的 UPDATE，
+    // 因此必须显式使用保存点。
+    const SAVEPOINT = `order_attempt_${attempt}`;
+    tx.run(sql.raw(`SAVEPOINT ${SAVEPOINT}`));
     try {
       // manual 型库存：条件原子扣减（-1 = 不限库存），受影响行数判定，不超卖。
       // 注意：必须用 shouldChargeStock 而非 stockLimit > 0——后者在库存扣到 0 后
@@ -248,20 +291,27 @@ function insertOrderWithRetry(
           email: data.email,
           note: data.note,
           status: "pending" as OrderStatus,
+          // 发货方式快照：后续履约/释放以此为准，不受商品被改类型影响
+          deliveryType: product.deliveryType,
           stockCharged: product.deliveryType === "manual" && shouldChargeStock(product.stockLimit),
         })
         .run();
+      tx.run(sql.raw(`RELEASE ${SAVEPOINT}`));
       return orderNo;
     } catch (err) {
       lastErr = err;
+      // 无论何种失败，先回滚本次尝试的副作用（库存扣减/卡密占用）
+      tx.run(sql.raw(`ROLLBACK TO ${SAVEPOINT}`));
+      tx.run(sql.raw(`RELEASE ${SAVEPOINT}`));
       if (err instanceof OrderError) throw err;
-      // 订单号撞唯一索引 → 换号重试
+      // 订单号撞唯一索引（或其它可重试冲突）→ 换号重试；
+      // 副作用已被保存点回滚，下一轮从干净状态开始。
     }
   }
   throw new OrderError("ORDER_NO_COLLISION", `订单号生成失败: ${String(lastErr)}`);
 }
 
-function compensateFailedOrder(orderNo: string, product: Product): void {
+function compensateFailedOrder(orderNo: string): void {
   db.transaction(
     (tx) => {
       const order = tx.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
@@ -270,7 +320,7 @@ function compensateFailedOrder(orderNo: string, product: Product): void {
         .set({ status: "closed" as OrderStatus, updatedAt: new Date() })
         .where(eq(orders.orderNo, orderNo))
         .run();
-      getDeliveryStrategy(product.deliveryType).release(tx, order, product);
+      releaseOrderStock(tx, order.orderNo);
     },
     { behavior: "immediate" }
   );
