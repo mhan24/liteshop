@@ -90,3 +90,80 @@ describe("重购边界：已付款订单", () => {
     expect(countOrders("clean-exp@test.dev")).toBe(2);
   });
 });
+
+describe("重购资格由服务端统一计算（前台按钮以此为准）", () => {
+  it("已付款后关闭：canRepurchase=false 且带原因", async () => {
+    const { createOrder } = await import("./create-order");
+    const { handlePaymentNotify } = await import("./fulfill-order");
+    const { closeOrder } = await import("./fulfill-order");
+    const { lookupOrder, getOrderStatusView } = await import("./query-order");
+    const { buildMockNotifyBody } = await import("@/server/payment/mock");
+
+    const p = seedAuto(["C1", "C2", "C3"]);
+    const r = await createOrder({ email: "elig-paid@test.dev", quantity: 1, slug: p.slug });
+    const o = getOrder(r.orderNo);
+    handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo, tradeId: o.tradeId!, amountCents: BigInt(o.totalCents),
+      currency: o.currency, status: 2,
+    }));
+    db.update(orders).set({ status: "paid", paidAt: new Date() })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    closeOrder(r.orderNo);
+
+    const view = lookupOrder(r.orderNo, "elig-paid@test.dev")!;
+    expect(view.canRepurchase).toBe(false);
+    expect(view.repurchaseBlockedReason).toContain("已付款");
+
+    // 轮询视图同样带上（回跳页/待支付页都用它）
+    const poll = getOrderStatusView(r.orderNo)!;
+    expect(poll.canRepurchase).toBe(false);
+  });
+
+  it("有待处理异常到账的过期订单：canRepurchase=false", async () => {
+    const { createOrder } = await import("./create-order");
+    const { handlePaymentNotify } = await import("./fulfill-order");
+    const { sweepExpiredOrders } = await import("./expire-orders");
+    const { lookupOrder } = await import("./query-order");
+    const { buildMockNotifyBody } = await import("@/server/payment/mock");
+
+    const p = seedAuto(["C1", "C2", "C3"]);
+    const r = await createOrder({ email: "elig-anom@test.dev", quantity: 1, slug: p.slug });
+    const o = getOrder(r.orderNo);
+    db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000) })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+    sweepExpiredOrders();
+    handlePaymentNotify("mock", buildMockNotifyBody({
+      orderNo: r.orderNo, tradeId: o.tradeId!, amountCents: BigInt(o.totalCents),
+      currency: o.currency, status: 2,
+    }));
+
+    const view = lookupOrder(r.orderNo, "elig-anom@test.dev")!;
+    expect(view.status).toBe("expired");
+    expect(view.canRepurchase).toBe(false);
+    expect(view.repurchaseBlockedReason).toContain("到账");
+  });
+
+  it("未付款的过期订单：canRepurchase=true", async () => {
+    const { createOrder } = await import("./create-order");
+    const { lookupOrder } = await import("./query-order");
+    const p = seedAuto(["C1", "C2", "C3"]);
+    const r = await createOrder({ email: "elig-clean@test.dev", quantity: 1, slug: p.slug });
+    db.update(orders).set({ status: "expired", stockCharged: false })
+      .where(eq(orders.orderNo, r.orderNo)).run();
+
+    const view = lookupOrder(r.orderNo, "elig-clean@test.dev")!;
+    expect(view.canRepurchase).toBe(true);
+    expect(view.repurchaseBlockedReason).toBeNull();
+  });
+
+  it("pending / reconciling / completed 均不可重购", async () => {
+    const { createOrder } = await import("./create-order");
+    const { lookupOrder } = await import("./query-order");
+    for (const [i, status] of ["pending", "reconciling", "completed"].entries()) {
+      const p = seedAuto(["C1", "C2", "C3"]);
+      const r = await createOrder({ email: `elig-${i}@test.dev`, quantity: 1, slug: p.slug });
+      db.update(orders).set({ status }).where(eq(orders.orderNo, r.orderNo)).run();
+      expect(lookupOrder(r.orderNo, `elig-${i}@test.dev`)!.canRepurchase).toBe(false);
+    }
+  });
+});

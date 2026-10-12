@@ -27,6 +27,10 @@ interface OrderStatusPayload {
   expiresAtText?: string | null;
   /** 商品标识：用于过期后「重新购买」跳回商品页 */
   productSlug?: string | null;
+  /** 是否允许重新购买（服务端统一计算：状态 + 未收款 + 无待处理异常到账） */
+  canRepurchase?: boolean;
+  /** 不能重购的原因，用于前台提示 */
+  repurchaseBlockedReason?: string | null;
 }
 
 /** 回跳页状态轮询：2s 间隔，completed/expired/closed 停止 */

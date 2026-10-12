@@ -46,6 +46,8 @@ export default async function PayPendingPage({
                 paymentUrl: view.paymentUrl,
                 expiresAtText: view.expiresAtText,
                 productSlug: view.productSlug,
+                canRepurchase: view.canRepurchase,
+                repurchaseBlockedReason: view.repurchaseBlockedReason,
               }
             : null
         }

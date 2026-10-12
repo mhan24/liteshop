@@ -21,6 +21,9 @@ export async function GET(request: Request) {
       paymentUrl: view.paymentUrl,
       expiresAtText: view.expiresAtText,
       productSlug: view.productSlug,
+      // 重购资格由服务端计算，前台按钮直接以此为准
+      canRepurchase: view.canRepurchase,
+      repurchaseBlockedReason: view.repurchaseBlockedReason,
     },
   });
 }

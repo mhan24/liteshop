@@ -1,11 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, products } from "@/db/schema";
+import { orders, paymentAnomalies, products } from "@/db/schema";
 import type { Order, OrderStatus } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
 import { formatDateTime } from "@/lib/datetime";
 import { isValidOrderNo } from "@/lib/order-no";
 import { expireOrderIfOverdue } from "./expire-orders";
+import { canRepurchase as canRepurchaseStatus, repurchaseBlockedReason } from "./create-order";
 
 /** 查单服务：前台查单页（订单号+邮箱双因子）与支付回跳页轮询 */
 
@@ -38,6 +39,10 @@ export interface PublicOrderView {
   /** 仅 pending 暴露：继续支付入口 */
   paymentUrl: string | null;
   expiresAtText: string | null;
+  /** 是否允许重新购买（状态 + 未收款 + 无待处理异常到账）——前台按钮以此为准 */
+  canRepurchase: boolean;
+  /** 不能重购的原因（canRepurchase=false 时有值），用于前台提示 */
+  repurchaseBlockedReason: string | null;
 }
 
 export function lookupOrder(orderNo: string, email: string): PublicOrderView | null {
@@ -91,6 +96,9 @@ function toPublicView(order: Order, opts?: { includeDelivery?: boolean }): Publi
     paymentUrl: order.status === "pending" ? (order.paymentUrl ?? null) : null,
     // 无有效期（渠道未返回/建单失败）时不展示该行，避免渲染成 1970 纪元时间
     expiresAtText: order.status === "pending" ? formatDateTime(order.expirationTime) : null,
+    // 重购资格由服务端统一计算，前台按钮直接以此为准，
+    // 避免「按钮显示了但提交才被拒」的不一致体验
+    ...computeRepurchaseEligibility(order),
   };
 }
 
@@ -133,4 +141,30 @@ export function getMockCheckoutData(orderNo: string): MockCheckoutData | null {
     tradeId: order.tradeId,
     amountCents: BigInt(order.totalCents),
   };
+}
+
+/**
+ * 计算订单的重购资格（前台按钮与服务端校验的唯一真相）。
+ *
+ * 必须同时满足：
+ * 1. 状态属于白名单（expired / closed）
+ * 2. 无实际收款记录（paidAt 为空）—— 状态机允许 paid → closed，
+ *    仅凭 status 判断不出是否收过钱
+ * 3. 无待处理的异常到账（payment_anomalies.status = 'open'）——
+ *    此时买家是否付款尚未核实，允许重购会造成重复付款
+ */
+function computeRepurchaseEligibility(order: Order): {
+  canRepurchase: boolean;
+  repurchaseBlockedReason: string | null;
+} {
+  if (!canRepurchaseStatus(order.status)) {
+    return { canRepurchase: false, repurchaseBlockedReason: null };
+  }
+  const hasOpenAnomaly = db
+    .select({ id: paymentAnomalies.id })
+    .from(paymentAnomalies)
+    .where(and(eq(paymentAnomalies.orderNo, order.orderNo), eq(paymentAnomalies.status, "open")))
+    .get();
+  const reason = repurchaseBlockedReason(order, !!hasOpenAnomaly);
+  return { canRepurchase: reason === null, repurchaseBlockedReason: reason };
 }
