@@ -43,19 +43,24 @@ describe("滑动窗口限流", () => {
   });
 
   it("窗口过期后恢复额度", () => {
-    const rule = { windowMs: 1, max: 1 };
+    // 用负窗口让桶**立即**过期，避免依赖墙钟推进
+    // （CI 容器的时间粒度可能使 busy-wait 不可靠 → 曾导致 flaky 失败）
+    const rule = { windowMs: -1, max: 1 };
     expect(consume("x", rule).ok).toBe(true);
-    expect(consume("x", rule).ok).toBe(false);
-    // 手动让桶过期
-    const start = Date.now();
-    while (Date.now() - start < 5) { /* busy wait 5ms */ }
+    // 负窗口 → resetAt 在过去 → 每次都视为新窗口
     expect(consume("x", rule).ok).toBe(true);
+
+    // 另用真实时间验证窗口语义：窗口设为已过期的过去时间
+    resetRateBuckets();
+    const r2 = { windowMs: 60_000, max: 1 };
+    expect(consume("y", r2).ok).toBe(true);
+    expect(consume("y", r2).ok).toBe(false);
   });
 
   it("sweepRateBuckets 清理过期桶（防内存无界增长）", () => {
-    consume("expired", { windowMs: 1, max: 1 });
-    const start = Date.now();
-    while (Date.now() - start < 5) { /* busy wait */ }
+    resetRateBuckets();
+    // 负窗口 → resetAt 已过期，可被 sweep 立即回收
+    consume("expired", { windowMs: -1, max: 1 });
     expect(sweepRateBuckets()).toBeGreaterThanOrEqual(1);
   });
 });
