@@ -150,6 +150,12 @@ describe("过期订单重新购买（方案 A：不恢复原单）", () => {
   it("商品下架后拒绝重新购买", async () => {
     const p = seedProduct({ cards: ["C1"] });
     const r = await createOrder({ email: "down@test.dev", quantity: 1, slug: p.slug });
+    // 先让订单进入可重购状态，才能走到「商品是否在售」这一层校验
+    // （pending 订单会被状态白名单先行拒绝）
+    db.update(orders)
+      .set({ status: "expired", stockCharged: false })
+      .where(eq(orders.orderNo, r.orderNo))
+      .run();
     db.update(products).set({ status: "off" }).where(eq(products.id, p.id)).run();
     await expect(createOrderForRepurchase(r.orderNo, "down@test.dev")).rejects.toThrow(/下架/);
   });

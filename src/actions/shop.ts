@@ -1,6 +1,11 @@
 "use server";
 
-import { createOrder, createOrderForRepurchase, OrderError } from "@/server/order/create-order";
+import {
+  canRepurchase,
+  createOrder,
+  createOrderForRepurchase,
+  OrderError,
+} from "@/server/order/create-order";
 import type { CreateOrderResult } from "@/server/order/create-order";
 import { lookupOrder, type PublicOrderView } from "@/server/order/query-order";
 import { cancelPendingOrder } from "@/server/order/fulfill-order";
@@ -153,13 +158,19 @@ export async function repurchaseOrderAction(
     return { error: quota.message ?? "该订单重新购买次数过多，请稍后再试" };
   }
 
-  if (view.status === "completed" || view.status === "paid" || view.status === "delivering") {
-    return { error: "该订单已支付，无需重新购买" };
+  // 白名单校验（与服务层共用 RE PURCHASE_ALLOWED_STATUSES，避免两处漂移）
+  if (!canRepurchase(view.status)) {
+    if (view.status === "completed" || view.status === "paid" || view.status === "delivering") {
+      return { error: "该订单已支付，无需重新购买" };
+    }
+    if (view.status === "pending") {
+      return { error: "该订单仍在待支付状态，请直接前往收银台完成支付" };
+    }
+    if (view.status === "reconciling") {
+      return { error: "该订单支付状态待核实，请勿重复付款，请联系客服" };
+    }
+    return { error: `当前状态（${view.statusLabel}）无法重新购买` };
   }
-  if (view.status === "pending") {
-    return { error: "该订单仍在待支付状态，请直接前往收银台完成支付" };
-  }
-  // 仅 expired / closed 允许重新购买
   if (!view.productSlug) {
     return { error: "原商品已下架或删除，请返回商品列表重新选择" };
   }

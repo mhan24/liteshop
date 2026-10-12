@@ -4,7 +4,7 @@ import { cards, orders, paymentAnomalies, products } from "@/db/schema";
 import type { NewProduct, Product } from "@/db/schema";
 import { SUPPORTED_CURRENCIES, toMinorUnits, isZeroDecimalCurrency } from "@/lib/money";
 import { getSiteCurrency } from "@/server/settings";
-import { normalizeStockLimit } from "@/lib/stock";
+import { isUnlimitedStock, normalizeStockLimit, STOCK_UNLIMITED } from "@/lib/stock";
 import { slugify } from "@/lib/slug";
 
 /** 后台·商品服务（service 层；写操作全部记录审计日志由 Action 层调用） */
@@ -150,17 +150,44 @@ export function updateProduct(id: number, input: ProductInput): { ok: boolean; m
     .get();
   if (dup) return { ok: false, message: `标识已被占用: ${v.data.slug}` };
 
-  // manual 库存上限：允许向上调整或改为不限；向下不允许低于已售占用（简化：直接更新，发货侧不回看上限）
-  db.update(products)
-    .set({
-      ...v.data,
-      // 编辑留空币种 → 保持原值
-      currency: input.currency?.trim() ? v.data.currency : existing.currency,
-      updatedAt: new Date(),
-    })
-    .where(eq(products.id, id))
-    .run();
-  return { ok: true, message: "商品已更新" };
+  // 检测「有限库存 ↔ 不限库存」的模式切换。
+  // 切换意味着管理员在手动接管库存数量：此时旧订单持有的占用已失去意义，
+  // 必须在同一事务内清除其 stockCharged，否则订单过期时会按旧的占用再加回来，
+  // 造成库存虚高（实测「有限→不限→有限」后 3 变 4，潜在超卖）。
+  // validateProductInput 已通过 normalizeStockLimit 保证 stockLimit 为数字
+  const nextStockLimit = v.data.stockLimit ?? STOCK_UNLIMITED;
+  const modeChanged =
+    isUnlimitedStock(existing.stockLimit) !== isUnlimitedStock(nextStockLimit);
+
+  db.transaction(
+    (tx) => {
+      tx.update(products)
+        .set({
+          ...v.data,
+          // 编辑留空币种 → 保持原值
+          currency: input.currency?.trim() ? v.data.currency : existing.currency,
+          updatedAt: new Date(),
+        })
+        .where(eq(products.id, id))
+        .run();
+
+      if (modeChanged) {
+        // 只影响仍标记为「占用中」的订单；已释放的订单该字段本就是 false
+        tx.update(orders)
+          .set({ stockCharged: false, updatedAt: new Date() })
+          .where(and(eq(orders.productId, id), eq(orders.stockCharged, true)))
+          .run();
+      }
+    },
+    { behavior: "immediate" }
+  );
+
+  return {
+    ok: true,
+    message: modeChanged
+      ? "商品已更新；库存模式变更，历史订单的库存占用已重置"
+      : "商品已更新",
+  };
 }
 
 /** 下架（软删，交易数据保留）；存在订单时禁止硬删 */

@@ -341,6 +341,26 @@ function compensateFailedOrder(orderNo: string): void {
  *
  * 双因子：调用方已用订单号 + 邮箱确认归属。
  */
+/**
+ * 允许重新购买的原订单状态 —— **白名单**（唯一真相）。
+ *
+ * 只有已终结且未支付的订单才能重购：
+ * - expired / closed：交易已失效或已关闭，重购不会与在途交易冲突
+ *
+ * 明确**不允许**：
+ * - pending      ：仍在待支付，应直接继续支付（重购会重复占用库存）
+ * - reconciling  ：支付结果未知，网关可能已建单、买家可能已付款；
+ *                  此时重购会再次占用库存，且买家可能为同一笔订单重复付款
+ * - paid / delivering / completed：已付款或已交付
+ *
+ * 白名单（而非黑名单）可避免将来新增状态时被静默放行。
+ */
+export const REPURCHASE_ALLOWED_STATUSES = ["expired", "closed"] as const;
+
+export function canRepurchase(status: string): boolean {
+  return (REPURCHASE_ALLOWED_STATUSES as readonly string[]).includes(status);
+}
+
 export async function createOrderForRepurchase(
   sourceOrderNo: string,
   email: string
@@ -349,6 +369,16 @@ export async function createOrderForRepurchase(
   if (!src) throw new OrderError("ORDER_NOT_FOUND", "原订单不存在");
   if (src.email.trim().toLowerCase() !== email.trim().toLowerCase()) {
     throw new OrderError("INVALID_INPUT", "订单号与邮箱不匹配");
+  }
+  // 服务层兜底校验：任何调用入口（含将来的新入口）都必须满足白名单，
+  // 不能只依赖前端按钮或 Action 的判断。
+  if (!canRepurchase(src.status)) {
+    throw new OrderError(
+      "INVALID_STATUS",
+      src.status === "reconciling"
+        ? "该订单支付状态待核实，请勿重复下单，请联系客服"
+        : `订单状态为「${src.status}」，无法重新购买`
+    );
   }
   if (!src.productId) {
     throw new OrderError("PRODUCT_NOT_FOUND", "原商品已删除，请重新选择商品");
