@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { csrfToken } from "@/lib/session";
 import { getAdminBase } from "@/lib/admin-path";
+import { takeFlash } from "@/lib/flash-store";
+import { getSiteCurrency } from "@/server/settings";
 import { deleteProductAction, toggleProductStatusAction } from "@/actions/admin";
 import { listProducts } from "@/server/admin/catalog";
 import { formatCents } from "@/lib/money";
+import { isUnlimitedStock } from "@/lib/stock";
 import { Flash } from "@/components/admin/flash";
 import { ProductDialog } from "@/components/admin/product-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -23,11 +26,13 @@ export const metadata = { title: "商品管理" };
 export default async function AdminProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; err?: string }>;
+  searchParams: Promise<{ flash?: string }>;
 }) {
-  const { ok, err } = await searchParams;
+  const { flash: flashId } = await searchParams;
+  const flash = takeFlash(flashId);
   const csrf = await csrfToken();
   const base = await getAdminBase();
+  const siteCurrency = getSiteCurrency();
   const products = listProducts();
 
   return (
@@ -37,12 +42,12 @@ export default async function AdminProductsPage({
           <h1 className="font-serif text-2xl tracking-tight">商品</h1>
           <p className="mt-1 text-sm text-muted-foreground">共 {products.length} 个商品</p>
         </div>
-        <ProductDialog csrf={csrf}>
+        <ProductDialog csrf={csrf} siteCurrency={siteCurrency}>
           <Button>新建商品</Button>
         </ProductDialog>
       </div>
 
-      <Flash ok={ok} err={err} />
+      <Flash ok={flash?.ok} err={flash?.err} />
 
       <div className="overflow-x-auto rounded-xl border border-border bg-card">
         <Table>
@@ -82,9 +87,11 @@ export default async function AdminProductsPage({
                   <TableCell className="text-right font-mono">
                     {p.deliveryType === "auto"
                       ? `${p.availableCards} / ${p.soldCards}`
-                      : p.stockLimit > 0
-                        ? `${p.stockLimit}（上限）`
-                        : "不限"}
+                      : isUnlimitedStock(p.stockLimit)
+                        ? "不限"
+                        : p.stockLimit === 0
+                          ? "已售罄"
+                          : `${p.stockLimit}（剩余）`}
                   </TableCell>
                   <TableCell className="text-right font-mono">{p.orderCount}</TableCell>
                   <TableCell>
@@ -102,6 +109,7 @@ export default async function AdminProductsPage({
                     <div className="flex items-center justify-end gap-1">
                       <ProductDialog
                         csrf={csrf}
+                        siteCurrency={siteCurrency}
                         product={{
                           id: p.id,
                           name: p.name,
@@ -109,6 +117,7 @@ export default async function AdminProductsPage({
                           description: p.description,
                           imageUrl: p.imageUrl,
                           price: p.priceCents,
+                          currency: p.currency,
                           deliveryType: p.deliveryType,
                           stockLimit: p.stockLimit,
                           status: p.status,

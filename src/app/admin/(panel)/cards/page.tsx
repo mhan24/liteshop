@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { csrfToken } from "@/lib/session";
 import { getAdminBase } from "@/lib/admin-path";
+import { takeFlash } from "@/lib/flash-store";
 import {
   clearCardsAction,
   deleteCardsAction,
@@ -20,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { formatDateTime } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "卡密管理" };
@@ -34,9 +36,10 @@ const STATUS_TABS = [
 export default async function AdminCardsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ product?: string; status?: string; ok?: string; err?: string }>;
+  searchParams: Promise<{ product?: string; status?: string; flash?: string }>;
 }) {
   const params = await searchParams;
+  const flash = takeFlash(params.flash);
   const csrf = await csrfToken();
   const base = await getAdminBase();
   const products = listProducts().filter((p) => p.deliveryType === "auto");
@@ -51,7 +54,7 @@ export default async function AdminCardsPage({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-serif text-2xl tracking-tight">卡密</h1>
-          <p className="mt-1 text-sm text-muted-foreground">卡密池：导入即上架售卖</p>
+          <p className="mt-1 text-sm text-muted-foreground">卡密池：导入即上架售卖；同一内容可多张（支持重复销售）</p>
         </div>
         {selected ? (
           <div className="flex items-center gap-2">
@@ -69,7 +72,7 @@ export default async function AdminCardsPage({
         ) : null}
       </div>
 
-      <Flash ok={params.ok} err={params.err} />
+      <Flash ok={flash?.ok} err={flash?.err} />
 
       {products.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
@@ -177,7 +180,7 @@ export default async function AdminCardsPage({
                             )}
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {c.createdAt.toISOString().slice(0, 16).replace("T", " ")}
+                            {formatDateTime(c.createdAt)}
                           </TableCell>
                         </TableRow>
                       ))

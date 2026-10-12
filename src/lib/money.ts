@@ -60,6 +60,30 @@ export function centsToNumber(cents: bigint): number {
   return Number(formatCents(cents));
 }
 
+/** 站点支持的币种（与 bepusdt fiat 对齐：CNY/USD/EUR/GBP/JPY） */
+export const SUPPORTED_CURRENCIES = ["USD", "CNY", "EUR", "GBP", "JPY"] as const;
+export type CurrencyCode = (typeof SUPPORTED_CURRENCIES)[number];
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  CNY: "¥",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+};
+
+export function currencySymbol(code: string): string {
+  return CURRENCY_SYMBOLS[code.toUpperCase()] ?? "";
+}
+
+/** 金额展示统一入口："$9.90"；未知币种回退 "CODE 9.90" */
+export function formatMoney(cents: bigint, currency: string): string {
+  const code = currency.toUpperCase();
+  const sym = CURRENCY_SYMBOLS[code];
+  const amount = formatCents(cents);
+  return sym ? `${sym}${amount}` : `${code} ${amount}`;
+}
+
 /** 等值金额字符串归一化（"12.3400"→"12.34"、"12"→"12"），用于 actual_amount 对账 */
 export function normalizeAmountString(value: string): string {
   const s = value.trim();

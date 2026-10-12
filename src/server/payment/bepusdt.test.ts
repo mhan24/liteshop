@@ -1,17 +1,97 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { epusdtSign } from "@/lib/signature";
-import { bepusdtProvider, parseBepusdtConfig } from "./bepusdt";
+import {
+  bepusdtProvider,
+  parseBepusdtConfig,
+  clampBepusdtTimeout,
+  BEPUSDT_TIMEOUT_MIN,
+  BEPUSDT_TIMEOUT_MAX,
+  BEPUSDT_TIMEOUT_DEFAULT,
+} from "./bepusdt";
 
 /** bepusdt 渠道测试：字段/算法均以网关源码为准（PLAN §5） */
 
 const CONFIG = { api_base: "https://pay.example.com", token: "tok", trade_type: "usdt.trc20", fiat: "CNY" };
+
+describe("超时边界与网关 CalcTradeExpiredAt 对齐（[180,3600]，默认1200）", () => {
+  it("区间内原样保留（含线上使用的 900）", () => {
+    expect(clampBepusdtTimeout(900)).toBe(900);
+    expect(clampBepusdtTimeout(180)).toBe(180);
+    expect(clampBepusdtTimeout(3600)).toBe(3600);
+  });
+
+  it("越界钳制，避免网关静默回落到自身默认值", () => {
+    // < 180：网关会忽略 → 上钳到下限
+    expect(clampBepusdtTimeout(60)).toBe(BEPUSDT_TIMEOUT_MIN);
+    expect(clampBepusdtTimeout(0)).toBe(BEPUSDT_TIMEOUT_MIN);
+    expect(clampBepusdtTimeout(-5)).toBe(BEPUSDT_TIMEOUT_MIN);
+    // > 3600：网关会忽略 → 下钳到上限
+    expect(clampBepusdtTimeout(4000)).toBe(BEPUSDT_TIMEOUT_MAX);
+    expect(clampBepusdtTimeout(99999)).toBe(BEPUSDT_TIMEOUT_MAX);
+  });
+
+  it("缺失/非法值回落到网关默认 1200", () => {
+    expect(clampBepusdtTimeout(undefined)).toBe(BEPUSDT_TIMEOUT_DEFAULT);
+    expect(clampBepusdtTimeout(Number.NaN)).toBe(BEPUSDT_TIMEOUT_DEFAULT);
+    expect(clampBepusdtTimeout(Number.POSITIVE_INFINITY)).toBe(BEPUSDT_TIMEOUT_DEFAULT);
+  });
+
+  it("小数截断为整数", () => {
+    expect(clampBepusdtTimeout(900.7)).toBe(900);
+  });
+
+  it("parseBepusdtConfig 对越界配置同样钳制", () => {
+    expect(parseBepusdtConfig({ api_base: "https://a.b", token: "t", timeout_seconds: 900 }).timeoutSeconds).toBe(900);
+    expect(parseBepusdtConfig({ api_base: "https://a.b", token: "t", timeout_seconds: 7200 }).timeoutSeconds).toBe(
+      BEPUSDT_TIMEOUT_MAX
+    );
+  });
+
+  it("下单请求体携带钳制后的 timeout（900 原样发送）", async () => {
+    let sent: Record<string, unknown> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify({
+            status_code: 200,
+            data: { trade_id: "gw_t", payment_url: "https://pay.example.com/c/x", expiration_time: 899 },
+          }),
+          { status: 200 }
+        );
+      })
+    );
+    const provider = bepusdtProvider({ ...CONFIG, timeout_seconds: 900 });
+    await provider.createPayment({
+      orderNo: "LS20261012TIMEOUT00",
+      amountCents: 100n,
+      currency: "CNY",
+      subject: "T",
+      notifyUrl: "https://s.example.com/n",
+      redirectUrl: "https://s.example.com/r",
+    });
+    expect(sent["timeout"]).toBe(900);
+
+    // 越界配置 → 发送钳制后的 3600，而非被网关忽略的原始值
+    const p2 = bepusdtProvider({ ...CONFIG, timeout_seconds: 9999 });
+    await p2.createPayment({
+      orderNo: "LS20261012TIMEOUT01",
+      amountCents: 100n,
+      currency: "CNY",
+      subject: "T",
+      notifyUrl: "https://s.example.com/n",
+      redirectUrl: "https://s.example.com/r",
+    });
+    expect(sent["timeout"]).toBe(BEPUSDT_TIMEOUT_MAX);
+  });
+});
 
 describe("parseBepusdtConfig", () => {
   it("缺省值与清洗", () => {
     const c = parseBepusdtConfig({ api_base: "https://a.b/", token: " t " });
     expect(c.apiBase).toBe("https://a.b");
     expect(c.token).toBe("t");
-    expect(c.fiat).toBe("CNY");
     expect(c.timeoutSeconds).toBeUndefined();
   });
 });
@@ -38,7 +118,9 @@ describe("bepusdtProvider.createPayment（收银台模式 create-order）", () =
             actual_amount: "1.234567",
             status: 1,
             token: "TRXaddr",
-            expiration_time: 1780000000,
+            // 网关真实语义：剩余有效期（秒），非 Unix 时间戳
+            // 见 bepusdt app/handler/epusdt/epusdt.go:164
+            expiration_time: 899,
             payment_url: "https://pay.example.com/checkout/x",
             reselect: true,
           },
@@ -48,6 +130,7 @@ describe("bepusdtProvider.createPayment（收银台模式 create-order）", () =
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    const before = Date.now();
     const provider = bepusdtProvider(CONFIG);
     const created = await provider.createPayment({
       orderNo: "LS20261011TESTTEST",
@@ -60,7 +143,47 @@ describe("bepusdtProvider.createPayment（收银台模式 create-order）", () =
     expect(created.tradeId).toBe("gw_123");
     expect(created.paymentUrl).toBe("https://pay.example.com/checkout/x");
     expect(created.expectedActualAmount).toBe("1.234567");
-    expect(created.expirationTime).toEqual(new Date(1780000000 * 1000));
+    // 回归：expiration_time=899（剩余秒）必须换算为「当前时间 + 899s」，
+    // 而不是 new Date(899*1000) → 1970-01-01 08:14
+    expect(created.expirationTime).toBeInstanceOf(Date);
+    const deltaMs = created.expirationTime!.getTime() - before;
+    expect(deltaMs).toBeGreaterThanOrEqual(899_000);
+    expect(deltaMs).toBeLessThan(901_000);
+    expect(created.expirationTime!.getUTCFullYear()).toBeGreaterThan(2000);
+  });
+
+  it("网关未返回 expiration_time 时兜底为请求 timeout，而非 null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              status_code: 200,
+              data: {
+                trade_id: "gw_no_exp",
+                payment_url: "https://pay.example.com/checkout/noexp",
+              },
+            }),
+            { status: 200 }
+          )
+      )
+    );
+    const provider = bepusdtProvider(CONFIG);
+    const before = Date.now();
+    const created = await provider.createPayment({
+      orderNo: "LS20261011NOEXP0000",
+      amountCents: 990n,
+      currency: "CNY",
+      subject: "Demo",
+      notifyUrl: "https://shop.example.com/n",
+      redirectUrl: "https://shop.example.com/r",
+    });
+    // 未配置 timeout → 与网关默认对齐的 1200s；不得为 null，避免订单永不过期
+    expect(created.expirationTime).toBeInstanceOf(Date);
+    const deltaMs = created.expirationTime!.getTime() - before;
+    expect(deltaMs).toBeGreaterThanOrEqual((BEPUSDT_TIMEOUT_DEFAULT - 1) * 1000);
+    expect(deltaMs).toBeLessThan((BEPUSDT_TIMEOUT_DEFAULT + 1) * 1000);
   });
 
   it("网关业务失败抛错", async () => {
@@ -110,5 +233,44 @@ describe("bepusdtProvider.verifyNotify", () => {
     const other = { ...body, signature: epusdtSign(body, "other") };
     expect(provider.verifyNotify(JSON.stringify(other)).ok).toBe(false);
     expect(provider.verifyNotify("not json").ok).toBe(false);
+  });
+});
+
+describe("api_base 协议校验（SSRF 纵深防御）", () => {
+  it("仅接受 http/https", () => {
+    expect(parseBepusdtConfig({ api_base: "https://pay.example.com", token: "t" }).apiBase).toBe(
+      "https://pay.example.com"
+    );
+    expect(parseBepusdtConfig({ api_base: "http://127.0.0.1:8080/", token: "t" }).apiBase).toBe(
+      "http://127.0.0.1:8080"
+    );
+  });
+
+  it("拒绝非 http(s) 协议与不可解析值", () => {
+    for (const bad of [
+      "file:///etc/passwd",
+      "data:text/html,x",
+      "ftp://example.com",
+      "javascript:alert(1)",
+      "not-a-url",
+      "//example.com",
+      "",
+    ]) {
+      expect(parseBepusdtConfig({ api_base: bad, token: "t" }).apiBase).toBeUndefined();
+    }
+  });
+
+  it("缺失 api_base 时 createPayment 拒绝执行", async () => {
+    const provider = bepusdtProvider({ api_base: "file:///etc/passwd", token: "t" });
+    await expect(
+      provider.createPayment({
+        orderNo: "LS20261012SSRF000000",
+        amountCents: 100n,
+        currency: "CNY",
+        subject: "T",
+        notifyUrl: "https://s.example.com/n",
+        redirectUrl: "https://s.example.com/r",
+      })
+    ).rejects.toThrow(/未配置/);
   });
 });

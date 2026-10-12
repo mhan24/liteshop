@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getShopProduct } from "@/server/shop";
+import { getCopy } from "@/server/copy";
+import { getTurnstileClientConfig } from "@/server/settings";
 import { BuyForm } from "@/components/shop/buy-form";
 import { Reveal } from "@/components/reveal";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +31,8 @@ export default async function ProductDetailPage({
   const product = getShopProduct(slug);
   if (!product) notFound();
 
+  const turnstile = getTurnstileClientConfig();
+  const copy = { payHint: getCopy("detail_pay_hint") };
   const soldOut = !product.onSale;
   const maxQuantity =
     product.deliveryType === "auto" || (product.stock != null && product.stock > 0)
@@ -60,10 +64,7 @@ export default async function ProductDetailPage({
               {product.deliveryType === "auto" ? "自动发卡" : "人工发货"}
             </Badge>
           </div>
-          <p className="mt-4 font-mono text-2xl">
-            <span className="mr-1 text-sm text-muted-foreground">{product.currency}</span>
-            {product.priceFormatted}
-          </p>
+          <p className="mt-4 font-mono text-2xl">{product.priceFormatted}</p>
           <Separator className="my-6" />
           <div className="whitespace-pre-line text-[15px] leading-relaxed text-foreground/90">
             {product.description || "暂无介绍"}
@@ -93,16 +94,15 @@ export default async function ProductDetailPage({
                   slug={product.slug}
                   maxQuantity={maxQuantity}
                   deliveryType={product.deliveryType}
+                  turnstile={turnstile}
+                  buttonText={getCopy("buy_button")}
+                  notice={getCopy("buy_notice")}
                 />
               )}
             </CardContent>
           </Card>
           <p className="mt-4 px-1 text-xs leading-relaxed text-muted-foreground">
-            支付完成后回到本站，凭「订单号 + 邮箱」在
-            <a href="/orders" className="mx-1 underline underline-offset-4">
-              订单查询
-            </a>
-            页查看卡密或交付内容。
+            {copy.payHint}
           </p>
         </section>
       </Reveal>

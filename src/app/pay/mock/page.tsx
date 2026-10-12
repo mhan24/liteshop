@@ -52,9 +52,7 @@ export default async function MockPayPage({
             </div>
             <div className="flex justify-between gap-4">
               <dt className="text-muted-foreground">应付</dt>
-              <dd className="font-mono">
-                {order.currency} {order.totalFormatted}
-              </dd>
+              <dd className="font-mono">{order.totalFormatted}</dd>
             </div>
             <div className="flex justify-between gap-4">
               <dt className="text-muted-foreground">状态</dt>

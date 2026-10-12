@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db, } from "@/db";
 import { mailLogs, orders } from "@/db/schema";
 import type { Order } from "@/db/schema";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { getSetting, getSiteName, getSiteUrl } from "@/server/settings";
 
 /** 邮件通知：交易完成后向买家邮箱发送卡密 / 人工交付状态（SMTP 配置见后台设置） */
@@ -138,7 +138,7 @@ function renderOrderMail(order: Order, kind: MailKind): { subject: string; text:
   const site = getSiteName();
   const siteUrl = getSiteUrl();
   const lookupUrl = `${siteUrl}/orders`;
-  const total = `${order.currency} ${formatCents(BigInt(order.totalCents))}`;
+  const total = formatMoney(BigInt(order.totalCents), order.currency);
   const content = order.deliveryContent ?? "";
 
   if (kind === MAIL_KINDS.processing) {

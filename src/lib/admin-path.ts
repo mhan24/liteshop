@@ -17,10 +17,14 @@ export function getAdminPath(): string {
 /**
  * 当前请求的后台基础路径（服务端组件/Action 用）。
  * 中间件在入口伪装（rewrite）时注入 x-admin-base；未注入时回落 settings 值。
+ *
+ * 防御性校验：该头由中间件注入，但请求头本质是客户端可控输入（中间件仅在
+ * 命中后台路径时才覆写）。这里仍做严格校验，避免上游疏漏时被注入跳转目标。
  */
 export async function getAdminBase(): Promise<string> {
   const h = await headers();
   const injected = h.get(ADMIN_BASE_HEADER);
-  if (injected && injected.startsWith("/")) return injected;
+  const p = injected?.startsWith("/") ? injected.slice(1) : "";
+  if (p && isValidAdminPath(p)) return `/${p}`;
   return `/${getAdminPath()}`;
 }

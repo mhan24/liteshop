@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { ADMIN_COOKIE, assertCsrf, SESSION_TTL_SECONDS } from "@/lib/session";
 import { getAdminBase } from "@/lib/admin-path";
+import { putFlash } from "@/lib/flash-store";
 import {
   changeAdminCredentials,
   currentSession,
@@ -25,6 +26,9 @@ import {
 import { closeOrder, manualDeliver, retryAutoDelivery } from "@/server/order/fulfill-order";
 import { sendOrderEmail, sendTestEmail } from "@/server/mail";
 import { setSetting, upsertPaymentConfig, SETTING_KEYS } from "@/server/settings";
+import { clampBepusdtTimeout } from "@/server/payment/bepusdt";
+import { COPY_KEYS, setCopy } from "@/server/copy";
+import { SUPPORTED_CURRENCIES } from "@/lib/money";
 
 /** 后台 Server Actions：全部经 session 鉴权 + CSRF 校验 + 审计日志 + service 层落库 */
 
@@ -40,11 +44,12 @@ async function clientIp(): Promise<string> {
   return h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip") ?? "-";
 }
 
-/** 跳回来源页（/admin/... 内部路径自动换算为当前伪装入口） */
+/** 跳回来源页（/admin/... 内部路径自动换算为当前伪装入口）；提示走一次性 Flash（URL 仅含随机 ID） */
 async function back(path: string, msg: string, ok: boolean): Promise<never> {
   const base = await getAdminBase();
   const rest = path.startsWith("/admin") ? path.slice("/admin".length) : path;
-  redirect(`${base}${rest}?${ok ? "ok" : "err"}=${encodeURIComponent(msg)}`);
+  const id = putFlash(ok ? { ok: msg } : { err: msg });
+  redirect(`${base}${rest}?flash=${id}`);
 }
 
 /* ===== 登录/登出 ===== */
@@ -76,8 +81,21 @@ export async function loginAction(_prev: { error?: string } | null, formData: Fo
   });
   logAdmin("login", username, "管理员登录", ip);
   const next = String(formData.get("next") ?? "");
-  if (next.startsWith("/")) redirect(next);
+  if (isSafeInternalPath(next)) redirect(next);
   redirect(await getAdminBase());
+}
+
+/**
+ * 仅允许站内相对路径，防开放重定向。
+ * 注意不能只用 startsWith("/")：`//evil.com` 也是以 / 开头，
+ * 但它是协议相对 URL，浏览器会跳转到站外（钓鱼常用手法）。
+ */
+function isSafeInternalPath(p: string): boolean {
+  if (!p.startsWith("/")) return false;
+  if (p.startsWith("//")) return false; // 协议相对 URL
+  if (p.includes("\\")) return false; // 反斜杠可能被浏览器规范化成 //
+  if (/[\u0000-\u001f]/.test(p)) return false; // 控制字符
+  return true;
 }
 
 export async function logoutAction() {
@@ -100,7 +118,8 @@ export async function saveProductAction(formData: FormData) {
     imageUrl: String(formData.get("imageUrl") ?? ""),
     priceCentsText: String(formData.get("price") ?? ""),
     deliveryType: String(formData.get("deliveryType") ?? "auto"),
-    stockLimit: Number(formData.get("stockLimit") ?? 0),
+    // 留空 = 不限（-1）；由 normalizeStockLimit 统一归一化
+    stockLimit: formData.get("stockLimit") === null ? -1 : Number(formData.get("stockLimit")),
     status: String(formData.get("status") ?? "on"),
     sort: Number(formData.get("sort") ?? 0),
   };
@@ -143,7 +162,7 @@ export async function importCardsAction(formData: FormData) {
   const result = importCards(productId, raw);
   logAdmin("cards.import", String(productId), result.message, await clientIp());
   revalidatePath("/admin/cards");
-  await back(`/admin/cards?product=${productId}`, result.message, result.imported > 0 || result.duplicates > 0);
+  await back(`/admin/cards?product=${productId}`, result.message, result.imported > 0);
 }
 
 export async function deleteCardsAction(formData: FormData) {
@@ -241,10 +260,15 @@ export async function saveSiteSettingsAction(formData: FormData) {
   const siteName = String(formData.get("siteName") ?? "").trim().slice(0, 60);
   const siteUrl = String(formData.get("siteUrl") ?? "").trim().slice(0, 200);
   const threshold = Math.max(0, Math.trunc(Number(formData.get("threshold") ?? 5)) || 0);
+  const currency = String(formData.get("currency") ?? "").trim().toUpperCase();
+  if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
+    await back("/admin/settings", `不支持的币种: ${currency}`, false);
+  }
   setSetting(SETTING_KEYS.siteName, siteName);
   setSetting(SETTING_KEYS.siteUrl, siteUrl.replace(/\/+$/, ""));
   setSetting(SETTING_KEYS.cardLowStockThreshold, String(threshold));
-  logAdmin("settings.site", "-", JSON.stringify({ siteName, siteUrl, threshold }), await clientIp(), session.u);
+  setSetting(SETTING_KEYS.currency, currency);
+  logAdmin("settings.site", "-", JSON.stringify({ siteName, siteUrl, threshold, currency }), await clientIp(), session.u);
   revalidatePath("/admin/settings");
   await back("/admin/settings", "站点设置已保存", true);
 }
@@ -256,11 +280,28 @@ export async function savePaymentConfigAction(formData: FormData) {
   if (provider !== "bepusdt") await back("/admin/settings", "未知支付渠道", false);
 
   const enabled = String(formData.get("enabled") ?? "") === "on";
+  const apiBase = String(formData.get("apiBase") ?? "").trim();
+  const token = String(formData.get("token") ?? "").trim();
+
+  // 启用却缺少必填项会导致全站无法下单（createPayment 抛错 → 每单都被补偿关单），
+  // 因此在保存时就拦下，避免把站点置于「支付中断」状态。
+  if (enabled) {
+    if (apiBase === "") {
+      await back("/admin/settings", "启用支付渠道前请填写 API 地址", false);
+    }
+    if (token === "") {
+      await back("/admin/settings", "启用支付渠道前请填写对接令牌", false);
+    }
+    if (!/^https?:\/\/.+/i.test(apiBase)) {
+      await back("/admin/settings", "API 地址需以 http:// 或 https:// 开头", false);
+    }
+  }
+
   const configJson: Record<string, unknown> = {
-    api_base: String(formData.get("apiBase") ?? "").trim(),
-    token: String(formData.get("token") ?? "").trim(),
-    fiat: "CNY",
-    timeout_seconds: Math.max(180, Math.trunc(Number(formData.get("timeout") ?? 600)) || 600),
+    api_base: apiBase,
+    token,
+    // 与网关 CalcTradeExpiredAt 的 [180, 3600] 边界对齐（越界网关会静默回落）
+    timeout_seconds: clampBepusdtTimeout(Number(formData.get("timeout") ?? 900)),
   };
   upsertPaymentConfig(provider, { enabled, configJson });
   logAdmin("settings.payment", provider, `enabled=${enabled}`, await clientIp(), session.u);
@@ -294,7 +335,15 @@ export async function saveSmtpSettingsAction(formData: FormData) {
   setSetting("smtp_port", portRaw === "" ? "465" : String(port));
   setSetting("smtp_secure", String(formData.get("smtpSecure") ?? "") === "on" ? "1" : "0");
   setSetting("smtp_user", String(formData.get("smtpUser") ?? "").trim());
-  setSetting("smtp_pass", String(formData.get("smtpPass") ?? ""));
+  // 留空 = 保持原密码。
+  // 表单不再回填明文密码（避免页面源码泄露），因此留空是"不修改"而非"清空"；
+  // 需要清除密码时提交特殊标记 __CLEAR__。
+  const smtpPassInput = String(formData.get("smtpPass") ?? "");
+  if (smtpPassInput === "__CLEAR__") {
+    setSetting("smtp_pass", "");
+  } else if (smtpPassInput !== "") {
+    setSetting("smtp_pass", smtpPassInput);
+  }
   setSetting("smtp_from", from);
   logAdmin("settings.smtp", "-", `enabled=${enabled}`, await clientIp(), session.u);
   revalidatePath("/admin/settings");
@@ -311,6 +360,46 @@ export async function sendTestEmailAction(formData: FormData) {
   const result = await sendTestEmail(to);
   logAdmin("settings.smtp_test", to, result.ok ? "测试邮件已发送" : `失败：${result.error ?? ""}`, await clientIp(), session.u);
   await back("/admin/settings", result.ok ? `测试邮件已发送至 ${to}` : `发送失败：${result.error ?? "未知错误"}`, result.ok);
+}
+
+/* ===== 人机验证（Cloudflare Turnstile）===== */
+
+export async function saveTurnstileSettingsAction(formData: FormData) {
+  const session = await requireSession();
+  await assertCsrf(formData.get("csrf"));
+  const enabled = String(formData.get("turnstileEnabled") ?? "") === "on";
+  const siteKey = String(formData.get("turnstileSiteKey") ?? "").trim();
+  const secretKey = String(formData.get("turnstileSecretKey") ?? "").trim();
+  if (enabled && (siteKey === "" || secretKey === "")) {
+    await back("/admin/settings", "启用 Turnstile 需填写 Site Key 与 Secret Key", false);
+  }
+  setSetting("turnstile_enabled", enabled ? "1" : "0");
+  setSetting("turnstile_site_key", siteKey);
+  setSetting("turnstile_secret_key", secretKey);
+  logAdmin("settings.turnstile", "-", `enabled=${enabled}`, await clientIp(), session.u);
+  revalidatePath("/admin/settings");
+  revalidatePath("/");
+  await back("/admin/settings", "人机验证设置已保存", true);
+}
+
+/* ===== 前台文案 ===== */
+
+export async function saveCopySettingsAction(formData: FormData) {
+  const session = await requireSession();
+  await assertCsrf(formData.get("csrf"));
+  let changed = 0;
+  for (const key of COPY_KEYS) {
+    const raw = formData.get(`copy_${key}`);
+    if (raw == null) continue;
+    const value = String(raw).slice(0, 2000);
+    setCopy(key, value);
+    changed += 1;
+  }
+  logAdmin("settings.copy", "-", `${changed} 条文案已更新`, await clientIp(), session.u);
+  revalidatePath("/admin/settings");
+  revalidatePath("/");
+  revalidatePath("/orders");
+  await back("/admin/settings", `前台文案已保存（${changed} 条）`, true);
 }
 
 /* ===== 管理员凭据 / 入口路径 ===== */
@@ -340,7 +429,7 @@ export async function changeAdminCredentialsAction(formData: FormData) {
     // 全部会话已失效 → 回登录页；若改了入口路径，必须用新路径（旧路径此刻已 404）
     const base =
       newPath.trim() !== "" ? `/${newPath.trim().toLowerCase()}` : await getAdminBase();
-    redirect(`${base}/login?msg=${encodeURIComponent(result.message)}`);
+    redirect(`${base}/login?flash=${putFlash({ ok: result.message })}`);
   }
   await back("/admin/settings", result.message, result.ok);
 }

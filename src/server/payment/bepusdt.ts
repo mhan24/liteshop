@@ -1,5 +1,5 @@
 import { centsToNumber } from "@/lib/money";
-import { epusdtSign, epusdtVerify } from "@/lib/signature";
+import { epusdtSign, epusdtVerify, parseJsonObject } from "@/lib/signature";
 import type {
   CreatePaymentInput,
   CreatedPayment,
@@ -17,10 +17,33 @@ import type {
  * - 商户应答：HTTP 200 + 含 success/ok（本站固定应答 "success"）
  */
 
+/**
+ * 交易超时边界，与网关 CalcTradeExpiredAt 完全对齐（以网关为准）：
+ *   // app/model/order.go —— 最小180，最大3600，默认1200
+ *   func CalcTradeExpiredAt(sec int64) time.Time {
+ *     if sec >= 180 && sec <= 3600 { return time.Now().Add(sec * time.Second) }
+ *     return time.Now().Add(GetK(PaymentTimeout) * time.Second)
+ *   }
+ * 传超出 [180, 3600] 的值网关会静默忽略并回落到它自己的 PaymentTimeout(默认1200)，
+ * 导致「我方展示的有效期」与「网关实际过期」不一致；因此钳制在闭区间内。
+ */
+export const BEPUSDT_TIMEOUT_MIN = 180;
+export const BEPUSDT_TIMEOUT_MAX = 3600;
+/** 网关 GetK(PaymentTimeout) 的默认值（我们未传有效值时网关会采用） */
+export const BEPUSDT_TIMEOUT_DEFAULT = 1200;
+
+/** 将任意输入钳制到网关可接受的 [180, 3600] 区间 */
+export function clampBepusdtTimeout(sec: number | undefined): number {
+  if (sec == null || !Number.isFinite(sec)) return BEPUSDT_TIMEOUT_DEFAULT;
+  const n = Math.trunc(sec);
+  if (n < BEPUSDT_TIMEOUT_MIN) return BEPUSDT_TIMEOUT_MIN;
+  if (n > BEPUSDT_TIMEOUT_MAX) return BEPUSDT_TIMEOUT_MAX;
+  return n;
+}
+
 export interface BepusdtConfig {
   apiBase?: string;
   token?: string;
-  fiat?: string;
   timeoutSeconds?: number;
 }
 
@@ -30,12 +53,28 @@ export function parseBepusdtConfig(config: Record<string, unknown>): BepusdtConf
     const n = typeof v === "number" ? v : Number(v);
     return Number.isFinite(n) && n > 0 ? n : undefined;
   };
+  const rawTimeout = num(config["timeout_seconds"]);
   return {
-    apiBase: str(config["api_base"])?.replace(/\/+$/, ""),
+    // 仅接受 http/https：该值最终会拼进 fetch()，放任其它协议（file:、data: 等）
+    // 会形成 SSRF/本地文件读取面。后台保存时已校验，这里再做一道纵深防御。
+    apiBase: normalizeApiBase(str(config["api_base"])),
     token: str(config["token"]),
-    fiat: str(config["fiat"]) ?? "CNY",
-    timeoutSeconds: num(config["timeout_seconds"]),
+    // 越界/缺失一律钳制，避免与网关实际过期时间脱节
+    timeoutSeconds: rawTimeout == null ? undefined : clampBepusdtTimeout(rawTimeout),
   };
+}
+
+/** 校验并归一化 API 地址；非法协议/不可解析一律返回 undefined（视同未配置） */
+function normalizeApiBase(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.replace(/\/+$/, "");
+  try {
+    const u = new URL(trimmed);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
+    return trimmed;
+  } catch {
+    return undefined;
+  }
 }
 
 interface CreateOrderResponse {
@@ -66,14 +105,15 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
       if (!config.apiBase || !config.token) {
         throw new Error("bepusdt 未配置：请在后台设置 api_base 与 token");
       }
-      // create-order（收银台）超时最低 180 秒
-      const timeout = Math.max(180, input.timeoutSeconds ?? config.timeoutSeconds ?? 600);
+      // 钳制到网关可接受区间（网关对越界值会静默回落到自己的默认 1200s）
+      const timeout = clampBepusdtTimeout(input.timeoutSeconds ?? config.timeoutSeconds);
       const body: Record<string, unknown> = {
         order_id: input.orderNo,
         notify_url: input.notifyUrl,
         redirect_url: input.redirectUrl,
         amount: centsToNumber(input.amountCents),
-        fiat: config.fiat,
+        // fiat 跟随订单币种（站点统一币种：USD/CNY/EUR/GBP/JPY）
+        fiat: input.currency,
         name: input.subject,
         timeout,
       };
@@ -93,27 +133,30 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
       if (!data?.trade_id || !data.payment_url) {
         throw new Error(`bepusdt 创建订单失败: ${json.message ?? JSON.stringify(json).slice(0, 200)}`);
       }
-      const expSeconds = typeof data.expiration_time === "string" ? Number(data.expiration_time) : data.expiration_time;
+      // 注意：bepusdt 的 expiration_time 是「剩余有效期（秒）」，不是 Unix 时间戳。
+      // 网关源码 app/handler/epusdt/epusdt.go：
+      //   "expiration_time": uint64(order.ExpiredAt.Sub(time.Now()).Seconds())
+      // 因此必须用 now + 剩余秒数计算绝对过期时刻，否则会落成 1970 纪元时间。
+      const expSeconds =
+        typeof data.expiration_time === "string" ? Number(data.expiration_time) : data.expiration_time;
+      const hasExpiry = Number.isFinite(expSeconds) && (expSeconds as number) > 0;
       return {
         provider: "bepusdt",
         tradeId: data.trade_id,
         paymentUrl: data.payment_url,
         expectedActualAmount: data.actual_amount != null ? String(data.actual_amount) : null,
-        expirationTime:
-          Number.isFinite(expSeconds) && (expSeconds as number) > 0
-            ? new Date((expSeconds as number) * 1000)
-            : null,
+        expirationTime: hasExpiry
+          ? new Date(Date.now() + (expSeconds as number) * 1000)
+          : // 网关未返回有效期时兜底为本次请求的 timeout，避免订单永不过期
+            new Date(Date.now() + timeout * 1000),
         raw: data,
       };
     },
 
     verifyNotify(rawBody: string): NotifyVerification {
-      let body: Record<string, unknown>;
-      try {
-        body = JSON.parse(rawBody) as Record<string, unknown>;
-      } catch {
-        return { ok: false, error: "JSON 解析失败" };
-      }
+      const parsed = parseJsonObject(rawBody);
+      if (!parsed.ok) return { ok: false, error: parsed.error };
+      const body = parsed.value;
       if (!config.token) return { ok: false, error: "bepusdt token 未配置" };
       if (!epusdtVerify(body, config.token)) {
         return { ok: false, error: "签名校验失败" };

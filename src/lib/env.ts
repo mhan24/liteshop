@@ -34,6 +34,51 @@ export const envConfig = {
 
   /** 支付驱动为 mock 时注入的演示口令开关 */
   mockPayment: env("PAYMENT_DRIVER") === "mock",
+
+  /**
+   * 定时任务（/api/cron/*）专用密钥。
+   * 与 AUTH_SECRET 隔离：定时脚本/外部 cron 只需持有该值，
+   * 泄露它不会危及管理会话签名。
+   */
+  cronSecret: env("CRON_SECRET"),
 } as const;
 
-// AUTH_SECRET 的强制校验在运行时进行（lib/session.authSecret），避免构建期收集页面数据时误报
+/**
+ * 生产环境安全自检（启动即失败，避免"配置错误静默上线"）。
+ *
+ * 背景：mock 渠道的签名令牌有公开默认值，若在生产可达，任何人可伪造
+ * "支付成功"回调白嫖发货（历史上确实存在该漏洞）。虽然渠道门控已修复，
+ * 这里再做一道纵深防御：生产 + mock 驱动 = 明确拒绝启动。
+ */
+export function assertProductionSafety(): void {
+  if (!envConfig.isProd) return;
+
+  if (envConfig.paymentDriver === "mock") {
+    throw new Error(
+      "生产环境禁止 PAYMENT_DRIVER=mock：mock 渠道令牌为公开默认值，会导致伪造支付回调。请改为 auto 或 bepusdt。"
+    );
+  }
+
+  if (!envConfig.authSecret) {
+    throw new Error("生产环境必须设置 AUTH_SECRET（openssl rand -hex 32）");
+  }
+
+  // cron 端点会写库（关闭超时订单），密钥缺失会导致端点不可用；
+  // 这里仅告警而不阻断启动——因为它不影响前台交易链路。
+  if (!envConfig.cronSecret) {
+    console.warn(
+      "[env] 未设置 CRON_SECRET：/api/cron/* 将拒绝所有请求（超时订单仍由惰性清扫兜底）。"
+    );
+  } else if (envConfig.cronSecret === envConfig.authSecret) {
+    console.warn(
+      "[env] CRON_SECRET 与 AUTH_SECRET 相同，失去隔离意义；建议改为独立随机值。"
+    );
+  }
+
+  // mock 若被显式设置令牌也无法改变"渠道可被门控"的事实，故一并提醒
+  if (process.env.MOCK_PAYMENT_TOKEN && envConfig.paymentDriver !== "mock") {
+    console.warn(
+      "[env] 检测到 MOCK_PAYMENT_TOKEN，但当前驱动非 mock；生产环境请移除该变量以避免误解。"
+    );
+  }
+}

@@ -20,14 +20,16 @@ export default async function PayReturnPage({
           "radial-gradient(500px 200px at 80% 0%, rgba(180,160,120,0.05), transparent)",
       }}
     >
-      <OrderStatusPoll orderNo={orderNo ?? ""} initial={order ? {
+      <OrderStatusPoll orderNo={orderNo ?? ""} payCTA initial={order ? {
         orderNo: order.orderNo,
         status: order.status,
         statusLabel: order.statusLabel,
         productName: order.productName,
         quantity: order.quantity,
-        total: `${order.currency} ${order.totalFormatted}`,
+        total: order.totalFormatted,
         emailMasked: order.emailMasked,
+        paymentUrl: order.paymentUrl,
+        expiresAtText: order.expiresAtText,
       } : null} />
     </main>
   );

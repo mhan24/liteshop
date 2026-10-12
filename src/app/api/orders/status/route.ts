@@ -16,8 +16,10 @@ export async function GET(request: Request) {
       statusLabel: view.statusLabel,
       productName: view.productName,
       quantity: view.quantity,
-      total: `${view.currency} ${view.totalFormatted}`,
+      total: view.totalFormatted,
       emailMasked: view.emailMasked,
+      paymentUrl: view.paymentUrl,
+      expiresAtText: view.expiresAtText,
     },
   });
 }

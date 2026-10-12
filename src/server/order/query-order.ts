@@ -2,8 +2,10 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orders } from "@/db/schema";
 import type { Order, OrderStatus } from "@/db/schema";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
+import { formatDateTime } from "@/lib/datetime";
 import { isValidOrderNo } from "@/lib/order-no";
+import { expireOrderIfOverdue } from "./expire-orders";
 
 /** 查单服务：前台查单页（订单号+邮箱双因子）与支付回跳页轮询 */
 
@@ -26,15 +28,21 @@ export interface PublicOrderView {
   statusLabel: string;
   emailMasked: string;
   createdAt: Date;
+  createdAtText: string;
   paidAt: Date | null;
   /** 仅 completed 状态对买家可见（PLAN §6-②） */
   deliveryContent: string | null;
+  /** 仅 pending 暴露：继续支付入口 */
+  paymentUrl: string | null;
+  expiresAtText: string | null;
 }
 
 export function lookupOrder(orderNo: string, email: string): PublicOrderView | null {
   const no = orderNo.trim();
   const mail = email.trim().toLowerCase();
   if (!no || !mail || !isValidOrderNo(no)) return null;
+  // 惰性超时清扫：避免过期订单仍显示"待支付/继续支付"占着库存
+  expireOrderIfOverdue(no);
   const order = db
     .select()
     .from(orders)
@@ -48,6 +56,8 @@ export function lookupOrder(orderNo: string, email: string): PublicOrderView | n
 export function getOrderStatusView(orderNo: string): PublicOrderView | null {
   const no = orderNo.trim();
   if (!no || !isValidOrderNo(no)) return null;
+  // 惰性超时清扫：轮询是高频读路径，超时订单在此被及时关闭并释放库存
+  expireOrderIfOverdue(no);
   const order = db.select().from(orders).where(eq(orders.orderNo, no)).get();
   if (!order) return null;
   return toPublicView(order, { includeDelivery: false });
@@ -59,15 +69,19 @@ function toPublicView(order: Order, opts?: { includeDelivery?: boolean }): Publi
     orderNo: order.orderNo,
     productName: order.productName,
     quantity: order.quantity,
-    totalFormatted: formatCents(BigInt(order.totalCents)),
+    totalFormatted: formatMoney(BigInt(order.totalCents), order.currency),
     currency: order.currency,
     status: order.status as OrderStatus,
     statusLabel: STATUS_LABELS[order.status as OrderStatus] ?? order.status,
     emailMasked: maskEmail(order.email),
     createdAt: order.createdAt,
+    createdAtText: formatDateTime(order.createdAt) ?? "",
     paidAt: order.paidAt,
     deliveryContent:
       includeDelivery && order.status === "completed" ? (order.deliveryContent ?? "") : null,
+    paymentUrl: order.status === "pending" ? (order.paymentUrl ?? null) : null,
+    // 无有效期（渠道未返回/建单失败）时不展示该行，避免渲染成 1970 纪元时间
+    expiresAtText: order.status === "pending" ? formatDateTime(order.expirationTime) : null,
   };
 }
 
@@ -103,7 +117,7 @@ export function getMockCheckoutData(orderNo: string): MockCheckoutData | null {
     orderNo: order.orderNo,
     productName: order.productName,
     quantity: order.quantity,
-    totalFormatted: formatCents(BigInt(order.totalCents)),
+    totalFormatted: formatMoney(BigInt(order.totalCents), order.currency),
     currency: order.currency,
     status,
     statusLabel: STATUS_LABELS[status] ?? order.status,

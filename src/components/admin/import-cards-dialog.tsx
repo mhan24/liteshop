@@ -32,7 +32,7 @@ export function ImportCardsDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>批量导入卡密</DialogTitle>
-          <DialogDescription>一行一张；重复内容自动剔除（数据库层同样强制唯一）。</DialogDescription>
+          <DialogDescription>一行一张；同一内容可导入多张（允许重复销售，适合测试）。</DialogDescription>
         </DialogHeader>
         <form action={importCardsAction} className="space-y-4">
           <input type="hidden" name="csrf" value={csrf} />

@@ -1,7 +1,8 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { cards, products } from "@/db/schema";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
+import { visibleStock, isOnSaleByStock } from "@/lib/stock";
 
 /** 前台商品视图（只读；仅上架商品） */
 
@@ -14,7 +15,7 @@ export interface ShopProductCard {
   priceFormatted: string;
   currency: string;
   deliveryType: string;
-  /** 可售余量：auto = 卡池可用数；manual = stockLimit（0=不限） */
+  /** 可售余量：auto = 卡池可用数；manual = 剩余数量（null 表示不限） */
   stock: number | null;
   onSale: boolean;
 }
@@ -38,17 +39,18 @@ export function listShopProducts(): ShopProductCard[] {
     let stock: number | null = null;
     if (p.deliveryType === "auto") {
       stock = cardCounts.find((c) => c.productId === p.id)?.n ?? 0;
-    } else if (p.stockLimit > 0) {
-      stock = p.stockLimit;
+    } else {
+      stock = visibleStock(p.stockLimit);
     }
-    const onSale = p.deliveryType === "manual" ? stock !== 0 : (stock ?? 0) > 0;
+    // auto：卡池有货即可售；manual：不限库存或仍有余额即可售（0 = 售罄）
+    const onSale = p.deliveryType === "manual" ? isOnSaleByStock(p.stockLimit) : (stock ?? 0) > 0;
     return {
       id: p.id,
       name: p.name,
       slug: p.slug,
       description: p.description,
       imageUrl: p.imageUrl,
-      priceFormatted: formatCents(BigInt(p.priceCents)),
+      priceFormatted: formatMoney(BigInt(p.priceCents), p.currency),
       currency: p.currency,
       deliveryType: p.deliveryType,
       stock,
@@ -72,17 +74,17 @@ export function getShopProduct(slug: string): ShopProductCard | undefined {
         .from(cards)
         .where(and(eq(cards.productId, p.id), eq(cards.status, "available")))
         .get()?.n ?? 0;
-  } else if (p.stockLimit > 0) {
-    stock = p.stockLimit;
+  } else {
+    stock = visibleStock(p.stockLimit);
   }
-  const onSale = p.deliveryType === "manual" ? stock !== 0 : (stock ?? 0) > 0;
+  const onSale = p.deliveryType === "manual" ? isOnSaleByStock(p.stockLimit) : (stock ?? 0) > 0;
   return {
     id: p.id,
     name: p.name,
     slug: p.slug,
     description: p.description,
     imageUrl: p.imageUrl,
-    priceFormatted: formatCents(BigInt(p.priceCents)),
+    priceFormatted: formatMoney(BigInt(p.priceCents), p.currency),
     currency: p.currency,
     deliveryType: p.deliveryType,
     stock,

@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { csrfToken } from "@/lib/session";
 import { getAdminBase } from "@/lib/admin-path";
+import { takeFlash } from "@/lib/flash-store";
 import { listOrdersForAdmin } from "@/server/admin/catalog";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
+import { formatDateTime } from "@/lib/datetime";
 import { Flash } from "@/components/admin/flash";
 import { OrderRowActions } from "@/components/admin/order-row-actions";
 import { StatusBadge } from "@/components/admin/status-badge";
@@ -35,9 +37,10 @@ const TABS = [
 export default async function AdminOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; q?: string; ok?: string; err?: string }>;
+  searchParams: Promise<{ status?: string; q?: string; flash?: string }>;
 }) {
   const params = await searchParams;
+  const flash = takeFlash(params.flash);
   const csrf = await csrfToken();
   const base = await getAdminBase();
   const status = params.status ?? "";
@@ -65,7 +68,7 @@ export default async function AdminOrdersPage({
         </form>
       </div>
 
-      <Flash ok={params.ok} err={params.err} />
+      <Flash ok={flash?.ok} err={flash?.err} />
 
       <div className="flex flex-wrap gap-1">
         {TABS.map((t) => (
@@ -115,7 +118,7 @@ export default async function AdminOrdersPage({
                     </p>
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {o.currency} {formatCents(BigInt(o.totalCents))}
+                    {formatMoney(BigInt(o.totalCents), o.currency)}
                   </TableCell>
                   <TableCell className="max-w-40 truncate text-sm" title={o.email}>
                     {o.email}
@@ -124,7 +127,7 @@ export default async function AdminOrdersPage({
                     <StatusBadge status={o.status} />
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                    {o.createdAt.toISOString().slice(0, 16).replace("T", " ")}
+                    {formatDateTime(o.createdAt)}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col items-end gap-1">

@@ -1,11 +1,21 @@
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { cards, orders, products } from "@/db/schema";
 import type { NewProduct, Product } from "@/db/schema";
-import { toCents } from "@/lib/money";
+import { SUPPORTED_CURRENCIES, toCents } from "@/lib/money";
+import { getSiteCurrency } from "@/server/settings";
+import { normalizeStockLimit } from "@/lib/stock";
 import { slugify } from "@/lib/slug";
 
 /** 后台·商品服务（service 层；写操作全部记录审计日志由 Action 层调用） */
+
+/**
+ * 转义 LIKE 模式中的元字符，使其按字面量匹配。
+ * 顺序很重要：必须先转义反斜杠本身，否则会二次转义。
+ */
+function escapeLike(input: string): string {
+  return input.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
 
 export interface ProductListRow extends Product {
   availableCards: number;
@@ -49,26 +59,40 @@ export interface ProductInput {
   description: string;
   imageUrl: string;
   priceCentsText: string;
+  currency?: string;
   deliveryType: string;
   stockLimit: number;
   status: string;
   sort: number;
 }
 
-function validateProductInput(input: ProductInput): { ok: true; data: Omit<NewProduct, "slug"> & { slug: string } } | { ok: false; message: string } {
+export function validateProductInput(input: ProductInput): { ok: true; data: Omit<NewProduct, "slug"> & { slug: string } } | { ok: false; message: string } {
   const name = input.name.trim();
   if (!name || name.length > 100) return { ok: false, message: "商品名必填且不超过 100 字" };
-  const price = toCents(input.priceCentsText.trim());
+  // toCents 对非法输入抛 MoneyParseError：此处必须捕获并转为可读校验错误，
+  // 否则后台填错价格会让 Server Action 直接抛未处理异常（整页 500）。
+  let price: bigint;
+  try {
+    price = toCents(input.priceCentsText.trim());
+  } catch {
+    return { ok: false, message: "价格格式不正确，请填写如 9.90 的数字" };
+  }
   if (price <= 0n) return { ok: false, message: "价格必须大于 0" };
   if (Number(price) > 90_000_000_000) return { ok: false, message: "价格过大" };
   const deliveryType = input.deliveryType === "manual" ? "manual" : "auto";
-  const stockLimit = Math.trunc(input.stockLimit) || 0;
-  if (stockLimit < 0) return { ok: false, message: "库存不能为负" };
+  // 库存：-1 = 不限；>= 0 = 有限（0 明确表示售罄）。
+  // 空/非法输入按"不限"处理（与表单留空语义一致）。
+  const stockLimit = normalizeStockLimit(input.stockLimit);
   const status = input.status === "off" ? "off" : "on";
   const sort = Math.trunc(input.sort) || 0;
   const slug = slugify(input.slug?.trim() || name);
   if (!/^[a-z0-9-]{1,80}$/.test(slug)) {
     return { ok: false, message: "标识仅限小写字母、数字、连字符（1-80 位）" };
+  }
+  // 币种：新建跟随站点默认；编辑时留空保持原值（由调用方处理）
+  const currency = (input.currency ?? "").trim().toUpperCase();
+  if (currency !== "" && !(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
+    return { ok: false, message: `不支持的币种: ${currency}` };
   }
   return {
     ok: true,
@@ -78,6 +102,7 @@ function validateProductInput(input: ProductInput): { ok: true; data: Omit<NewPr
       description: input.description.trim().slice(0, 5000),
       imageUrl: input.imageUrl.trim() || null,
       priceCents: Number(price),
+      currency: currency || getSiteCurrency(),
       deliveryType,
       stockLimit,
       status,
@@ -87,7 +112,7 @@ function validateProductInput(input: ProductInput): { ok: true; data: Omit<NewPr
 }
 
 export function createProduct(input: ProductInput): { ok: boolean; message: string } {
-  const v = validateProductInput(input);
+  const v = validateProductInput({ ...input, currency: input.currency ?? getSiteCurrency() });
   if (!v.ok) return v;
   const dup = db.select({ id: products.id }).from(products).where(eq(products.slug, v.data.slug)).get();
   if (dup) return { ok: false, message: `标识已被占用: ${v.data.slug}` };
@@ -109,7 +134,12 @@ export function updateProduct(id: number, input: ProductInput): { ok: boolean; m
 
   // manual 库存上限：允许向上调整或改为不限；向下不允许低于已售占用（简化：直接更新，发货侧不回看上限）
   db.update(products)
-    .set({ ...v.data, updatedAt: new Date() })
+    .set({
+      ...v.data,
+      // 编辑留空币种 → 保持原值
+      currency: input.currency?.trim() ? v.data.currency : existing.currency,
+      updatedAt: new Date(),
+    })
     .where(eq(products.id, id))
     .run();
   return { ok: true, message: "商品已更新" };
@@ -144,17 +174,19 @@ export function deleteProduct(id: number): { ok: boolean; message: string } {
 
 export interface ImportCardsResult {
   imported: number;
-  duplicates: number;
   invalid: number;
   message: string;
 }
 
-/** 批量导入卡密：一行一个；代码去重 + DB UNIQUE(product_id, content) 双保险（PLAN §3） */
+/**
+ * 批量导入卡密：一行一张；同一内容可导入多张（允许重复销售/测试场景）。
+ * 并发与超卖安全由发货事务的条件 UPDATE（status='available'）保证。
+ */
 export function importCards(productId: number, raw: string): ImportCardsResult {
   const product = db.select().from(products).where(eq(products.id, productId)).get();
-  if (!product) return { imported: 0, duplicates: 0, invalid: 0, message: "商品不存在" };
+  if (!product) return { imported: 0, invalid: 0, message: "商品不存在" };
   if (product.deliveryType !== "auto") {
-    return { imported: 0, duplicates: 0, invalid: 0, message: "仅自动发卡商品需要卡密" };
+    return { imported: 0, invalid: 0, message: "仅自动发卡商品需要卡密" };
   }
 
   const lines = raw
@@ -163,25 +195,14 @@ export function importCards(productId: number, raw: string): ImportCardsResult {
     .filter((l) => l !== "");
   const valid = lines.filter((l) => l.length <= 500);
   const invalid = lines.length - valid.length;
-  const unique = Array.from(new Set(valid));
-  const duplicatesInBatch = valid.length - unique.length;
 
-  let imported = 0;
-  let duplicates = duplicatesInBatch;
-  for (const content of unique) {
-    try {
-      db.insert(cards).values({ productId, content, status: "available" }).run();
-      imported += 1;
-    } catch {
-      // UNIQUE(product_id, content) 冲突 → 与库中已有重复
-      duplicates += 1;
-    }
+  for (const content of valid) {
+    db.insert(cards).values({ productId, content, status: "available" }).run();
   }
   return {
-    imported,
-    duplicates,
+    imported: valid.length,
     invalid,
-    message: `导入 ${imported} 张，重复 ${duplicates} 张，无效 ${invalid} 行`,
+    message: `导入 ${valid.length} 张${invalid > 0 ? `，无效跳过 ${invalid} 行` : ""}`,
   };
 }
 
@@ -247,6 +268,13 @@ export function getDashboardStats(threshold: number): DashboardStats {
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
 
+  /**
+   * 营收口径：以 paidAt 是否为 NULL 判定「是否真的收到过钱」。
+   *
+   * 不能用 status IN (paid,delivering,completed)——已付款订单被管理员关闭后
+   * status 变为 closed，会从营收中凭空消失（少计已收款项）。
+   * paidAt 只在 pending→paid 的真实入账时刻写入，是「收过钱」的可靠事实。
+   */
   const revenueRow = (from?: Date) =>
     db
       .select({
@@ -255,9 +283,7 @@ export function getDashboardStats(threshold: number): DashboardStats {
       })
       .from(orders)
       .where(
-        from
-          ? and(inArray(orders.status, ["paid", "delivering", "completed"]), gte(orders.paidAt, from))
-          : inArray(orders.status, ["paid", "delivering", "completed"])
+        from ? and(isNotNull(orders.paidAt), gte(orders.paidAt, from)) : isNotNull(orders.paidAt)
       )
       .get()!;
 
@@ -320,7 +346,11 @@ export function listOrdersForAdmin(opts: {
   }
   const q = opts.q?.trim();
   if (q) {
-    conds.push(sql`(${orders.orderNo} LIKE ${"%" + q + "%"} OR lower(${orders.email}) LIKE ${"%" + q.toLowerCase() + "%"})`);
+    // 转义 LIKE 元字符：否则搜索 "%" 或 "_" 会被当成通配符（搜 % 返回全部订单）
+    const escaped = escapeLike(q);
+    conds.push(
+      sql`(${orders.orderNo} LIKE ${"%" + escaped + "%"} ESCAPE '\\' OR lower(${orders.email}) LIKE ${"%" + escaped.toLowerCase() + "%"} ESCAPE '\\')`
+    );
   }
   const rows = db
     .select({

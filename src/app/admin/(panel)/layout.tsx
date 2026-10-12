@@ -7,6 +7,7 @@ import { logoutAction } from "@/actions/admin";
 import { ADMIN_COOKIE } from "@/lib/session";
 import { getAdminBase } from "@/lib/admin-path";
 import { AdminNav } from "@/components/admin/admin-nav";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { SignOutIcon } from "@phosphor-icons/react/ssr";
 
 export const dynamic = "force-dynamic";
@@ -27,15 +28,18 @@ export default async function AdminPanelLayout({ children }: { children: React.R
             {siteName}
           </Link>
           <AdminNav base={base} variant="sidebar" />
-          <form action={logoutAction} className="mt-auto pt-6">
-            <button
-              type="submit"
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <SignOutIcon className="size-4" weight="bold" />
-              退出登录
-            </button>
-          </form>
+          <div className="mt-auto flex items-center gap-1 pt-6">
+            <ThemeToggle />
+            <form action={logoutAction} className="flex-1">
+              <button
+                type="submit"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <SignOutIcon className="size-4" weight="bold" />
+                退出登录
+              </button>
+            </form>
+          </div>
         </aside>
 
         {/* 顶导航（移动） */}
@@ -44,11 +48,14 @@ export default async function AdminPanelLayout({ children }: { children: React.R
             <Link href={base} className="font-serif text-lg tracking-tight">
               {siteName}
             </Link>
-            <form action={logoutAction}>
-              <button type="submit" aria-label="退出登录">
-                <SignOutIcon className="size-5 text-muted-foreground" weight="bold" />
-              </button>
-            </form>
+            <div className="flex items-center gap-1">
+              <ThemeToggle />
+              <form action={logoutAction}>
+                <button type="submit" aria-label="退出登录">
+                  <SignOutIcon className="size-5 text-muted-foreground" weight="bold" />
+                </button>
+              </form>
+            </div>
           </div>
           <div className="mt-2">
             <AdminNav base={base} variant="topbar" />

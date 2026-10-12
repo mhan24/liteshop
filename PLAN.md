@@ -207,3 +207,25 @@ README 内容：Docker 部署、bepusdt 配置说明（Token 获取路径：bepu
 2. **SMTP 邮件通知**：新增 `mail_logs` 表（`UNIQUE(order_no, kind)` 幂等）与 `server/mail.ts`；后台可配置 SMTP（含发送测试邮件）。触发点：自动发卡完成→交付邮件；人工商品支付确认→处理中邮件；人工发货完成/补发卡密→交付邮件；订单页支持「补发交付邮件」。
 3. **管理员与后台入口**：管理员用户名/密码改为 DB 设置优先（.env 为引导兜底），设置页可修改（需验证当前密码，成功后全局登出）；`settings.admin_path` 支持后台入口路径伪装（如 /my-panel），旧 /admin/* 返回 404，中间件改写并注入 `x-admin-base`，全站后台链接自动跟随。
 4. **运维**：哈希格式分隔符由 `$` 改为 `:`（规避 Docker Compose env_file 插值损坏，解析兼容两种）；Docker 基础镜像锁定 `node:22.23-bookworm-slim`（Turbopack 不兼容 Alpine/musl ARM；部分 ARM 主机 Node 20 原生 SQLite 调用会 SIGSEGV）。
+
+### 2026-10-11 · v1.2：站点币种统一（USD）
+
+- 新增站点设置 `currency`（默认 USD，可选 USD/CNY/EUR/GBP/JPY，与 bepusdt fiat 对齐）
+- 全站金额展示统一走 `formatMoney(cents, currency)`（`$9.90` / `¥42.50`，未知币种回退代码前缀）
+- 新建商品默认跟随站点币种（对话框可改）；编辑留空保持原值
+- bepusdt create-order 的 `fiat` 跟随订单币种（不再写死 CNY）
+- 邮件模板、仪表盘、订单列表、前台卡片/详情/查单/回跳页全部替换硬编码 `¥`/`CNY`
+
+### 2026-10-12 · v1.3：卡密重复销售 / 待支付页 / 查单验证码 / 北京时间
+
+1. **卡密可重复销售**：移除 `UNIQUE(product_id, content)` 与导入去重，同一内容可导入多张多次售出（测试场景）；超卖防护由发货事务条件 UPDATE 保证（新增迁移 0002）。
+2. **下单即锁定卡密**：auto 商品下单时事务内原子占卡（reserved + order_id）；支付转 sold，超时/关闭自动释放回 available，库存不足直接拒单。
+3. **待支付页**：新增 `/pay/pending?order_no=`；订单持久化 `payment_url`，从收银台回退/误关后可回到该页继续支付；未过期复用原收银台地址（不轮换 trade_id），过期后一键重新发起；下单后先落此页再进收银台；回跳页与查单页对 pending 订单均提供「继续支付」。
+4. **查单人机验证**：查单改为 Server Action 流程，启用 Turnstile 后需先完成挑战；待支付结果页提供继续支付。
+5. **北京时间**：全站时间显示统一 `Asia/Shanghai`（lib/datetime），禁止 toISOString 直接展示。
+
+### 2026-10-12 · v1.4：主题切换 / 前台文案 / 后台快捷链接
+
+1. **深浅主题**：next-themes（class 策略），默认跟随系统；前台页头与后台侧栏/顶栏提供切换按钮，`.dark` 调色板全站覆盖。
+2. **前台文案后台可改**：新增 `server/copy.ts` 文案注册表（首页主/副标题、眉标、空状态、购买按钮/须知、详情与查单与待支付页提示、页脚），后台「前台文案」卡片编辑，留空恢复默认；存储键 `copy_*`。
+3. **后台跳前台**：侧栏与顶栏新增「前往前台」新窗口链接。

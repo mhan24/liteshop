@@ -10,8 +10,8 @@ import type {
 
 /**
  * 人工发货：支付后订单停留 paid，管理员在后台录入交付内容后置 completed。
- * 库存模型：stock_limit > 0 时下单即条件扣减（WHERE stock_limit >= quantity），
- * 关单且从未交付时回补。
+ * 库存模型：stock_limit = -1 表示不限；>= 0 时下单即条件扣减
+ * （WHERE stock_limit >= quantity），关单且从未交付时回补。
  */
 export const manualDelivery: DeliveryStrategy = {
   type: "manual",

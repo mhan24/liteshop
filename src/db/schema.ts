@@ -61,8 +61,13 @@ export const products = sqliteTable(
     /** JSON 自由扩展位（多档价格、SEO 位等） */
     extra: text("extra", { mode: "json" }),
     deliveryType: text("delivery_type").notNull().default(DeliveryType.auto),
-    /** manual 型库存上限，0 = 不限 */
-    stockLimit: integer("stock_limit").notNull().default(0),
+    /**
+     * manual 型库存上限。
+     * -1 = 不限库存（哨兵值）；>= 0 = 剩余可售数量（0 表示已售罄）。
+     * 注意：历史数据用 0 兼表「不限」，语义与「售罄」冲突，
+     * 会导致扣减到 0 后失去库存约束而超卖，故改用 -1（见 lib/stock.ts）。
+     */
+    stockLimit: integer("stock_limit").notNull().default(-1),
     /** "on" | "off" */
     status: text("status").notNull().default("on"),
     sort: integer("sort").notNull().default(0),
@@ -86,8 +91,7 @@ export const cards = sqliteTable(
     createdAt: ts(),
   },
   (t) => [
-    // 数据库层拒绝重复导入（PLAN §3）：同一商品下内容唯一
-    uniqueIndex("cards_product_content_uq").on(t.productId, t.content),
+    // 允许同一内容导入多张（重复销售/测试场景）；并发安全由发货事务的条件 UPDATE 保证
     index("cards_product_status_idx").on(t.productId, t.status),
     index("cards_order_idx").on(t.orderId),
   ]
@@ -118,6 +122,8 @@ export const orders = sqliteTable(
     expectedActualAmount: text("expected_actual_amount"),
     expirationTime: integer("expiration_time", { mode: "timestamp_ms" }),
     blockTxnId: text("block_txn_id"),
+    /** 收银台地址：待支付期间复用（继续支付），过期后由 resume 重新创建 */
+    paymentUrl: text("payment_url"),
     paidAt: integer("paid_at", { mode: "timestamp_ms" }),
     createdAt: ts(),
     updatedAt: tsUpdated(),

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { epusdtSign, epusdtSignString, epusdtVerify, goFormatValue } from "./signature";
+import { epusdtSign, epusdtSignString, epusdtVerify, goFormatValue, parseJsonObject } from "./signature";
 
 // bepusdt 官方文档（docs/api/api.md）签名示例参数与 Token
 const DOC_TOKEN = "epusdt_password_xasddawqe";
@@ -51,5 +51,34 @@ describe("epusdtSign（与网关 EpusdtSign 源码对齐）", () => {
     expect(epusdtVerify({ ...body, amount: 1 }, DOC_TOKEN)).toBe(false);
     expect(epusdtVerify({ ...body }, "wrong-token")).toBe(false);
     expect(epusdtVerify({ no_sig: 1 }, DOC_TOKEN)).toBe(false);
+  });
+});
+
+describe("parseJsonObject：畸形回调不得抛异常", () => {
+  it("拒绝 JSON null / 数组 / 标量（JSON.parse 不会抛错但结果非对象）", () => {
+    for (const raw of ["null", "[]", "0", "false", '"str"', "123"]) {
+      const r = parseJsonObject(raw);
+      expect(r.ok).toBe(false);
+    }
+  });
+
+  it("拒绝非法 JSON", () => {
+    for (const raw of ["", "not json", "{", "undefined"]) {
+      expect(parseJsonObject(raw).ok).toBe(false);
+    }
+  });
+
+  it("接受普通对象", () => {
+    const r = parseJsonObject('{"order_id":"LS1","status":2}');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value["order_id"]).toBe("LS1");
+  });
+
+  it("回归：null body 曾导致 epusdtVerify 抛 TypeError", () => {
+    // 直接构造 null 会触发 "Cannot read properties of null (reading 'signature')"
+    const parsed = parseJsonObject("null");
+    expect(parsed.ok).toBe(false);
+    // 确认拦截后不会走到 epusdtVerify
+    expect(() => { if (parsed.ok) epusdtVerify(parsed.value, "t"); }).not.toThrow();
   });
 });

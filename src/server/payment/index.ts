@@ -64,12 +64,27 @@ export class PaymentError extends Error {
 
 const KNOWN_PROVIDERS = ["mock", "bepusdt"] as const;
 
-export function isKnownProvider(name: string): boolean {
+/**
+ * 是否为当前部署「真正启用」的渠道。
+ * 安全要点：mock 是本地测试渠道，其回调令牌有默认值（非机密），
+ * 因此绝不能在生产回调入口可达——否则任何人可伪造「支付成功」白嫖并发货。
+ * 仅当 PAYMENT_DRIVER=mock 显式开启时才承认 mock（PLAN §10）。
+ */
+export function isProviderEnabled(name: string): boolean {
+  const driver = process.env.PAYMENT_DRIVER ?? "auto";
+  if (name === "mock") return driver === "mock";
   return (KNOWN_PROVIDERS as readonly string[]).includes(name);
 }
 
-/** 按渠道名实例化（回调路由按 [provider] 分发） */
+export function isKnownProvider(name: string): boolean {
+  return isProviderEnabled(name);
+}
+
+/** 按渠道名实例化（回调路由按 [provider] 分发）；未启用的渠道一律拒绝 */
 export function getProvider(name: string): PaymentProvider {
+  if (!isProviderEnabled(name)) {
+    throw new PaymentError("UNKNOWN_PROVIDER", `未启用的支付渠道: ${name}`);
+  }
   switch (name) {
     case "mock":
       return mockProvider();

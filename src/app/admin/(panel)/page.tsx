@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { getDashboardStats } from "@/server/admin/catalog";
 import { getAdminBase } from "@/lib/admin-path";
+import { takeFlash } from "@/lib/flash-store";
 import { getSetting, SETTING_KEYS } from "@/server/settings";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
+import { getSiteCurrency } from "@/server/settings";
 import { Flash } from "@/components/admin/flash";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -12,12 +14,14 @@ export const metadata = { title: "仪表盘" };
 export default async function AdminDashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; err?: string }>;
+  searchParams: Promise<{ flash?: string }>;
 }) {
-  const { ok, err } = await searchParams;
+  const { flash: flashId } = await searchParams;
+  const flash = takeFlash(flashId);
   const threshold = Number(getSetting(SETTING_KEYS.cardLowStockThreshold) ?? "5") || 5;
   const stats = getDashboardStats(threshold);
   const base = await getAdminBase();
+  const siteCurrency = getSiteCurrency();
 
   return (
     <div className="space-y-6">
@@ -26,13 +30,13 @@ export default async function AdminDashboardPage({
         <p className="mt-1 text-sm text-muted-foreground">经营概览与预警</p>
       </div>
 
-      <Flash ok={ok} err={err} />
+      <Flash ok={flash?.ok} err={flash?.err} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard title="今日订单" value={String(stats.todayOrders)} />
-        <StatCard title="今日销售额" value={`¥ ${formatCents(BigInt(stats.todayRevenueCents))}`} />
+        <StatCard title="今日销售额" value={formatMoney(BigInt(stats.todayRevenueCents), siteCurrency)} />
         <StatCard title="累计订单" value={String(stats.totalOrders)} />
-        <StatCard title="累计销售额" value={`¥ ${formatCents(BigInt(stats.totalRevenueCents))}`} />
+        <StatCard title="累计销售额" value={formatMoney(BigInt(stats.totalRevenueCents), siteCurrency)} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

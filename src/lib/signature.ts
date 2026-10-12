@@ -41,6 +41,27 @@ export function epusdtSign(params: Record<string, unknown>, token: string): stri
   return md5Hex(epusdtSignString(params, token));
 }
 
+/**
+ * 解析回调 JSON 并确保结果是普通对象。
+ *
+ * 不能只依赖 try/catch + `as Record<string, unknown>`：
+ * `JSON.parse("null")`（以及 "[]"、"0"、"false"）**不会抛错**，
+ * 但返回的不是对象，后续 `body["signature"]` 会抛 TypeError → 接口 500。
+ * 攻击者只需发一个 `null` 就能打出未处理异常。
+ */
+export function parseJsonObject(rawBody: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    return { ok: false, error: "JSON 解析失败" };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: "回调报文必须是 JSON 对象" };
+  }
+  return { ok: true, value: parsed as Record<string, unknown> };
+}
+
 /** 常量时间比较，防时序侧信道（PLAN §6-②） */
 export function safeEqualHex(a: string, b: string): boolean {
   const ba = Buffer.from(a.toLowerCase(), "utf8");

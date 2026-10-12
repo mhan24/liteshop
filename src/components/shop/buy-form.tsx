@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useActionState } from "react";
 import { createOrderAction, type CreateOrderState } from "@/actions/shop";
+import { TurnstileWidget, useTurnstileToken } from "@/components/shop/turnstile-widget";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,27 +19,49 @@ export function BuyForm({
   slug,
   maxQuantity,
   deliveryType,
+  turnstile,
+  buttonText = "立即购买",
+  notice = "",
 }: {
   slug: string;
   maxQuantity: number;
   deliveryType: string;
+  /** 后台启用了 Turnstile 时由服务端传入 */
+  turnstile?: { enabled: boolean; siteKey: string };
+  buttonText?: string;
+  notice?: string;
 }) {
   const [state, formAction, pending] = useActionState<CreateOrderState | null, FormData>(
     createOrderAction,
     null
   );
   const [quantity, setQuantity] = useState("1");
+  const { token, setToken, resetToken } = useTurnstileToken();
+  const [captchaEpoch, setCaptchaEpoch] = useState(0);
+  const [lastError, setLastError] = useState<string | undefined>(undefined);
 
-  // 下单成功 → 跳转收银台（mock 内部页或 bepusdt 外部链接）
+  const captchaEnabled = !!turnstile?.enabled && !!turnstile.siteKey;
+
+  // 下单成功 → 先跳待支付页，由待支付页按钮在新窗口打开收银台
   useEffect(() => {
     if (state?.paymentUrl) {
       window.location.href = state.paymentUrl;
     }
   }, [state]);
 
+  // 提交失败 → Turnstile token 已被消费，重挂载挑战（渲染期调整状态模式）
+  if (state?.error !== lastError) {
+    setLastError(state?.error);
+    if (state?.error && captchaEnabled) {
+      resetToken();
+      setCaptchaEpoch((e) => e + 1);
+    }
+  }
+
   return (
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="slug" value={slug} />
+      {captchaEnabled ? <input type="hidden" name="cfToken" value={token ?? ""} /> : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
@@ -78,15 +101,27 @@ export function BuyForm({
         </div>
       ) : null}
 
+      {captchaEnabled ? (
+        <div className="space-y-1">
+          <TurnstileWidget key={captchaEpoch} siteKey={turnstile!.siteKey} onToken={setToken} />
+          {captchaEnabled && !token ? (
+            <p className="text-xs text-muted-foreground">提交前请先完成人机验证</p>
+          ) : null}
+        </div>
+      ) : null}
+
       {state?.error ? <p className="text-sm text-pastel-red-text">{state.error}</p> : null}
 
-      <Button type="submit" className="w-full" size="lg" disabled={pending || state?.paymentUrl != null}>
-        {pending ? "正在创建订单…" : state?.paymentUrl ? "正在跳转收银台…" : "立即购买"}
+      <Button
+        type="submit"
+        className="w-full"
+        size="lg"
+        disabled={pending || state?.paymentUrl != null || (captchaEnabled && !token)}
+      >
+        {pending ? "正在创建订单…" : state?.paymentUrl ? "正在跳转收银台…" : buttonText}
       </Button>
 
-      <p className="text-center text-xs text-muted-foreground">
-        点击购买即同意：数字商品一经交付，非质量问题不支持退款
-      </p>
+      <p className="text-center text-xs text-muted-foreground whitespace-pre-line">{notice}</p>
     </form>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { currencySymbol } from "@/lib/money";
 import { saveProductAction } from "@/actions/admin";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CurrencySelect } from "@/components/currency-select";
 import { Textarea } from "@/components/ui/textarea";
 
 export interface ProductDialogData {
@@ -23,8 +25,9 @@ export interface ProductDialogData {
   slug?: string;
   description?: string;
   imageUrl?: string | null;
-  /** 分 → 元字符串 */
+  /** 分 → 金额字符串 */
   price?: number;
+  currency?: string;
   deliveryType?: string;
   stockLimit?: number;
   status?: string;
@@ -40,15 +43,19 @@ function centsToYuan(cents?: number): string {
 export function ProductDialog({
   product,
   csrf,
+  siteCurrency,
   children,
 }: {
   product?: ProductDialogData;
   csrf: string;
+  /** 站点默认币种（新建商品默认值） */
+  siteCurrency: string;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [deliveryType, setDeliveryType] = useState(product?.deliveryType ?? "auto");
   const [status, setStatus] = useState(product?.status ?? "on");
+  const [currency, setCurrency] = useState(product?.currency ?? siteCurrency);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -73,7 +80,7 @@ export function ProductDialog({
               <Input id="p-slug" name="slug" defaultValue={product?.slug} placeholder="留空自动生成" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="p-price">价格（元）</Label>
+              <Label htmlFor="p-price">价格（{currencySymbol(currency) || currency}）</Label>
               <Input
                 id="p-price"
                 name="price"
@@ -82,6 +89,10 @@ export function ProductDialog({
                 placeholder="9.90"
                 required
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label>币种</Label>
+              <CurrencySelect name="currency" value={currency} onValueChange={setCurrency} />
             </div>
             <div className="space-y-1.5">
               <Label>发货方式</Label>
@@ -97,15 +108,21 @@ export function ProductDialog({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="p-stock">库存上限（人工发货，0=不限）</Label>
+              <Label htmlFor="p-stock">库存数量（人工发货）</Label>
               <Input
                 id="p-stock"
                 name="stockLimit"
                 type="number"
-                min={0}
-                defaultValue={product?.stockLimit ?? 0}
+                min={-1}
+                placeholder="留空或 -1 = 不限"
+                defaultValue={
+                  product?.stockLimit != null && product.stockLimit >= 0 ? product.stockLimit : ""
+                }
                 disabled={deliveryType !== "manual"}
               />
+              <p className="text-xs text-muted-foreground">
+                填 0 表示售罄；留空或 -1 表示不限库存。
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label>上架状态</Label>

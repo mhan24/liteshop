@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "./schema";
-import { envConfig } from "@/lib/env";
+import { envConfig, assertProductionSafety } from "@/lib/env";
 
 /**
  * SQLite 单连接（better-sqlite3 同步 API）：
@@ -35,13 +35,16 @@ function ensureSeed(sqlite: Database.Database) {
   sqlite.exec(`
     INSERT OR IGNORE INTO settings (key, value) VALUES
       ('site_name', 'liteshop'),
-      ('site_url', '');
+      ('site_url', ''),
+      ('currency', 'USD');
     INSERT OR IGNORE INTO payment_configs (provider, enabled, config_json) VALUES
       ('bepusdt', 0, '{}');
   `);
 }
 
 function createDb() {
+  // 生产安全自检：配置错误立即失败，避免带病上线
+  assertProductionSafety();
   const sqlite = openDb();
   runMigrations(sqlite);
   ensureSeed(sqlite);

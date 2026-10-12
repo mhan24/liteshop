@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ArrowSquareOutIcon,
   GearSixIcon,
   SquaresFourIcon,
   TicketIcon,
@@ -49,6 +50,18 @@ export function AdminNav({ base, variant }: { base: string; variant: "sidebar" |
           </Link>
         );
       })}
+      <a
+        href="/"
+        target="_blank"
+        rel="noreferrer"
+        className={cn(
+          "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+          variant === "topbar" && "whitespace-nowrap"
+        )}
+      >
+        <ArrowSquareOutIcon className="size-4" weight="bold" />
+        前往前台
+      </a>
     </nav>
   );
 }

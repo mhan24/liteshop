@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   cacheComponents: false,
   // Docker 部署：输出自包含产物（server.js）
   output: "standalone",
+  // 不暴露技术栈指纹（减少针对性扫描）
+  poweredByHeader: false,
   // better-sqlite3 为原生模块，禁止打包进 bundle
   serverExternalPackages: ["better-sqlite3"],
   turbopack: {

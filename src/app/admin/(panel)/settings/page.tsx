@@ -3,16 +3,22 @@ import {
   changeAdminCredentialsAction,
   savePaymentConfigAction,
   saveSiteSettingsAction,
+  saveCopySettingsAction,
   saveSmtpSettingsAction,
+  saveTurnstileSettingsAction,
   sendTestEmailAction,
 } from "@/actions/admin";
 import { getAdminCredentials } from "@/server/auth";
 import { getAdminPath } from "@/lib/admin-path";
-import { getPaymentConfig, getAllSettings, SETTING_KEYS } from "@/server/settings";
+import { COPY_FIELDS, getCopyAll } from "@/server/copy";
+import { takeFlash } from "@/lib/flash-store";
+import { getPaymentConfig, getAllSettings, getSiteCurrency, SETTING_KEYS } from "@/server/settings";
 import { Flash } from "@/components/admin/flash";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CurrencySelect } from "@/components/currency-select";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 
 export const dynamic = "force-dynamic";
@@ -21,9 +27,10 @@ export const metadata = { title: "系统设置" };
 export default async function AdminSettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; err?: string }>;
+  searchParams: Promise<{ flash?: string }>;
 }) {
-  const { ok, err } = await searchParams;
+  const { flash: flashId } = await searchParams;
+  const flash = takeFlash(flashId);
   const csrf = await csrfToken();
   const settings = getAllSettings();
   const cfg = getPaymentConfig("bepusdt");
@@ -31,6 +38,8 @@ export default async function AdminSettingsPage({
   const creds = getAdminCredentials();
   const adminPath = getAdminPath();
   const smtpEnabled = settings["smtp_enabled"] === "1";
+  const siteCurrency = getSiteCurrency();
+  const copyValues = getCopyAll();
 
   return (
     <div className="space-y-6">
@@ -39,13 +48,13 @@ export default async function AdminSettingsPage({
         <p className="mt-1 text-sm text-muted-foreground">站点、支付渠道、邮件通知与管理员</p>
       </div>
 
-      <Flash ok={ok} err={err} />
+      <Flash ok={flash?.ok} err={flash?.err} />
 
       <Card className="border-border bg-card">
         <CardHeader>
           <CardTitle className="text-base">站点</CardTitle>
           <CardDescription>
-            站点地址用于支付回跳与邮件内链接，必须公网可达且建议 HTTPS。
+            站点地址用于支付回跳与邮件内链接，必须公网可达且建议 HTTPS。默认币种用于新商品定价、订单与 bepusdt 收款（USD/CNY/EUR/GBP/JPY）。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -63,6 +72,10 @@ export default async function AdminSettingsPage({
                 defaultValue={settings[SETTING_KEYS.siteUrl] ?? ""}
                 placeholder="https://shop.9527.tr"
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="s-currency">默认币种（全站统一）</Label>
+              <CurrencySelect name="currency" id="s-currency" defaultValue={siteCurrency} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="s-threshold">卡密低库存阈值</Label>
@@ -113,14 +126,19 @@ export default async function AdminSettingsPage({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="b-timeout">订单超时（秒，≥180）</Label>
+              <Label htmlFor="b-timeout">订单超时（秒，180–3600）</Label>
               <Input
                 id="b-timeout"
                 name="timeout"
                 type="number"
                 min={180}
-                defaultValue={String(config["timeout_seconds"] ?? 600)}
+                max={3600}
+                step={1}
+                defaultValue={String(config["timeout_seconds"] ?? 900)}
               />
+              <p className="text-xs text-muted-foreground">
+                与 bepusdt 网关一致；超出 180–3600 网关会忽略并改用其默认值。
+              </p>
             </div>
             <label className="flex items-center gap-2 self-end text-sm sm:col-span-2">
               <input
@@ -133,6 +151,41 @@ export default async function AdminSettingsPage({
             </label>
             <div className="flex items-end sm:col-span-2">
               <Button type="submit">保存渠道配置</Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">人机验证（Cloudflare Turnstile）</CardTitle>
+          <CardDescription>
+            启用后，前台下单表单将插入 Turnstile 挑战，服务端经 siteverify 校验，防机器人刷单。
+            密钥获取：Cloudflare 控制台 → Turnstile → Add site（Widget Mode 建议 Managed）。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={saveTurnstileSettingsAction} className="grid max-w-xl gap-4 sm:grid-cols-2">
+            <input type="hidden" name="csrf" value={csrf} />
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                name="turnstileEnabled"
+                defaultChecked={settings["turnstile_enabled"] === "1"}
+                className="size-4"
+              />
+              启用下单人机验证
+            </label>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="t-site">Site Key（前台公开）</Label>
+              <Input id="t-site" name="turnstileSiteKey" defaultValue={settings["turnstile_site_key"] ?? ""} className="font-mono text-xs" autoComplete="off" />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="t-secret">Secret Key（服务端校验）</Label>
+              <Input id="t-secret" name="turnstileSecretKey" type="password" defaultValue={settings["turnstile_secret_key"] ?? ""} className="font-mono text-xs" autoComplete="off" />
+            </div>
+            <div className="flex items-end sm:col-span-2">
+              <Button type="submit">保存人机验证设置</Button>
             </div>
           </form>
         </CardContent>
@@ -172,7 +225,16 @@ export default async function AdminSettingsPage({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="m-pass">SMTP 密码 / 授权码</Label>
-              <Input id="m-pass" name="smtpPass" type="password" defaultValue={settings["smtp_pass"] ?? ""} autoComplete="off" />
+              <Input
+                id="m-pass"
+                name="smtpPass"
+                type="password"
+                placeholder={settings["smtp_pass"] ? "已设置（留空则不修改）" : "未设置"}
+                autoComplete="new-password"
+              />
+              <p className="text-xs text-muted-foreground">
+                出于安全考虑不回显已保存的密码；留空表示保持原值。
+              </p>
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="m-from">发件人</Label>
@@ -206,6 +268,38 @@ export default async function AdminSettingsPage({
             <Button type="submit" variant="outline">
               发送测试
             </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">前台文案</CardTitle>
+          <CardDescription>
+            前台所有主要文本均可在此修改；留空将恢复默认文案。保存后立即生效。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={saveCopySettingsAction} className="grid max-w-2xl gap-4 sm:grid-cols-2">
+            <input type="hidden" name="csrf" value={csrf} />
+            {COPY_FIELDS.map((f) => (
+              <div key={f.key} className={f.multiline ? "space-y-1.5 sm:col-span-2" : "space-y-1.5"}>
+                <Label htmlFor={`copy-${f.key}`}>{f.label}</Label>
+                {f.multiline ? (
+                  <Textarea
+                    id={`copy-${f.key}`}
+                    name={`copy_${f.key}`}
+                    rows={2}
+                    defaultValue={copyValues[f.key]}
+                  />
+                ) : (
+                  <Input id={`copy-${f.key}`} name={`copy_${f.key}`} defaultValue={copyValues[f.key]} />
+                )}
+              </div>
+            ))}
+            <div className="flex items-end sm:col-span-2">
+              <Button type="submit">保存前台文案</Button>
+            </div>
           </form>
         </CardContent>
       </Card>

@@ -33,7 +33,13 @@ export function handlePaymentNotify(providerName: string, rawBody: string): Hand
   let orderNo = "";
   let status: number | null = null;
 
-  const provider = getProvider(providerName);
+  // 渠道未启用（如生产环境的 mock）→ 直接拒绝，不落库、不抛错
+  let provider;
+  try {
+    provider = getProvider(providerName);
+  } catch {
+    return { handled: false, retryable: false, message: `支付渠道未启用: ${providerName}` };
+  }
   const verification = provider.verifyNotify(rawBody);
   verificationOk = verification.ok;
   message = verification.error ?? "";
@@ -53,19 +59,26 @@ export function handlePaymentNotify(providerName: string, rawBody: string): Hand
   }
   const payload = verification.payload;
 
-  // 重复通知（同 hash 已处理过）→ 跳过（防重放/防 bepusdt 重试重复发货）
-  const seen = db
-    .select({ id: notifyLogs.id })
-    .from(notifyLogs)
-    .where(and(eq(notifyLogs.payloadHash, payloadHash), eq(notifyLogs.handled, true)))
-    .get();
-  if (seen) {
-    if (logId) markHandled(logId, true);
-    return { handled: true, retryable: false, message: "重复通知，已跳过" };
-  }
-
+  // 重复通知去重 + 履约必须在同一个 IMMEDIATE 事务内完成。
+  // 若把去重查询放在事务外，两个并发的相同回调会同时通过检查（都还没标记 handled），
+  // 从而重复进入履约流程。虽然 processNotify 的状态机与 reserved 卡复用能兜住
+  // 重复发货，但在事务内判定更严谨，也避免无谓的写事务。
   const result = db.transaction(
-    (tx) => processNotify(tx, payload),
+    (tx) => {
+      const seen = tx
+        .select({ id: notifyLogs.id })
+        .from(notifyLogs)
+        .where(and(eq(notifyLogs.payloadHash, payloadHash), eq(notifyLogs.handled, true)))
+        .get();
+      if (seen) {
+        return {
+          handled: true,
+          retryable: false,
+          message: "重复通知，已跳过",
+        } satisfies HandleNotifyResult;
+      }
+      return processNotify(tx, payload);
+    },
     { behavior: "immediate" }
   );
   result.orderNo = payload.orderNo;
@@ -117,9 +130,15 @@ function processNotify(
     return { handled: false, retryable: false, message: `订单状态 ${order.status} 不接受支付通知` };
   }
 
-  // trade_id 必须与创建交易快照一致（防跨订单伪造）
-  if (order.tradeId && payload.tradeId && order.tradeId !== payload.tradeId) {
-    return { handled: false, retryable: false, message: "trade_id 与订单快照不匹配" };
+  // trade_id 必须与创建交易快照一致（防跨订单伪造）。
+  // 注意：不能因回调未携带 trade_id 就放行——否则攻击者可省略该字段绕过校验。
+  if (order.tradeId) {
+    if (!payload.tradeId) {
+      return { handled: false, retryable: false, message: "回调缺少 trade_id，拒绝入账" };
+    }
+    if (order.tradeId !== payload.tradeId) {
+      return { handled: false, retryable: false, message: "trade_id 与订单快照不匹配" };
+    }
   }
 
   // 法币金额必须与订单一致（整数分比较，禁浮点运算）
@@ -299,6 +318,59 @@ export function closeOrder(orderNo: string): AdminOpResult {
         .where(eq(orders.id, order.id))
         .run();
       return { ok: true, message: "订单已关闭" };
+    },
+    { behavior: "immediate" }
+  );
+}
+
+/**
+ * 买家取消订单（前台自助）：
+ * - 仅限 pending（未支付）订单；已支付/发货中/已完成一律拒绝，需联系客服
+ * - 双因子校验：订单号 + 下单邮箱，避免凭订单号枚举取消他人订单
+ * - 在 IMMEDIATE 事务内重新读取状态，避免与并发回调竞态（已支付则拒绝取消）
+ */
+export function cancelPendingOrder(orderNo: string, email: string): AdminOpResult {
+  const no = orderNo.trim();
+  const mail = email.trim().toLowerCase();
+  if (!no || !mail) return { ok: false, message: "请提供订单号与下单邮箱" };
+
+  return db.transaction(
+    (tx) => {
+      const order = tx.select().from(orders).where(eq(orders.orderNo, no)).get() as
+        | Order
+        | undefined;
+      if (!order) return { ok: false, message: "订单不存在" };
+      if (order.email.trim().toLowerCase() !== mail) {
+        return { ok: false, message: "订单号与邮箱不匹配" };
+      }
+      if (order.status !== "pending") {
+        return {
+          ok: false,
+          message:
+            order.status === "expired"
+              ? "订单已超时，无需取消"
+              : "订单已支付或已关闭，无法取消；如需帮助请联系客服",
+        };
+      }
+
+      const product = order.productId
+        ? tx.select().from(products).where(eq(products.id, order.productId)).get()
+        : null;
+      if (product) {
+        // 释放 reserved 卡密 / 回补 manual 库存
+        getDeliveryStrategy(product.deliveryType).release(tx, order, product);
+      }
+
+      assertTransition(order.status as OrderStatus, "closed");
+      tx.update(orders)
+        .set({
+          status: "closed" as OrderStatus,
+          paymentUrl: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.id, order.id))
+        .run();
+      return { ok: true, message: "订单已取消" };
     },
     { behavior: "immediate" }
   );

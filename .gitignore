@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# 模板文件需要入库（供他人复制为 .env）
+!.env.example
+!.deploy.env.example
 
 # vercel
 .vercel
@@ -45,3 +48,6 @@ next-env.d.ts
 /backups
 .env
 .env.production
+# 部署凭证（与应用 .env 分离；由 scripts/deploy.sh 读取）
+.deploy.env
+.deploy.env.local

@@ -15,6 +15,20 @@
       "when": 1791728897539,
       "tag": "0001_mail-logs",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791734631264,
+      "tag": "0002_card-resale-payment-url",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791776000000,
+      "tag": "0003_manual-stock-unlimited-sentinel",
+      "breakpoints": true
     }
   ]
 }

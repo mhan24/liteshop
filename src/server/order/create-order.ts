@@ -1,11 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
-import { cards, orders, products } from "@/db/schema";
+import { orders, products } from "@/db/schema";
 import type { OrderStatus, Product } from "@/db/schema";
 import { generateOrderNo } from "@/lib/order-no";
 import { getSiteUrl } from "@/server/settings";
 import { resolvePaymentProvider } from "@/server/payment";
 import { getDeliveryStrategy } from "@/server/delivery";
+import { shouldChargeStock } from "@/lib/stock";
 
 /** 下单服务：库存校验 → 建单（商品快照）→ 渠道创建支付 → 回写交易快照 */
 
@@ -59,22 +60,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
   const totalCents = BigInt(product.priceCents) * BigInt(quantity);
 
-  // auto 型预检（真实占卡发生在支付后的发货事务内，此处仅拦截明显缺货）
-  if (product.deliveryType === "auto") {
-    const available = db
-      .select({ n: sql<number>`count(*)` })
-      .from(cards)
-      .where(and(eq(cards.productId, product.id), eq(cards.status, "available")))
-      .get();
-    if ((available?.n ?? 0) < quantity) {
-      throw new OrderError("OUT_OF_STOCK", "库存不足");
-    }
-  }
-
   const provider = resolvePaymentProvider();
   const siteUrl = getSiteUrl();
 
-  // 建单：IMMEDIATE 事务（manual 型条件扣减库存；订单号撞唯一索引重试）
+  // 建单：IMMEDIATE 事务（auto 型下单即锁定卡密；manual 型条件扣减库存；订单号撞唯一索引重试）
   const orderNo = db.transaction(
     (tx) => insertOrderWithRetry(tx, product, { email, note, quantity }),
     { behavior: "immediate" }
@@ -94,6 +83,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         tradeId: created.tradeId,
         expectedActualAmount: created.expectedActualAmount,
         expirationTime: created.expirationTime,
+        paymentUrl: created.paymentUrl,
         updatedAt: new Date(),
       })
       .where(eq(orders.orderNo, orderNo))
@@ -125,14 +115,33 @@ function insertOrderWithRetry(
   for (let attempt = 0; attempt < 5; attempt++) {
     const orderNo = generateOrderNo();
     try {
-      // manual 型库存：条件原子扣减（stockLimit 0 = 不限），受影响行数判定，不超卖
-      if (product.deliveryType === "manual" && product.stockLimit > 0) {
+      // manual 型库存：条件原子扣减（-1 = 不限库存），受影响行数判定，不超卖。
+      // 注意：必须用 shouldChargeStock 而非 stockLimit > 0——后者在库存扣到 0 后
+      // 会误判为"不限库存"从而跳过校验，导致超卖。
+      if (product.deliveryType === "manual" && shouldChargeStock(product.stockLimit)) {
         const res = tx
           .update(products)
           .set({ stockLimit: sql`${products.stockLimit} - ${data.quantity}` })
           .where(and(eq(products.id, product.id), sql`${products.stockLimit} >= ${data.quantity}`))
           .run();
         if (res.changes === 0) throw new OrderError("OUT_OF_STOCK", "库存不足");
+      }
+      // auto 型：下单即锁定卡密（条件原子占卡，不足即整单回滚）
+      if (product.deliveryType === "auto") {
+        const claimed = tx.all<{ id: number }>(
+          sql`UPDATE cards
+              SET status = 'reserved', order_id = ${orderNo}
+              WHERE id IN (
+                SELECT id FROM cards
+                WHERE product_id = ${product.id} AND status = 'available'
+                ORDER BY id
+                LIMIT ${data.quantity}
+              )
+              RETURNING id`
+        );
+        if (claimed.length < data.quantity) {
+          throw new OrderError("OUT_OF_STOCK", "库存不足");
+        }
       }
       tx.insert(orders)
         .values({
@@ -146,7 +155,7 @@ function insertOrderWithRetry(
           email: data.email,
           note: data.note,
           status: "pending" as OrderStatus,
-          stockCharged: product.deliveryType === "manual" && product.stockLimit > 0,
+          stockCharged: product.deliveryType === "manual" && shouldChargeStock(product.stockLimit),
         })
         .run();
       return orderNo;
@@ -172,4 +181,59 @@ function compensateFailedOrder(orderNo: string, product: Product): void {
     },
     { behavior: "immediate" }
   );
+}
+
+/* ===== 继续支付（待支付页）===== */
+
+export interface ResumePaymentResult {
+  ok: boolean;
+  message: string;
+  paymentUrl?: string;
+}
+
+/**
+ * 继续支付：
+ * - pending 且未过期 → 复用已存收银台地址（不轮换 trade_id，避免在途回调验签失败）
+ * - 已过期/无地址 → 重新发起（渠道对同单号已失效交易会新建，回调 trade_id 同步更新）
+ */
+export async function resumeOrderPayment(orderNo: string): Promise<ResumePaymentResult> {
+  const order = db.select().from(orders).where(eq(orders.orderNo, orderNo)).get();
+  if (!order) return { ok: false, message: "订单不存在" };
+  if (order.status !== "pending") {
+    return { ok: false, message: `订单状态为「${order.status}」，无需继续支付` };
+  }
+
+  const notExpired = !order.expirationTime || order.expirationTime.getTime() > Date.now();
+  if (order.paymentUrl && notExpired) {
+    return { ok: true, message: "ok", paymentUrl: order.paymentUrl };
+  }
+
+  const provider = resolvePaymentProvider();
+  const siteUrl = getSiteUrl();
+  try {
+    const created = await provider.createPayment({
+      orderNo,
+      amountCents: BigInt(order.totalCents),
+      currency: order.currency,
+      subject: order.productName,
+      notifyUrl: `${siteUrl}/api/pay/notify/${provider.name}`,
+      redirectUrl: `${siteUrl}/pay/return?order_no=${orderNo}`,
+    });
+    db.update(orders)
+      .set({
+        tradeId: created.tradeId,
+        expectedActualAmount: created.expectedActualAmount,
+        expirationTime: created.expirationTime,
+        paymentUrl: created.paymentUrl,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.orderNo, orderNo))
+      .run();
+    return { ok: true, message: "已重新发起支付", paymentUrl: created.paymentUrl };
+  } catch (err) {
+    return {
+      ok: false,
+      message: `支付渠道创建失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listShopProducts } from "@/server/shop";
+import { getCopyAll } from "@/server/copy";
 import { Reveal } from "@/components/reveal";
 import { Badge } from "@/components/ui/badge";
 import { CaretRightIcon, TicketIcon } from "@phosphor-icons/react/ssr";
@@ -8,6 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ShopHomePage() {
   const products = listShopProducts();
+  const copy = getCopyAll();
 
   return (
     <main className="mx-auto max-w-5xl px-4">
@@ -21,16 +23,13 @@ export default async function ShopHomePage() {
       >
         <Reveal>
           <p className="mb-4 inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-xs tracking-[0.05em] text-muted-foreground uppercase">
-            数字商品 · 支付后自动发货
+            {copy.hero_badge}
           </p>
-          <h1 className="max-w-2xl font-serif text-4xl leading-[1.1] tracking-tight sm:text-5xl">
-            挑选商品，
-            <br />
-            卡密秒到。
+          <h1 className="max-w-2xl font-serif text-4xl leading-[1.1] tracking-tight whitespace-pre-line sm:text-5xl">
+            {copy.hero_title}
           </h1>
-          <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
-            下单后跳转收银台使用 USDT 等加密货币支付，
-            到账即自动发放卡密；人工商品由客服快速处理。
+          <p className="mt-4 max-w-xl whitespace-pre-line text-[15px] leading-relaxed text-muted-foreground">
+            {copy.hero_desc}
           </p>
         </Reveal>
       </section>
@@ -39,8 +38,8 @@ export default async function ShopHomePage() {
       <section className="pb-24">
         {products.length === 0 ? (
           <Reveal className="rounded-xl border border-border bg-card p-16 text-center">
-            <p className="font-serif text-xl">商品上架中</p>
-            <p className="mt-2 text-sm text-muted-foreground">敬请期待</p>
+            <p className="font-serif text-xl">{copy.shop_empty_title}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{copy.shop_empty_desc}</p>
           </Reveal>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -76,10 +75,7 @@ export default async function ShopHomePage() {
                     </p>
                   ) : null}
                   <div className="mt-auto flex items-center justify-between pt-6">
-                    <span className="font-mono text-lg">
-                      <span className="mr-1 text-xs text-muted-foreground">{p.currency}</span>
-                      {p.priceFormatted}
-                    </span>
+                    <span className="font-mono text-lg">{p.priceFormatted}</span>
                     <span
                       className={`inline-flex items-center gap-1 text-sm transition-colors ${
                         p.onSale

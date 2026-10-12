@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { epusdtSign, epusdtVerify } from "@/lib/signature";
+import { epusdtSign, epusdtVerify, parseJsonObject } from "@/lib/signature";
 import type {
   CreatePaymentInput,
   CreatedPayment,
@@ -14,10 +14,16 @@ import type {
  * 用于无真实网关时跑通「下单 → 支付 → 回调 → 发货」全链路（PLAN §10）。
  */
 
+/**
+ * mock 令牌：优先取 MOCK_PAYMENT_TOKEN，否则回退开发用默认值。
+ * 注意：默认值是公开常量、不构成机密，因此 mock 渠道的可用性由
+ * PAYMENT_DRIVER=mock 门控（见 payment/index.ts isProviderEnabled），
+ * 生产环境（driver=auto/bepusdt）下该渠道及其回调入口一律不可达。
+ */
 const DEFAULT_TOKEN = "mock-token";
 
 function token(): string {
-  return (process.env.MOCK_PAYMENT_TOKEN || DEFAULT_TOKEN);
+  return process.env.MOCK_PAYMENT_TOKEN || DEFAULT_TOKEN;
 }
 
 export function mockProvider(): PaymentProvider {
@@ -38,12 +44,9 @@ export function mockProvider(): PaymentProvider {
     },
 
     verifyNotify(rawBody: string): NotifyVerification {
-      let body: Record<string, unknown>;
-      try {
-        body = JSON.parse(rawBody) as Record<string, unknown>;
-      } catch {
-        return { ok: false, error: "JSON 解析失败" };
-      }
+      const parsed = parseJsonObject(rawBody);
+      if (!parsed.ok) return { ok: false, error: parsed.error };
+      const body = parsed.value;
       if (!epusdtVerify(body, token())) {
         return { ok: false, error: "签名校验失败" };
       }

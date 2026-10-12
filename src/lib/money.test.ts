@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCents, MoneyParseError, normalizeAmountString, toCents } from "./money";
+import { currencySymbol, formatCents, formatMoney, MoneyParseError, normalizeAmountString, toCents } from "./money";
 
 describe("toCents（整数分转换，禁浮点）", () => {
   it("整数字符串", () => {
@@ -62,5 +62,24 @@ describe("normalizeAmountString（actual_amount 对账）", () => {
     expect(normalizeAmountString("12")).toBe("12");
     expect(normalizeAmountString("0.500000")).toBe("0.5");
     expect(normalizeAmountString(" 42.5 ")).toBe("42.5");
+  });
+});
+
+describe("formatMoney / currencySymbol（全站统一展示）", () => {
+  it("常见币种符号", () => {
+    expect(formatMoney(990n, "USD")).toBe("$9.90");
+    expect(formatMoney(4250n, "CNY")).toBe("¥42.50");
+    expect(formatMoney(1234n, "EUR")).toBe("€12.34");
+    expect(formatMoney(7n, "GBP")).toBe("£0.07");
+    expect(currencySymbol("JPY")).toBe("¥");
+  });
+
+  it("未知币种回退代码前缀", () => {
+    expect(formatMoney(990n, "AUD")).toBe("AUD 9.90");
+    expect(currencySymbol("AUD")).toBe("");
+  });
+
+  it("大小写不敏感", () => {
+    expect(formatMoney(990n, "usd")).toBe("$9.90");
   });
 });

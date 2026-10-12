@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { paymentConfigs, settings } from "@/db/schema";
 import { envConfig } from "@/lib/env";
+import { SUPPORTED_CURRENCIES } from "@/lib/money";
 
 /** 站点级设置（settings 表仅存站点配置；支付渠道在 payment_configs） */
 
@@ -9,6 +10,7 @@ export const SETTING_KEYS = {
   siteName: "site_name",
   siteUrl: "site_url",
   cardLowStockThreshold: "card_low_stock_threshold",
+  currency: "currency",
 } as const;
 
 export function getAllSettings(): Record<string, string> {
@@ -33,11 +35,28 @@ export function getSiteName(): string {
   return getSetting(SETTING_KEYS.siteName) || "liteshop";
 }
 
+/** 站点默认币种（未设置时 USD；商品/订单/bepusdt fiat 全站统一跟随） */
+export function getSiteCurrency(): string {
+  const c = getSetting(SETTING_KEYS.currency)?.trim().toUpperCase();
+  return c && (SUPPORTED_CURRENCIES as readonly string[]).includes(c) ? c : "USD";
+}
+
 /** 站点对外地址：settings.site_url 优先，回落 env；用于 notify_url / redirect_url */
 export function getSiteUrl(): string {
   const fromDb = getSetting(SETTING_KEYS.siteUrl)?.trim();
   const raw = fromDb && fromDb !== "" ? fromDb : envConfig.siteUrl;
   return raw.replace(/\/+$/, "");
+}
+
+/** Turnstile 前台配置（仅站点 Key，Secret 只在服务端使用） */
+export function getTurnstileClientConfig(): { enabled: boolean; siteKey: string } {
+  const enabled = getSetting("turnstile_enabled") === "1";
+  const siteKey = getSetting("turnstile_site_key")?.trim() ?? "";
+  return { enabled: enabled && siteKey !== "", siteKey };
+}
+
+export function getTurnstileSecretKey(): string {
+  return getSetting("turnstile_secret_key")?.trim() ?? "";
 }
 
 export interface PaymentConfigRow {
