@@ -37,3 +37,38 @@ describe("查单页 Turnstile token 传递", () => {
     }
   });
 });
+
+/**
+ * 本地订单缓存与查单页的衔接。
+ *
+ * 安全边界：缓存只是「输入便利」，服务端仍按订单号 + 邮箱双因子校验，
+ * 因此缓存不得成为可越权访问订单的凭据。
+ */
+describe("查单页本地历史", () => {
+  const src = read("src/components/shop/order-lookup.tsx");
+
+  it("读取本地缓存并提供一键填充", () => {
+    expect(src).toContain("readCachedOrders");
+    expect(src).toContain("setOrderNo");
+    expect(src).toContain("setEmail");
+  });
+
+  it("提供清除本地记录的入口", () => {
+    expect(src).toContain("clearCachedOrders");
+  });
+
+  it("未支付订单提供「重新支付」与「取消」操作", () => {
+    expect(src).toContain("重新支付");
+    expect(src).toContain("CancelOrder");
+  });
+
+  it("页面明示缓存仅本机保存，服务端仍双因子校验", () => {
+    expect(src).toContain("仅保存在本机");
+    expect(src).toContain("订单号 + 邮箱");
+  });
+
+  it("取消操作仍走服务端校验（缓存不提供授权）", () => {
+    const actions = read("src/actions/shop.ts");
+    expect(actions).toMatch(/cancelPendingOrder\(orderNo,\s*email\)/);
+  });
+});

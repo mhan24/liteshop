@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { rememberOrder } from "@/lib/order-cache";
 
 /** 前台可选的支付方式（与服务端 CheckoutMethod 对应） */
 export interface CheckoutOption {
@@ -30,6 +31,8 @@ export function BuyForm({
   methods,
   buttonText = "立即购买",
   notice = "",
+  productName,
+  total,
 }: {
   slug: string;
   maxQuantity: number;
@@ -38,6 +41,9 @@ export function BuyForm({
   turnstile?: { enabled: boolean; siteKey: string };
   /** 服务端计算的可选支付方式；不传则不显示选择器 */
   methods?: CheckoutOption[];
+  /** 缓存展示用：商品名与格式化金额（由服务端传入） */
+  productName: string;
+  total: string;
   buttonText?: string;
   notice?: string;
 }) {
@@ -46,17 +52,28 @@ export function BuyForm({
     null
   );
   const [quantity, setQuantity] = useState("1");
+  const [email, setEmail] = useState("");
   const { token, setToken, resetToken } = useTurnstileToken();
   const [captchaEpoch, setCaptchaEpoch] = useState(0);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
 
   const captchaEnabled = !!turnstile?.enabled && !!turnstile.siteKey;
 
-  // 下单成功 → 先跳待支付页，由待支付页按钮在新窗口打开收银台
+  // 下单成功 → 先跳待支付页，由待支付页按钮在新窗口打开收银台。
+  // 同时写入本地缓存：买家之后可在查单页一键"重新支付 / 取消 / 查询"。
   useEffect(() => {
-    if (state?.paymentUrl) {
+    if (state?.paymentUrl && state.orderNo) {
+      // 只存下单所需的最小信息；不含支付地址与交付内容
+      rememberOrder({
+        orderNo: state.orderNo,
+        email,
+        productName,
+        total,
+        createdAt: new Date().toISOString(),
+      });
       window.location.href = state.paymentUrl;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
   // 提交失败 → Turnstile token 已被消费，重挂载挑战（渲染期调整状态模式）
@@ -80,6 +97,8 @@ export function BuyForm({
             id="buy-email"
             name="email"
             type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             required
             placeholder="you@example.com"
             autoComplete="email"

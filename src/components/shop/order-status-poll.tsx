@@ -259,7 +259,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 /** 买家自助取消：仅待支付订单；需邮箱二次确认，成功后状态轮询会自动刷新 */
-function CancelOrder({ orderNo }: { orderNo: string }) {
+export function CancelOrder({ orderNo }: { orderNo: string }) {
   const [state, formAction, pending] = useActionState<CancelOrderState | null, FormData>(
     cancelOrderAction,
     null

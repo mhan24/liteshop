@@ -108,6 +108,8 @@ export default async function ProductDetailPage({
                   deliveryType={product.deliveryType}
                   turnstile={turnstile}
                   methods={checkoutOptions}
+                  productName={product.name}
+                  total={product.priceFormatted}
                   buttonText={getCopy("buy_button")}
                   notice={getCopy("buy_notice")}
                 />
