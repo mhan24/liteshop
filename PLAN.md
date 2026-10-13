@@ -256,3 +256,10 @@ README 内容：Docker 部署、bepusdt 配置说明（Token 获取路径：bepu
 - **Turnstile 15 秒总预算改 1s 轮询实现**：覆盖「render 成功但 challenge 无响应」的静默失败；超时移除僵尸 widget 并判不可用。
 - **降级开关已上线**（后台可关）：验证不可用时无 token 提交放行，由下单/查单频率限制兜底；前端按钮解禁并带 cfFallback 标记。
 - 生产实测：验证失败 15s → 错误提示+按钮解禁 → 选交易所下单 → 到达待支付页 ✓。
+
+### 2026-10-13 · v1.7：占用卡密后台释放能力
+
+- 背景：诊断期间直接改库关闭测试订单、绕过释放逻辑，留下一张孤儿占用卡（属主已 closed）；后台此前对 reserved 卡无任何操作，无法自救。
+- 新增：卡密页 reserved 行「释放」按钮 → `releaseReservedCard`（service 层）：仅允许释放孤儿占用（无属主）或属主已终态（closed/expired）的卡；属主仍在 pending/paid/delivering 拒绝（提示先关单，正常流程会自动释放）；completed 拒绝（属交付流程）。操作入审计日志。
+- 生产脏数据已修复：VOX024G9GLJT5 已释放回可用池（同等 SQL 语义 + 审计）。
+- 超时清扫（惰性 + /api/cron/expire）此前已覆盖「pending 永久占卡」的主路径，本入口仅针对历史脏数据/外部改动兜底。

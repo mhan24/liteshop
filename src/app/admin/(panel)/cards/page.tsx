@@ -6,6 +6,7 @@ import { takeFlash } from "@/lib/flash-store";
 import {
   clearCardsAction,
   deleteCardsAction,
+  releaseCardAction,
 } from "@/actions/admin";
 import { listCards, listProducts } from "@/server/admin/catalog";
 import { CardStatus } from "@/db/schema";
@@ -138,7 +139,7 @@ export default async function AdminCardsPage({
                   <TableBody>
                     {cards.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                        <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                           暂无卡密
                         </TableCell>
                       </TableRow>
@@ -182,6 +183,22 @@ export default async function AdminCardsPage({
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">
                             {formatDateTime(c.createdAt)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {c.status === "reserved" ? (
+                              <form action={releaseCardAction}>
+                                <input type="hidden" name="csrf" value={csrf} />
+                                <input type="hidden" name="cardId" value={c.id} />
+                                <input type="hidden" name="productId" value={selected.id} />
+                                <button
+                                  type="submit"
+                                  className="text-xs text-pastel-red-text underline underline-offset-4 hover:text-foreground"
+                                  title="把这张占用卡密放回可用池（仅限属主订单已关闭/超时或无属主的孤儿占用）"
+                                >
+                                  释放
+                                </button>
+                              </form>
+                            ) : null}
                           </TableCell>
                         </TableRow>
                       ))

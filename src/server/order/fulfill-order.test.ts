@@ -11,7 +11,7 @@ import {
   cancelPendingOrder,
   getRejectedNotifyStats,
 } from "./fulfill-order";
-import { importCards } from "@/server/admin/catalog";
+import { importCards, releaseReservedCard } from "@/server/admin/catalog";
 import { createOrder } from "./create-order";
 import { lookupOrder, getOrderStatusView } from "./query-order";
 
@@ -545,5 +545,56 @@ describe("超卖回归：manual 库存扣到 0 后必须拒绝下单", () => {
     await expect(
       createOrder({ email: "a@test.dev", quantity: 1, slug: p.slug })
     ).rejects.toThrow(/库存不足/);
+  });
+});
+
+describe("孤儿占用卡密释放（后台自救入口）", () => {
+  it("属主订单已关闭：允许释放回可用池", async () => {
+    const p = seedAutoProduct(["ORPHAN-1"]);
+    const r = await createOrder({ email: "buyer@test.dev", quantity: 1, slug: p.slug });
+    expect(closeOrder(r.orderNo).ok).toBe(true);
+
+    // 模拟历史脏数据：卡仍 reserved（如外部直改 DB 未走释放）
+    const stuck = db.select().from(cards).where(eq(cards.orderId, r.orderNo)).all();
+    expect(stuck).toHaveLength(0); // closeOrder 正常路径已释放
+
+    // 手工构造一张孤儿占用
+    db.insert(cards).values({ productId: p.id, content: "ORPHAN-2", status: "reserved", orderId: r.orderNo }).run();
+    const cardId = db.select().from(cards).where(eq(cards.content, "ORPHAN-2")).get()!.id;
+
+    const res = releaseReservedCard(cardId);
+    expect(res.ok).toBe(true);
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!;
+    expect(card.status).toBe("available");
+    expect(card.orderId).toBeNull();
+  });
+
+  it("属主订单仍在 pending：拒绝释放（支付后需有卡可发）", async () => {
+    const p = seedAutoProduct(["HOLD-1"]);
+    const r = await createOrder({ email: "buyer@test.dev", quantity: 1, slug: p.slug });
+    const card = db.select().from(cards).where(eq(cards.orderId, r.orderNo)).get()!;
+
+    const res = releaseReservedCard(card.id);
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("先在订单页关闭");
+    // 卡未被释放
+    expect(db.select().from(cards).where(eq(cards.id, card.id)).get()!.status).toBe("reserved");
+  });
+
+  it("属主订单已 completed：拒绝释放（属于交付流程）", async () => {
+    const p = seedAutoProduct(["DONE-1", "DONE-2"]);
+    const r = await createOrder({ email: "buyer@test.dev", quantity: 1, slug: p.slug });
+    handlePaymentNotify("mock", paySuccess(r.orderNo));
+    const card = db.select().from(cards).where(eq(cards.status, "sold")).get()!;
+    // 卖出的卡不可"释放"（只能 reserved），防御性断言
+    const res = releaseReservedCard(card.id);
+    expect(res.ok).toBe(false);
+  });
+
+  it("非 reserved 状态拒绝", async () => {
+    const p = seedAutoProduct(["AV-1"]);
+    const card = db.select().from(cards).where(eq(cards.content, "AV-1")).get()!;
+    const res = releaseReservedCard(card.id);
+    expect(res.ok).toBe(false);
   });
 });

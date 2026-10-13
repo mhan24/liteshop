@@ -297,6 +297,46 @@ export function listCards(productId: number, status: string | null, limit = 200)
 }
 
 /** 删除未使用卡密（available）；reserved/sold 保留（禁止硬删除已产生交易关联的数据） */
+/**
+ * 释放一张占用（reserved）卡密回可用池 —— 针对孤儿占用的自救入口。
+ *
+ * 允许释放：
+ * - 属主订单不存在（外部改动/历史脏数据导致的孤儿）
+ * - 属主订单已终态（closed / expired：正常流程本应自动释放，此处为兜底）
+ * 拒绝释放（提示走正常流程）：
+ * - 属主订单仍在 pending / paid / delivering（关单或超时会自动释放，
+ *   强行释放会导致买家支付后无卡可发）
+ * - completed（交付已完成或补卡重试中，reserved 卡属于该流程）
+ */
+export function releaseReservedCard(cardId: number): { ok: boolean; message: string } {
+  const card = db.select().from(cards).where(eq(cards.id, cardId)).get();
+  if (!card) return { ok: false, message: "卡密不存在" };
+  if (card.status !== "reserved") {
+    return { ok: false, message: `仅占用状态可释放（当前：${card.status}）` };
+  }
+
+  if (card.orderId) {
+    const owner = db.select().from(orders).where(eq(orders.orderNo, card.orderId)).get();
+    if (owner && ["pending", "paid", "delivering"].includes(owner.status)) {
+      return {
+        ok: false,
+        message: `属主订单 ${owner.status === "pending" ? "尚未支付" : "处理中"}，请先在订单页关闭该订单（会自动释放卡密）`,
+      };
+    }
+    if (owner && owner.status === "completed") {
+      return { ok: false, message: "属主订单已完成交付，该卡密属于交付流程，不可释放" };
+    }
+  }
+
+  const res = db
+    .update(cards)
+    .set({ status: "available", orderId: null, soldAt: null })
+    .where(and(eq(cards.id, cardId), eq(cards.status, "reserved")))
+    .run();
+  if (res.changes === 0) return { ok: false, message: "释放失败：卡密状态已变化" };
+  return { ok: true, message: `卡密已释放回可用池${card.orderId ? `（原占用订单 ${card.orderId}）` : ""}` };
+}
+
 export function deleteAvailableCards(productId: number, ids: number[]): number {
   if (ids.length === 0) return 0;
   return db

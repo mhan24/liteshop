@@ -27,6 +27,7 @@ import { clientIpFromHeaders, parseClientIp } from "@/server/security/client-ip"
 import {
   clearAvailableCards,
   createProduct,
+  releaseReservedCard,
   deleteAvailableCards,
   deleteProduct,
   importCards,
@@ -223,6 +224,18 @@ export async function deleteCardsAction(formData: FormData) {
   logAdmin("cards.delete", String(productId), `删除未使用卡密 ${n} 张`, await clientIp());
   revalidatePath("/admin/cards");
   await back(`/admin/cards?product=${productId}`, `已删除 ${n} 张未使用卡密`, true);
+}
+
+/** 释放占用卡密回可用池（仅孤儿/已终态属主） */
+export async function releaseCardAction(formData: FormData) {
+  await requireSession();
+  await assertCsrf(formData.get("csrf"));
+  const cardId = Number(formData.get("cardId") ?? 0);
+  const productId = Number(formData.get("productId") ?? 0);
+  const result = releaseReservedCard(cardId);
+  logAdmin("cards.release", String(cardId), result.message, await clientIp());
+  revalidatePath("/admin/cards");
+  await back(`/admin/cards?product=${productId}`, result.message, result.ok);
 }
 
 export async function clearCardsAction(formData: FormData) {
