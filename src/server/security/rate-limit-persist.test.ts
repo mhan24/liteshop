@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { rateLimitCounters } from "@/db/schema";
-import { consume, resetRateBuckets } from "./rate-limit";
+import { _flushRateLimits, consume, resetRateBuckets } from "./rate-limit";
 
 /**
  * 限流的持久化保证：
@@ -19,8 +19,12 @@ beforeEach(() => {
   resetRateBuckets();
 });
 
-/** 模拟进程重启：内存状态清空，只剩 DB */
+/**
+ * 模拟进程重启：内存状态清空，只剩 DB。
+ * 先强制把缓冲的计数落库（生产中按 1s 间隔批量写入，或在触顶/新窗口时立即写）。
+ */
 function simulateRestart(): void {
+  _flushRateLimits();
   resetRateBuckets();
 }
 
@@ -28,6 +32,7 @@ describe("限流计数持久化（230be）", () => {
   it("计数会落库", () => {
     consume("persist:a", RULE);
     consume("persist:a", RULE);
+    _flushRateLimits();
     const row = db
       .select()
       .from(rateLimitCounters)

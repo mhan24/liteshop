@@ -42,19 +42,51 @@ function loadFromDb(key: string, now: number): { count: number; resetAt: number 
   }
 }
 
-/** 同步计数到 DB；失败不影响内存计数（可用性优先） */
-function persistToDb(key: string, count: number, resetAt: number): void {
-  try {
-    db.insert(rateLimitCounters)
-      .values({ bucketKey: key, count, resetAt: new Date(resetAt), updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: rateLimitCounters.bucketKey,
-        set: { count, resetAt: new Date(resetAt), updatedAt: new Date() },
-      })
-      .run();
-  } catch {
-    // 忽略：内存计数仍在生效
+/**
+ * 脏键缓冲：把 DB 写入**合并**成周期性批量落库。
+ *
+ * 若每次 consume 都直接写库，限流本身就变成写放大（高基数流量下每请求一次
+ * INSERT/UPSERT），实测会让容量测试从毫秒级退化到超时。
+ * 现改为：只把键标记为脏，最多每 FLUSH_INTERVAL_MS 合并写一次。
+ * 代价是「刚发生、尚未落库」的一小段时间内若进程崩溃，该窗口计数会丢失
+ * ——但窗口本身很短（分钟级），且内存计数在本进程内始终有效，
+ * 因此是可接受的折中：跨重启/多实例一致性的目标仍然达成。
+ */
+const dirty = new Map<string, { count: number; resetAt: number }>();
+const FLUSH_INTERVAL_MS = 1_000;
+let lastFlushAt = 0;
+
+/** 把待写计数落库（可批量）；失败不影响内存计数（可用性优先） */
+function flushToDb(force = false): void {
+  const now = Date.now();
+  if (!force && now - lastFlushAt < FLUSH_INTERVAL_MS) return;
+  if (dirty.size === 0) {
+    lastFlushAt = now;
+    return;
   }
+  lastFlushAt = now;
+  try {
+    db.transaction((tx) => {
+      for (const [key, v] of dirty) {
+        tx.insert(rateLimitCounters)
+          .values({ bucketKey: key, count: v.count, resetAt: new Date(v.resetAt), updatedAt: new Date() })
+          .onConflictDoUpdate({
+            target: rateLimitCounters.bucketKey,
+            set: { count: v.count, resetAt: new Date(v.resetAt), updatedAt: new Date() },
+          })
+          .run();
+      }
+    });
+    dirty.clear();
+  } catch {
+    // 失败则保留脏数据，下个周期重试；内存计数始终有效
+  }
+}
+
+/** 标记为待落库（合并写） */
+function persistToDb(key: string, count: number, resetAt: number): void {
+  dirty.set(key, { count, resetAt });
+  flushToDb(false);
 }
 
 /** 清理 DB 中已过期的记录 */
@@ -137,12 +169,18 @@ export function consume(key: string, rule: RateLimitRule): RateLimitResult {
   if (!rec || rec.resetAt <= now) {
     const fresh = { count: 1, resetAt: now + rule.windowMs };
     buckets.set(key, fresh);
+    // 新窗口只入脏缓冲（每秒批量落库）。这里刻意不强制 flush：
+    // 高基数流量下每个新键都开一个写事务会把限流变成写放大。
+    // 代价是崩溃时最多丢失 1 秒内的新键计数 —— 可接受（窗口为分钟级，
+    // 且同一键的后续请求会再次触达并写回）。
     persistToDb(key, fresh.count, fresh.resetAt);
     return { ok: true };
   }
   if (rec.count >= rule.max) {
-    // 回写一次，避免内存与 DB 漂移
+    // 达到上限：强制落库，保证「已触发限制」这一事实跨重启不丢
     buckets.set(key, rec);
+    persistToDb(key, rec.count, rec.resetAt);
+    flushToDb(true);
     return {
       ok: false,
       retryAfterSeconds: Math.ceil((rec.resetAt - now) / 1000),
@@ -175,9 +213,16 @@ export function _rateBucketSize(): number {
   return buckets.size;
 }
 
+/** 供测试：强制把待写计数落库 */
+export function _flushRateLimits(): void {
+  flushToDb(true);
+}
+
 export function resetRateBuckets(): void {
   buckets.clear();
+  dirty.clear();
   lastSweepAt = 0;
+  lastFlushAt = 0;
 }
 
 /**

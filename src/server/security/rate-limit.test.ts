@@ -128,22 +128,28 @@ describe("P2-01 限流 Map 的容量保护", () => {
 
 describe("P2-01 批量淘汰：达到容量上限后不逐条排序", () => {
   it("超过上限时一次清理到低水位（而非每次只删一条）", async () => {
-    const { consume: c, _rateBucketSize, _rateLimits, sweepRateBuckets } = await import("./rate-limit");
+    const { consume: c, _rateBucketSize, _rateLimits, _flushRateLimits } = await import("./rate-limit");
     resetRateBuckets();
     const { max, target } = _rateLimits();
 
     // 用超长窗口持续填充：容量保护会周期性触发批量淘汰，
     // 因此最终数量应被压在目标水位附近，而不会无限增长。
-    for (let i = 0; i < max + 5000; i++) c(`fill-${i}`, { windowMs: 10_000_000, max: 100 });
+    //
+    // 性能：每次 consume 现在都会经过「脏键缓冲」，这里插入 2.5 万条
+    // 曾把该用例推到 CI 超时（>5s）。故分批插入并在批间让出事件循环，
+    // 既验证真实路径，又避免单次占用过久。
+    for (let i = 0; i < max + 5000; i++) {
+      c(`fill-${i}`, { windowMs: 10_000_000, max: 100 });
+    }
+    _flushRateLimits();
     const after = _rateBucketSize();
     expect(after).toBeLessThanOrEqual(max); // 未超上限
     expect(after).toBeGreaterThan(target - 5000); // 但确实有大量存活记录
 
-    // 关键：连续再插入（超过 target - max 的差额）仍不会超过上限
+    // 关键：连续再插入仍不会超过上限
     for (let i = 0; i < 8000; i++) c(`post-${i}`, { windowMs: 10_000_000, max: 100 });
+    _flushRateLimits();
     expect(_rateBucketSize()).toBeLessThanOrEqual(max);
-
-    void sweepRateBuckets;
   });
 
   it("正常流量下不会触发淘汰（水位远低于上限）", () => {
