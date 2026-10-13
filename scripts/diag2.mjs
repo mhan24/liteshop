@@ -140,6 +140,14 @@ if (process.argv[4] === "manual-render") {
   proc.kill();
   process.exit(0);
 }
+if (process.argv[4] === "observe-pending") {
+  const txt = await send("Runtime.evaluate", {
+    expression: `document.body.innerText.slice(0, 700)`,
+  }, sessionId).then(r => r.result.value);
+  console.log("PENDING TEXT:", txt);
+  proc.kill();
+  process.exit(0);
+}
 if (process.argv[4] === "observe-buy") {
   // 等降级生效（15s 预算）→ 填邮箱选交易所 → 提交 → 应跳转待支付页
   await new Promise((r) => setTimeout(r, 17000));

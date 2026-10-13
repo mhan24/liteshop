@@ -3,6 +3,7 @@ import { getOrderStatusView } from "@/server/order/query-order";
 import { getCopy } from "@/server/copy";
 import { getSupportUrl, getTurnstileClientConfig } from "@/server/settings";
 import { OrderStatusPoll } from "@/components/shop/order-status-poll";
+import { OrderAccessGate } from "@/components/shop/order-access-gate";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "待支付订单" };
@@ -36,6 +37,14 @@ export default async function PayPendingPage({
         turnstile={turnstile}
         payCTA
         support={support}
+        accessGate={
+          view ? undefined : (
+            <OrderAccessGate
+              orderNo={orderNo ?? ""}
+              turnstile={turnstile.enabled ? turnstile : undefined}
+            />
+          )
+        }
         initial={
           view
             ? {

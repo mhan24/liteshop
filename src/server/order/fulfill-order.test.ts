@@ -582,8 +582,9 @@ describe("孤儿占用卡密释放（后台自救入口）", () => {
   });
 
   it("属主订单已 completed：拒绝释放（属于交付流程）", async () => {
-    const p = seedAutoProduct(["DONE-1", "DONE-2"]);
-    const r = await createOrder({ email: "buyer@test.dev", quantity: 1, slug: p.slug });
+    const seed: { id: number; slug: string } = seedAutoProduct(["DONE-1", "DONE-2"]);
+    void seed.id;
+    const r = await createOrder({ email: "buyer@test.dev", quantity: 1, slug: seed.slug });
     handlePaymentNotify("mock", paySuccess(r.orderNo));
     const card = db.select().from(cards).where(eq(cards.status, "sold")).get()!;
     // 卖出的卡不可"释放"（只能 reserved），防御性断言
@@ -592,7 +593,7 @@ describe("孤儿占用卡密释放（后台自救入口）", () => {
   });
 
   it("非 reserved 状态拒绝", async () => {
-    const p = seedAutoProduct(["AV-1"]);
+    seedAutoProduct(["AV-1"]);
     const card = db.select().from(cards).where(eq(cards.content, "AV-1")).get()!;
     const res = releaseReservedCard(card.id);
     expect(res.ok).toBe(false);

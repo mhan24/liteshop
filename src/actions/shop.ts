@@ -122,6 +122,50 @@ export async function lookupOrderAction(
   return { order };
 }
 
+/* ===== 待支付页就地验证（解锁访问凭据）===== */
+
+export interface VerifyAccessState {
+  error?: string;
+}
+
+/**
+ * 待支付页的就地访问验证：订单号（URL 携带）+ 邮箱双因子通过后，
+ * 签发访问凭据并重定向回待支付页——买家无需再绕道查单页。
+ */
+export async function verifyOrderAccessAction(
+  _prev: VerifyAccessState | null,
+  formData: FormData
+): Promise<VerifyAccessState> {
+  const orderNo = String(formData.get("orderNo") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
+
+  if (isTurnstileEnforced()) {
+    const token = String(formData.get("cfToken") ?? "");
+    if (!(token.trim() === "" && isTurnstileFallbackEnabled())) {
+      const verify = await verifyTurnstileToken(token, getTurnstileSecretKey());
+      if (!verify.ok) {
+        return { error: "人机验证未通过，请重新完成验证后再试" };
+      }
+    }
+  }
+
+  if (!orderNo || !email) {
+    return { error: "请填写下单邮箱" };
+  }
+  const ip = await clientIpFromHeaders();
+  const lim = checkLookupRateLimit(ip);
+  if (!lim.ok) return { error: lim.message ?? "操作过于频繁，请稍后再试" };
+
+  const order = lookupOrder(orderNo, email);
+  if (!order) {
+    const miss = checkLookupMissRateLimit(ip);
+    if (!miss.ok) return { error: miss.message ?? "尝试次数过多，请稍后再试" };
+    return { error: "邮箱与订单不匹配，请核对下单时填写的邮箱" };
+  }
+  await grantOrderAccess(order.orderNo);
+  redirect(`/pay/pending?order_no=${encodeURIComponent(order.orderNo)}`);
+}
+
 /* ===== 买家取消订单（仅未支付）===== */
 
 export interface CancelOrderState {

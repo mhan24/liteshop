@@ -263,3 +263,9 @@ README 内容：Docker 部署、bepusdt 配置说明（Token 获取路径：bepu
 - 新增：卡密页 reserved 行「释放」按钮 → `releaseReservedCard`（service 层）：仅允许释放孤儿占用（无属主）或属主已终态（closed/expired）的卡；属主仍在 pending/paid/delivering 拒绝（提示先关单，正常流程会自动释放）；completed 拒绝（属交付流程）。操作入审计日志。
 - 生产脏数据已修复：VOX024G9GLJT5 已释放回可用池（同等 SQL 语义 + 审计）。
 - 超时清扫（惰性 + /api/cron/expire）此前已覆盖「pending 永久占卡」的主路径，本入口仅针对历史脏数据/外部改动兜底。
+
+### 2026-10-13 · v1.8：待支付页就地验证（消除「交易所转账无处付款」死角）
+
+- 用户报告「使用交易所转账不跳转收银台」：下单跳转本身正常；死角在**换浏览器/丢 cookie 打开待支付链接**时，页面只有「请前往订单查询」——而查单页验证码在买家网络同样不可用，形成死循环，买家看不到任何付款方式。
+- 新增待支付页**就地访问验证**（OrderAccessGate）：输入下单邮箱（订单号已在 URL，双因子不变）→ verifyOrderAccessAction 校验 + 限流 + 签发访问凭据 → redirect 回待支付页看转账指引。Turnstile 与降级逻辑与查单一致。
+- 无权限提示文案同步更新；渐进增强（redirect）路径同样可用。

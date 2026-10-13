@@ -55,6 +55,7 @@ export function OrderStatusPoll({
   payCTA = false,
   turnstile,
   support,
+  accessGate,
 }: {
   orderNo: string;
   initial: OrderStatusPayload | null;
@@ -62,6 +63,8 @@ export function OrderStatusPoll({
   payCTA?: boolean;
   /** 后台启用 Turnstile 时由服务端下发（重新购买表单需要渲染验证码） */
   turnstile?: { enabled: boolean; siteKey: string };
+  /** 无访问凭据时就地验证入口（待支付页传入） */
+  accessGate?: React.ReactNode;
   /** 客服入口（由服务端读取设置后下发） */
   support?: SupportConfig;
 }) {
@@ -101,10 +104,19 @@ export function OrderStatusPoll({
 
   if (notFound) {
     return (
-      <div className="rounded-xl border border-border bg-card p-10 text-center">
-        <p className="font-serif text-xl">请验证订单信息</p>
-        <p className="mt-2 text-sm text-muted-foreground">请前往订单查询，凭订单号和邮箱验证后继续。</p>
-        <a href="/orders" className="mt-4 inline-block underline underline-offset-4">前往订单查询</a>
+      <div className="space-y-4">
+        <div className="rounded-xl border border-border bg-card p-10 text-center">
+          <p className="font-serif text-xl">请验证订单信息</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {accessGate
+              ? "输入下单邮箱完成验证，即可在本页继续。"
+              : "请前往订单查询，凭订单号和邮箱验证后继续。"}
+          </p>
+          {accessGate ? null : (
+            <a href="/orders" className="mt-4 inline-block underline underline-offset-4">前往订单查询</a>
+          )}
+        </div>
+        {accessGate}
       </div>
     );
   }
