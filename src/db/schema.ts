@@ -210,6 +210,34 @@ export const settings = sqliteTable("settings", {
   updatedAt: tsUpdated(),
 });
 
+/**
+ * 限流计数器（持久化）。
+ *
+ * 背景：限流与登录锁定原先只存于进程内存，导致
+ *   1) 进程重启后计数归零 —— 攻击者若能触发重启即可绕过全部限制；
+ *   2) 多副本部署时每个实例各算各的，额度随副本数放大。
+ *
+ * 改为落 SQLite（项目本就以 SQLite 为唯一状态源，且写事务已串行化），
+ * 使限流在重启与多实例下保持一致。内存 Map 仍作为前置快速路径，
+ * 避免每个请求都写库；只有命中/需要时才同步落库。
+ *
+ * 键的作用域前缀区分用途（order / lookup / notify / login / orderStatus），
+ * 过期记录由 sweep 定期清理，并有容量上限兜底。
+ */
+export const rateLimitCounters = sqliteTable(
+  "rate_limit_counters",
+  {
+    /** 作用域名 + 标识（IP、邮箱、订单号等）拼接而成 */
+    bucketKey: text("bucket_key").primaryKey(),
+    /** 当前窗口内的计数 */
+    count: integer("count").notNull().default(0),
+    /** 窗口结束时间（毫秒时间戳） */
+    resetAt: integer("reset_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: tsUpdated(),
+  },
+  (t) => [index("rate_limit_reset_idx").on(t.resetAt)]
+);
+
 /** 支付渠道配置：新增渠道加行不改表（PLAN §3） */
 export const paymentConfigs = sqliteTable(
   "payment_configs",

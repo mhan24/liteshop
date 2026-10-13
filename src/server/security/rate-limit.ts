@@ -1,6 +1,6 @@
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db";
-import { orders } from "@/db/schema";
+import { orders, rateLimitCounters } from "@/db/schema";
 
 /**
  * 下单与回调限流。
@@ -14,8 +14,57 @@ import { orders } from "@/db/schema";
  * （可换邮箱），必须叠加「活跃待支付订单总量」这一全局兜底。
  */
 
-/** 内存滑动窗口（单实例部署；与 lib/flash-store 同样的取舍） */
+/**
+ * 内存滑动窗口（**快速路径**）。
+ *
+ * 计数同时持久化到 rate_limit_counters：内存用于避免每个请求都写库，
+ * 落库用于让限流在**进程重启**与**多副本**下保持一致
+ * （否则攻击者可通过重启或把请求分散到多个副本来绕过限流）。
+ * 读取时先看内存，缺失则回源 DB；写入时两者同步。
+ */
 const buckets = new Map<string, { count: number; resetAt: number }>();
+
+/** 从 DB 读取计数（内存缺失时的回源） */
+function loadFromDb(key: string, now: number): { count: number; resetAt: number } | null {
+  try {
+    const row = db
+      .select({ count: rateLimitCounters.count, resetAt: rateLimitCounters.resetAt })
+      .from(rateLimitCounters)
+      .where(eq(rateLimitCounters.bucketKey, key))
+      .get();
+    if (!row) return null;
+    const resetAtMs = row.resetAt.getTime();
+    if (resetAtMs <= now) return null; // 窗口已过期
+    return { count: row.count, resetAt: resetAtMs };
+  } catch {
+    // DB 不可用时降级为「仅内存」：限流变弱但不会因存储故障而拒绝正常流量
+    return null;
+  }
+}
+
+/** 同步计数到 DB；失败不影响内存计数（可用性优先） */
+function persistToDb(key: string, count: number, resetAt: number): void {
+  try {
+    db.insert(rateLimitCounters)
+      .values({ bucketKey: key, count, resetAt: new Date(resetAt), updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: rateLimitCounters.bucketKey,
+        set: { count, resetAt: new Date(resetAt), updatedAt: new Date() },
+      })
+      .run();
+  } catch {
+    // 忽略：内存计数仍在生效
+  }
+}
+
+/** 清理 DB 中已过期的记录 */
+export function sweepRateLimitRows(now = Date.now()): number {
+  try {
+    return db.delete(rateLimitCounters).where(lte(rateLimitCounters.resetAt, new Date(now))).run().changes;
+  } catch {
+    return 0;
+  }
+}
 
 export interface RateLimitRule {
   /** 窗口时长（毫秒） */
@@ -79,13 +128,21 @@ export function consume(key: string, rule: RateLimitRule): RateLimitResult {
     for (let i = 0; i < buckets.size - EVICT_TARGET; i++) buckets.delete(sorted[i][0]);
   }
 
-  const rec = buckets.get(key);
+  // 内存优先，缺失则回源 DB（重启后仍能恢复计数）
+  let rec = buckets.get(key);
+  if (!rec || rec.resetAt <= now) {
+    rec = loadFromDb(key, now) ?? undefined;
+  }
 
   if (!rec || rec.resetAt <= now) {
-    buckets.set(key, { count: 1, resetAt: now + rule.windowMs });
+    const fresh = { count: 1, resetAt: now + rule.windowMs };
+    buckets.set(key, fresh);
+    persistToDb(key, fresh.count, fresh.resetAt);
     return { ok: true };
   }
   if (rec.count >= rule.max) {
+    // 回写一次，避免内存与 DB 漂移
+    buckets.set(key, rec);
     return {
       ok: false,
       retryAfterSeconds: Math.ceil((rec.resetAt - now) / 1000),
@@ -93,6 +150,8 @@ export function consume(key: string, rule: RateLimitRule): RateLimitResult {
     };
   }
   rec.count += 1;
+  buckets.set(key, rec);
+  persistToDb(key, rec.count, rec.resetAt);
   return { ok: true };
 }
 

@@ -1,9 +1,10 @@
+import { eq } from "drizzle-orm";
 import { envConfig } from "@/lib/env";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { createSessionToken, SESSION_TTL_SECONDS, verifySessionToken } from "@/lib/session";
 import { getSetting, setSetting } from "@/server/settings";
 import { db } from "@/db";
-import { settings } from "@/db/schema";
+import { rateLimitCounters, settings } from "@/db/schema";
 
 /** 管理员登录/登出/凭据修改（service 层；页面/Action 不得直连 DB） */
 
@@ -80,13 +81,65 @@ function enforceCapacity(): void {
   for (let i = 0; i < toRemove; i++) attempts.delete(sorted[i][0]);
 }
 
+/** 锁定计数持久化：使锁定在进程重启与多副本下保持一致 */
+function loadAttempt(key: string, now: number): AttemptRecord | null {
+  try {
+    const row = db
+      .select({ count: rateLimitCounters.count, resetAt: rateLimitCounters.resetAt })
+      .from(rateLimitCounters)
+      .where(eq(rateLimitCounters.bucketKey, `login:${key}`))
+      .get();
+    if (!row) return null;
+    if (row.resetAt.getTime() <= now) return null;
+    // 持久化只存 count 与窗口结束时间；lockedUntil 即窗口结束时间
+    return { count: row.count, lockedUntil: row.resetAt.getTime(), updatedAt: row.resetAt.getTime() };
+  } catch {
+    return null;
+  }
+}
+
+function persistAttempt(key: string, rec: AttemptRecord): void {
+  try {
+    db.insert(rateLimitCounters)
+      .values({
+        bucketKey: `login:${key}`,
+        count: rec.count,
+        resetAt: new Date(Math.max(rec.lockedUntil, rec.updatedAt + LOCKOUT_MS)),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: rateLimitCounters.bucketKey,
+        set: {
+          count: rec.count,
+          resetAt: new Date(Math.max(rec.lockedUntil, rec.updatedAt + LOCKOUT_MS)),
+          updatedAt: new Date(),
+        },
+      })
+      .run();
+  } catch {
+    // 忽略：内存计数仍生效
+  }
+}
+
+/** 取记录：内存优先，缺失回源 DB（重启后仍能恢复锁定状态） */
+function getAttempt(key: string, now: number): AttemptRecord | undefined {
+  const mem = attempts.get(key);
+  if (mem && mem.lockedUntil > now) return mem;
+  const persisted = loadAttempt(key, now);
+  if (persisted) {
+    attempts.set(key, persisted);
+    return persisted;
+  }
+  return mem;
+}
+
 /** 剩余锁定秒数；0 = 未锁定（取用户名维度与 IP 维度中较长者） */
 export function lockedForSeconds(ip: string, username: string): number {
   const now = Date.now();
   sweepExpired(now);
-  const rec = attempts.get(attemptKey(ip, username));
+  const rec = getAttempt(attemptKey(ip, username), now);
   const userLock = rec && rec.lockedUntil > now ? rec.lockedUntil : 0;
-  const ipRec = attempts.get(`ip:${ip}`);
+  const ipRec = getAttempt(`ip:${ip}`, now);
   const ipLock = ipRec && ipRec.lockedUntil > now ? ipRec.lockedUntil : 0;
   const until = Math.max(userLock, ipLock);
   return until > now ? Math.ceil((until - now) / 1000) : 0;
@@ -98,7 +151,8 @@ export function recordFailure(ip: string, username: string): void {
 
   // 维度 1：IP + 用户名
   const key = attemptKey(ip, username);
-  const rec = attempts.get(key) ?? { count: 0, lockedUntil: 0, updatedAt: now };
+  const prev = getAttempt(key, now);
+  const rec: AttemptRecord = prev ?? { count: 0, lockedUntil: 0, updatedAt: now };
   rec.count += 1;
   rec.updatedAt = now;
   if (rec.count >= MAX_FAILURES) {
@@ -106,6 +160,7 @@ export function recordFailure(ip: string, username: string): void {
     rec.count = 0;
   }
   attempts.set(key, rec);
+  persistAttempt(key, rec);
 
   // 维度 2：仅 IP（跨用户名累计，防轮换绕过）
   const ipKey = `ip:${ip}`;
@@ -117,13 +172,21 @@ export function recordFailure(ip: string, username: string): void {
     ipRec.count = 0;
   }
   attempts.set(ipKey, ipRec);
+  persistAttempt(ipKey, ipRec);
 
   enforceCapacity();
 }
 
 function clearFailures(ip: string, username: string): void {
-  attempts.delete(attemptKey(ip, username));
-  attempts.delete(`ip:${ip}`);
+  const keys = [attemptKey(ip, username), `ip:${ip}`];
+  for (const k of keys) attempts.delete(k);
+  try {
+    for (const k of keys) {
+      db.delete(rateLimitCounters).where(eq(rateLimitCounters.bucketKey, `login:${k}`)).run();
+    }
+  } catch {
+    // 忽略
+  }
 }
 
 /** 仅供测试：读取当前记录数 */
