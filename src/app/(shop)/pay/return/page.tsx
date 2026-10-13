@@ -1,5 +1,7 @@
+import { hasOrderAccess } from "@/server/order/access";
 import { getOrderStatusView } from "@/server/order/query-order";
-import { getTurnstileClientConfig } from "@/server/settings";
+import { getSupportUrl, getTurnstileClientConfig } from "@/server/settings";
+import { getCopy } from "@/server/copy";
 import { OrderStatusPoll } from "@/components/shop/order-status-poll";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +13,12 @@ export default async function PayReturnPage({
   searchParams: Promise<{ order_no?: string }>;
 }) {
   const { order_no: orderNo } = await searchParams;
-  const order = orderNo ? getOrderStatusView(orderNo) : null;
+  const order = orderNo && await hasOrderAccess(orderNo) ? getOrderStatusView(orderNo) : null;
   // 本页同样启用 payCTA（可重新购买），因此必须与待支付页保持一致：
   // 下发人机验证配置 + 服务端计算的重购资格。
   // 否则开启 Turnstile 后此处重购会因缺少 cfToken 被服务端守卫拒绝。
   const turnstile = getTurnstileClientConfig();
+  const support = { url: getSupportUrl(), label: getCopy("support_label") };
 
   return (
     <main
@@ -29,6 +32,7 @@ export default async function PayReturnPage({
         orderNo={orderNo ?? ""}
         payCTA
         turnstile={turnstile}
+        support={support}
         initial={order ? {
           orderNo: order.orderNo,
           status: order.status,

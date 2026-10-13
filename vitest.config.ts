@@ -19,6 +19,7 @@ export default defineConfig({
     env: {
       NODE_ENV: "test",
       PAYMENT_DRIVER: "mock",
+      MOCK_PAYMENT_TOKEN: "vitest-only-mock-token",
       // 每次运行全新数据目录，避免历史迁移残留（目录由系统临时目录回收）
       DATA_DIR: path.join(os.tmpdir(), `liteshop-vitest-${process.pid}-${Date.now()}`),
       AUTH_SECRET: "vitest-secret",

@@ -10,7 +10,7 @@ import {
   sendTestEmailAction,
 } from "@/actions/admin";
 import { getAdminCredentials } from "@/server/auth";
-import { DEFAULT_REPO_URL } from "@/server/settings";
+import { DEFAULT_REPO_URL, DEFAULT_SUPPORT_URL } from "@/server/settings";
 import { getAdminPath } from "@/lib/admin-path";
 import { COPY_FIELDS, getCopyAll } from "@/server/copy";
 import { takeFlash } from "@/lib/flash-store";
@@ -90,6 +90,19 @@ export default async function AdminSettingsPage({
               <p className="text-xs text-muted-foreground">
                 页脚「Powered by liteshop」将链接到此地址（新窗口打开）。
                 留空则不显示链接；仅接受 http/https 地址。
+              </p>
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="s-support">联系客服地址</Label>
+              <Input
+                id="s-support"
+                name="supportUrl"
+                defaultValue={settings[SETTING_KEYS.supportUrl] ?? DEFAULT_SUPPORT_URL}
+                placeholder={DEFAULT_SUPPORT_URL}
+              />
+              <p className="text-xs text-muted-foreground">
+                前台页脚与订单相关页面的「联系客服」将指向此地址（新窗口打开）。
+                可填 Telegram、工单或邮箱链接；留空则不显示入口；仅接受 http/https 地址。
               </p>
             </div>
             <div className="space-y-1.5">

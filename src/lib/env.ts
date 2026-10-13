@@ -18,13 +18,11 @@ export const envConfig = {
   dbPath: env("DATABASE_PATH"), // 未设置则用 dataDir/liteshop.db
 
   /** 会话签名密钥；生产必须显式提供（openssl rand -hex 32） */
-  authSecret: env("AUTH_SECRET") ?? (nodeEnv === "production" ? undefined : "dev-only-insecure-secret"),
+  authSecret: env("AUTH_SECRET"),
 
   adminUser: env("ADMIN_USER") ?? "admin",
   /** scrypt 格式：scrypt$N$r$p$salt$hash（scripts/hash-password 生成） */
   adminPasswordHash: env("ADMIN_PASSWORD_HASH"),
-  /** 开发兜底：未设置 hash 时允许的明文口令（仅 NODE_ENV=development） */
-  adminPasswordDev: env("ADMIN_PASSWORD") ?? "admin123",
 
   /** mock | bepusdt | auto（读 payment_configs 中启用的渠道） */
   paymentDriver: env("PAYMENT_DRIVER") ?? "auto",
@@ -46,16 +44,17 @@ export const envConfig = {
 /**
  * 生产环境安全自检（启动即失败，避免"配置错误静默上线"）。
  *
- * 背景：mock 渠道的签名令牌有公开默认值，若在生产可达，任何人可伪造
+ * 背景：mock 渠道仅用于本地测试，若在生产可达，持有测试令牌者可伪造
  * "支付成功"回调白嫖发货（历史上确实存在该漏洞）。虽然渠道门控已修复，
  * 这里再做一道纵深防御：生产 + mock 驱动 = 明确拒绝启动。
  */
 export function assertProductionSafety(): void {
+  if (!envConfig.authSecret) throw new Error("必须显式设置 AUTH_SECRET（openssl rand -hex 32）");
   if (!envConfig.isProd) return;
 
   if (envConfig.paymentDriver === "mock") {
     throw new Error(
-      "生产环境禁止 PAYMENT_DRIVER=mock：mock 渠道令牌为公开默认值，会导致伪造支付回调。请改为 auto 或 bepusdt。"
+      "生产环境禁止 PAYMENT_DRIVER=mock：mock 渠道仅供测试，会导致伪造支付回调。请改为 auto 或 bepusdt。"
     );
   }
 

@@ -1,3 +1,5 @@
+import { normalizeHttpUrl } from "@/lib/http-url";
+
 /**
  * 收银台跳转：必须在新窗口打开并夺取焦点。
  *
@@ -7,7 +9,7 @@
  */
 
 export function openPaymentWindow(rawUrl: string | null | undefined): void {
-  const url = (rawUrl ?? "").trim();
+  const url = normalizeHttpUrl(rawUrl ?? "", window.location.origin);
   if (!url) return;
 
   const win = window.open(url, "_blank", "noopener,noreferrer");
@@ -28,9 +30,5 @@ export function openPaymentWindow(rawUrl: string | null | undefined): void {
 
 /** 使新窗口 URL 绝对化（mock 收银台为站内相对路径） */
 export function toAbsoluteUrl(url: string): string {
-  try {
-    return new URL(url, window.location.origin).toString();
-  } catch {
-    return url;
-  }
+  return normalizeHttpUrl(url, window.location.origin) ?? "";
 }

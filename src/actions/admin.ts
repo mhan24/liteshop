@@ -1,5 +1,8 @@
 "use server";
 
+import { envConfig } from "@/lib/env";
+import { secureCookie } from "@/lib/cookie-policy";
+import { normalizeHttpUrl } from "@/lib/http-url";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -45,7 +48,7 @@ import {
   acceptAnomalyForManualDelivery,
   resolveAnomalyAs,
 } from "@/server/admin/anomalies";
-import { clampBepusdtTimeout } from "@/server/payment/bepusdt";
+import { clampBepusdtTimeout, normalizeBepusdtApiBase } from "@/server/payment/bepusdt";
 import { COPY_KEYS, setCopy } from "@/server/copy";
 import { SUPPORTED_CURRENCIES } from "@/lib/money";
 import { STOCK_UNLIMITED } from "@/lib/stock";
@@ -106,7 +109,7 @@ export async function loginAction(_prev: { error?: string } | null, formData: Fo
     return { error: result.message };
   }
   const jar = await cookies();
-  const secure = h.get("x-forwarded-proto") === "https";
+  const secure = secureCookie(envConfig.isProd, h.get("x-forwarded-proto"));
   jar.set(ADMIN_COOKIE, result.token, {
     httpOnly: true,
     sameSite: "lax",
@@ -114,7 +117,7 @@ export async function loginAction(_prev: { error?: string } | null, formData: Fo
     path: "/",
     maxAge: result.maxAge ?? SESSION_TTL_SECONDS,
   });
-  logAdmin("login", username, "管理员登录", ip);
+  logAdmin("login", username.trim(), "管理员登录", ip);
   const next = String(formData.get("next") ?? "");
   if (isSafeInternalPath(next)) redirect(next);
   redirect(await getAdminBase());
@@ -369,6 +372,9 @@ export async function saveSiteSettingsAction(formData: FormData) {
   await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const siteName = String(formData.get("siteName") ?? "").trim().slice(0, 60);
   const siteUrl = String(formData.get("siteUrl") ?? "").trim().slice(0, 200);
+  if (siteUrl && !normalizeHttpUrl(siteUrl)) {
+    await back("/admin/settings", "站点地址需为不含凭据的有效 http/https 地址", false);
+  }
   const threshold = Math.max(0, Math.trunc(Number(formData.get("threshold") ?? 5)) || 0);
   const currency = String(formData.get("currency") ?? "").trim().toUpperCase();
   if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
@@ -380,10 +386,16 @@ export async function saveSiteSettingsAction(formData: FormData) {
   if (repoUrl !== "" && !isSafeHttpUrl(repoUrl)) {
     await back("/admin/settings", "开源仓库地址需为 http/https 开头的完整地址", false);
   }
+  // 联系客服地址同样会输出为 <a href>，必须校验协议
+  const supportUrl = String(formData.get("supportUrl") ?? "").trim();
+  if (supportUrl !== "" && !isSafeHttpUrl(supportUrl)) {
+    await back("/admin/settings", "联系客服地址需为 http/https 开头的完整地址", false);
+  }
 
   setSetting(SETTING_KEYS.siteName, siteName);
   setSetting(SETTING_KEYS.siteUrl, siteUrl.replace(/\/+$/, ""));
   setSetting(SETTING_KEYS.repoUrl, repoUrl);
+  setSetting(SETTING_KEYS.supportUrl, supportUrl);
   setSetting(SETTING_KEYS.cardLowStockThreshold, String(threshold));
   setSetting(SETTING_KEYS.currency, currency);
   logAdmin("settings.site", "-", JSON.stringify({ siteName, siteUrl, threshold, currency }), await clientIp(), session.u);
@@ -399,6 +411,10 @@ export async function savePaymentConfigAction(formData: FormData) {
 
   const enabled = String(formData.get("enabled") ?? "") === "on";
   const apiBase = String(formData.get("apiBase") ?? "").trim();
+  const safeApiBase = normalizeBepusdtApiBase(apiBase);
+  if (apiBase && !safeApiBase) {
+    await back("/admin/settings", "支付 API 地址不合法或不在服务器允许范围内", false);
+  }
   const submittedToken = String(formData.get("token") ?? "").trim();
   // 表单不回显令牌 → 留空表示保持原值；__CLEAR__ 表示清除
   const existingToken =
@@ -421,7 +437,7 @@ export async function savePaymentConfigAction(formData: FormData) {
   }
 
   const configJson: Record<string, unknown> = {
-    api_base: apiBase,
+    api_base: safeApiBase ?? "",
     token,
     // 与网关 CalcTradeExpiredAt 的 [180, 3600] 边界对齐（越界网关会静默回落）
     timeout_seconds: clampBepusdtTimeout(Number(formData.get("timeout") ?? 900)),

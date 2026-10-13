@@ -82,3 +82,60 @@ describe("重购按钮的显示条件", () => {
     }
   });
 });
+
+describe("客服入口在订单状态页的渲染", () => {
+  const SUPPORT = { url: "https://t.me/setup0de?direct", label: "联系客服" };
+  const renderWith = (
+    props: Partial<OrderStatusPayload>,
+    support?: { url: string | null; label: string }
+  ) =>
+    renderToStaticMarkup(
+      <OrderStatusPoll
+        orderNo="LS20261012ABCDEFG1"
+        initial={{ ...base, ...props }}
+        payCTA
+        support={support}
+      />
+    );
+
+  it("订单过期时提示可点击的客服入口", () => {
+    const html = renderWith({ status: "expired", canRepurchase: true }, SUPPORT);
+    expect(html).toContain("联系客服");
+    expect(html).toContain('href="https://t.me/setup0de?direct"');
+    expect(html).toContain("如已付款请");
+  });
+
+  it("待对账（reconciling）时提示客服核对", () => {
+    const html = renderWith({ status: "reconciling", canRepurchase: false }, SUPPORT);
+    expect(html).toContain('href="https://t.me/setup0de?direct"');
+    expect(html).toContain("请勿重复付款");
+  });
+
+  it("订单关闭时提示客服核实", () => {
+    const html = renderWith({ status: "closed", canRepurchase: true }, SUPPORT);
+    expect(html).toContain('href="https://t.me/setup0de?direct"');
+  });
+
+  it("未配置客服地址时不渲染链接（仅保留文字）", () => {
+    const html = renderWith({ status: "expired", canRepurchase: true }, undefined);
+    expect(html).not.toContain("t.me/setup0de");
+    // 提示文案仍在，只是没有可点击入口
+    expect(html).toContain("如已付款请");
+  });
+
+  it("客服地址留空时不渲染链接", () => {
+    const html = renderWith(
+      { status: "expired", canRepurchase: true },
+      { url: null, label: "联系客服" }
+    );
+    expect(html).not.toContain('target="_blank"');
+  });
+
+  it("自定义客服文案生效", () => {
+    const html = renderWith({ status: "expired", canRepurchase: true }, {
+      url: "https://t.me/x",
+      label: "点此找人工",
+    });
+    expect(html).toContain("点此找人工");
+  });
+});

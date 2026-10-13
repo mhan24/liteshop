@@ -16,15 +16,15 @@ import type {
  */
 
 /**
- * mock 令牌：优先取 MOCK_PAYMENT_TOKEN，否则回退开发用默认值。
- * 注意：默认值是公开常量、不构成机密，因此 mock 渠道的可用性由
+ * mock 令牌必须显式配置，源码不包含默认令牌。mock 渠道的可用性由
  * PAYMENT_DRIVER=mock 门控（见 payment/index.ts isProviderEnabled），
  * 生产环境（driver=auto/bepusdt）下该渠道及其回调入口一律不可达。
  */
-const DEFAULT_TOKEN = "mock-token";
 
 function token(): string {
-  return process.env.MOCK_PAYMENT_TOKEN || DEFAULT_TOKEN;
+  const value = process.env.MOCK_PAYMENT_TOKEN;
+  if (!value) throw new Error("mock 支付必须显式设置 MOCK_PAYMENT_TOKEN");
+  return value;
 }
 
 export function mockProvider(): PaymentProvider {
@@ -32,6 +32,7 @@ export function mockProvider(): PaymentProvider {
     name: "mock",
 
     async createPayment(input: CreatePaymentInput): Promise<CreatedPayment> {
+      token(); // 缺失测试令牌时先拒绝，不创建不可支付的订单快照。
       const tradeId = `mock_${randomBytes(8).toString("hex")}`;
       const timeout = input.timeoutSeconds ?? 600;
       return {
@@ -48,6 +49,7 @@ export function mockProvider(): PaymentProvider {
       const parsed = parseJsonObject(rawBody);
       if (!parsed.ok) return { ok: false, error: parsed.error };
       const body = parsed.value;
+      if (!process.env.MOCK_PAYMENT_TOKEN) return { ok: false, error: "mock 支付令牌未配置" };
       if (!epusdtVerify(body, token())) {
         return { ok: false, error: "签名校验失败" };
       }

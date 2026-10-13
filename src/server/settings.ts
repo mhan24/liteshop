@@ -1,3 +1,4 @@
+import { normalizeHttpUrl } from "@/lib/http-url";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { paymentConfigs, settings } from "@/db/schema";
@@ -13,6 +14,8 @@ export const SETTING_KEYS = {
   currency: "currency",
   /** 页脚「Powered by liteshop」指向的开源仓库地址 */
   repoUrl: "repo_url",
+  /** 联系客服地址（Telegram / 工单 / 邮箱等） */
+  supportUrl: "support_url",
 } as const;
 
 /**
@@ -20,6 +23,12 @@ export const SETTING_KEYS = {
  * 可通过后台「站点设置 → 开源仓库地址」覆盖；留空表示不显示链接。
  */
 export const DEFAULT_REPO_URL = "https://github.com/mhan24/liteshop";
+
+/**
+ * 联系客服的默认地址。
+ * 可通过后台「站点设置 → 联系客服地址」覆盖；留空表示不显示入口。
+ */
+export const DEFAULT_SUPPORT_URL = "https://t.me/setup0de?direct";
 
 export function getAllSettings(): Record<string, string> {
   const rows = db.select().from(settings).all();
@@ -53,7 +62,11 @@ export function getSiteCurrency(): string {
 export function getSiteUrl(): string {
   const fromDb = getSetting(SETTING_KEYS.siteUrl)?.trim();
   const raw = fromDb && fromDb !== "" ? fromDb : envConfig.siteUrl;
-  return raw.replace(/\/+$/, "");
+  const safe = normalizeHttpUrl(raw) ?? normalizeHttpUrl(envConfig.siteUrl) ?? "http://localhost:3000";
+  const url = new URL(safe);
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/+$/, "");
 }
 
 /**
@@ -71,14 +84,24 @@ export function getRepoUrl(): string | null {
   return isSafeHttpUrl(candidate) ? candidate : DEFAULT_REPO_URL;
 }
 
+/**
+ * 联系客服地址。返回 null 表示不渲染入口。
+ *
+ * 语义与 getRepoUrl 一致：未设置(null) → 用默认值；显式留空("") → 不显示；
+ * 非法值 → 回落默认。该值会输出为 <a href>，因此必须严格校验为 http(s)。
+ */
+export function getSupportUrl(): string | null {
+  const raw = getSetting(SETTING_KEYS.supportUrl)?.trim();
+  if (raw === "") return null;
+  const candidate = raw && raw !== "" ? raw : DEFAULT_SUPPORT_URL;
+  return isSafeHttpUrl(candidate) ? candidate : DEFAULT_SUPPORT_URL;
+}
+
 /** 仅接受 http/https 绝对地址（用于任何会输出为链接的设置项） */
 export function isSafeHttpUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
+  // 复用 lib/http-url 的统一实现：除协议外还拒绝内嵌凭据
+  // （http://user:pass@host）与控制字符，比只看 protocol 更严。
+  return normalizeHttpUrl(value) !== null;
 }
 
 /**

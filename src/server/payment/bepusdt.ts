@@ -1,3 +1,4 @@
+import { normalizeHttpUrl } from "@/lib/http-url";
 import { minorUnitsToNumber } from "@/lib/money";
 import { epusdtSign, epusdtVerify, parseJsonObject } from "@/lib/signature";
 import { PaymentCreationError } from "./index";
@@ -58,7 +59,7 @@ export function parseBepusdtConfig(config: Record<string, unknown>): BepusdtConf
   return {
     // 仅接受 http/https：该值最终会拼进 fetch()，放任其它协议（file:、data: 等）
     // 会形成 SSRF/本地文件读取面。后台保存时已校验，这里再做一道纵深防御。
-    apiBase: normalizeApiBase(str(config["api_base"])),
+    apiBase: normalizeBepusdtApiBase(str(config["api_base"])),
     token: str(config["token"]),
     // 越界/缺失一律钳制，避免与网关实际过期时间脱节
     timeoutSeconds: rawTimeout == null ? undefined : clampBepusdtTimeout(rawTimeout),
@@ -66,16 +67,19 @@ export function parseBepusdtConfig(config: Record<string, unknown>): BepusdtConf
 }
 
 /** 校验并归一化 API 地址；非法协议/不可解析一律返回 undefined（视同未配置） */
-function normalizeApiBase(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
-  const trimmed = raw.replace(/\/+$/, "");
-  try {
-    const u = new URL(trimmed);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
-    return trimmed;
-  } catch {
-    return undefined;
-  }
+export function normalizeBepusdtApiBase(raw: string | undefined): string | undefined {
+  const safe = raw && normalizeHttpUrl(raw);
+  if (!safe) return undefined;
+  const url = new URL(safe);
+  if (url.search || url.hash) return undefined;
+  const host = url.hostname.toLowerCase();
+  // 内网网关是受支持的管理员配置；云元数据地址不应作为支付端点。
+  if (/^169\.254\./.test(host) || /^\[fe[89ab]/.test(host) || /^\[::ffff:a9fe:/.test(host) ||
+      ["metadata.google.internal", "instance-data.ec2.internal", "100.100.100.200"].includes(host)) return undefined;
+  const allowed = process.env.BEPUSDT_ALLOWED_ORIGINS?.split(",").map(v => normalizeHttpUrl(v.trim()))
+    .filter((v): v is string => !!v).map(v => new URL(v).origin);
+  if (process.env.BEPUSDT_ALLOWED_ORIGINS && !allowed?.includes(url.origin)) return undefined;
+  return safe.replace(/\/+$/, "");
 }
 
 interface CreateOrderResponse {
@@ -126,6 +130,7 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(signed),
         signal: AbortSignal.timeout(15_000),
+        redirect: "error",
       });
       if (!res.ok) {
         // 结果分类（决定上层是否补偿关单、释放库存）：
@@ -199,6 +204,8 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
           }）: ${parsed.message ?? JSON.stringify(parsed).slice(0, 200)}`
         );
       }
+      const paymentUrl = normalizeHttpUrl(data.payment_url, config.apiBase);
+      if (!paymentUrl) throw new PaymentCreationError("unknown", "bepusdt 收银台地址协议或格式不安全，订单保留待对账");
       // 注意：bepusdt 的 expiration_time 是「剩余有效期（秒）」，不是 Unix 时间戳。
       // 网关源码 app/handler/epusdt/epusdt.go：
       //   "expiration_time": uint64(order.ExpiredAt.Sub(time.Now()).Seconds())
@@ -209,7 +216,7 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
       return {
         provider: "bepusdt",
         tradeId: data.trade_id,
-        paymentUrl: data.payment_url,
+        paymentUrl,
         expectedActualAmount: data.actual_amount != null ? String(data.actual_amount) : null,
         expirationTime: hasExpiry
           ? new Date(Date.now() + (expSeconds as number) * 1000)

@@ -13,6 +13,7 @@ import {
   type RepurchaseState,
 } from "@/actions/shop";
 import { openPaymentWindow, toAbsoluteUrl } from "@/lib/open-payment-window";
+import { SupportLink } from "@/components/shop/support-link";
 
 export interface OrderStatusPayload {
   orderNo: string;
@@ -33,12 +34,19 @@ export interface OrderStatusPayload {
   repurchaseBlockedReason?: string | null;
 }
 
+/** 客服入口：地址为空时不渲染由 SupportLink 内部处理 */
+export interface SupportConfig {
+  url: string | null;
+  label: string;
+}
+
 /** 回跳页状态轮询：2s 间隔，completed/expired/closed 停止 */
 export function OrderStatusPoll({
   orderNo,
   initial,
   payCTA = false,
   turnstile,
+  support,
 }: {
   orderNo: string;
   initial: OrderStatusPayload | null;
@@ -46,6 +54,8 @@ export function OrderStatusPoll({
   payCTA?: boolean;
   /** 后台启用 Turnstile 时由服务端下发（重新购买表单需要渲染验证码） */
   turnstile?: { enabled: boolean; siteKey: string };
+  /** 客服入口（由服务端读取设置后下发） */
+  support?: SupportConfig;
 }) {
   const [order, setOrder] = useState<OrderStatusPayload | null>(initial);
   const [notFound, setNotFound] = useState(!initial);
@@ -84,8 +94,9 @@ export function OrderStatusPoll({
   if (notFound) {
     return (
       <div className="rounded-xl border border-border bg-card p-10 text-center">
-        <p className="font-serif text-xl">没有找到订单</p>
-        <p className="mt-2 text-sm text-muted-foreground">请检查订单号是否正确</p>
+        <p className="font-serif text-xl">请验证订单信息</p>
+        <p className="mt-2 text-sm text-muted-foreground">请前往订单查询，凭订单号和邮箱验证后继续。</p>
+        <a href="/orders" className="mt-4 inline-block underline underline-offset-4">前往订单查询</a>
       </div>
     );
   }
@@ -130,16 +141,33 @@ export function OrderStatusPoll({
         ) : order.status === "delivering" ? (
           <>支付已到账，正在为你发货；如卡密紧张可能稍有延迟。</>
         ) : order.status === "expired" ? (
-          <>订单已超时未支付，占用的库存已释放。如已付款请联系客服核实。</>
+          <>
+            订单已超时未支付，占用的库存已释放。如已付款请
+            <SupportLink url={support?.url} label={support?.label ?? "联系客服"} />
+            核实。
+          </>
         ) : order.status === "reconciling" ? (
           <>
             支付状态待核实：我们未能确认本次支付是否已在网关创建。
-            <b className="mx-1">请勿重复付款</b>，客服核对后会尽快处理；也可稍后回到本页查看。
+            <b className="mx-1">请勿重复付款</b>，
+            <SupportLink url={support?.url} label={support?.label ?? "联系客服"} />
+            核对后会尽快处理；也可稍后回到本页查看。
           </>
         ) : (
-          <>订单已关闭。如已付款请联系客服核实。</>
+          <>
+            订单已关闭。如已付款请
+            <SupportLink url={support?.url} label={support?.label ?? "联系客服"} />
+            核实。
+          </>
         )}
       </div>
+
+      {["expired", "closed", "reconciling"].includes(order.status) ? (
+        <p className="mt-3 text-center text-xs text-muted-foreground">
+          支付遇到问题？
+          <SupportLink url={support?.url} label={support?.label ?? "联系客服"} />
+        </p>
+      ) : null}
 
       {order.status === "pending" && payCTA && order.paymentUrl ? (
         <button

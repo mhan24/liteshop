@@ -7,8 +7,10 @@ import {
   getTurnstileClientConfig,
   setSetting,
   getRepoUrl,
+  getSupportUrl,
   isSafeHttpUrl,
   DEFAULT_REPO_URL,
+  DEFAULT_SUPPORT_URL,
   SETTING_KEYS,
 } from "./settings";
 
@@ -105,5 +107,54 @@ describe("页脚仓库地址：安全校验", () => {
     expect(isSafeHttpUrl("javascript:alert(1)")).toBe(false);
     expect(isSafeHttpUrl("//evil.com")).toBe(false);
     expect(isSafeHttpUrl("")).toBe(false);
+  });
+});
+
+describe("联系客服地址", () => {
+  beforeEach(() => {
+    db.delete(settings).where(eq(settings.key, SETTING_KEYS.supportUrl)).run();
+  });
+
+  it("未设置时回落默认客服地址", () => {
+    expect(getSupportUrl()).toBe(DEFAULT_SUPPORT_URL);
+    expect(DEFAULT_SUPPORT_URL).toBe("https://t.me/setup0de?direct");
+  });
+
+  it("自定义 http/https 地址被采纳", () => {
+    setSetting(SETTING_KEYS.supportUrl, "https://t.me/other_support");
+    expect(getSupportUrl()).toBe("https://t.me/other_support");
+    setSetting(SETTING_KEYS.supportUrl, "mailto:x@y.z");
+    // mailto 不是 http(s) → 回落默认，避免把非预期协议塞进 <a href>
+    expect(getSupportUrl()).toBe(DEFAULT_SUPPORT_URL);
+  });
+
+  it("留空表示不显示客服入口", () => {
+    setSetting(SETTING_KEYS.supportUrl, "");
+    expect(getSupportUrl()).toBeNull();
+  });
+
+  it("危险协议回落默认（该值会输出为 <a href>）", () => {
+    for (const bad of [
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "//evil.com",
+      "not-a-url",
+    ]) {
+      setSetting(SETTING_KEYS.supportUrl, bad);
+      expect(getSupportUrl()).toBe(DEFAULT_SUPPORT_URL);
+    }
+  });
+
+  it("拒绝内嵌凭据的地址（normalizeHttpUrl 更严）", () => {
+    setSetting(SETTING_KEYS.supportUrl, "https://user:pass@evil.com");
+    expect(getSupportUrl()).toBe(DEFAULT_SUPPORT_URL);
+  });
+});
+
+describe("isSafeHttpUrl 复用统一实现后仍正确", () => {
+  it("拒绝内嵌凭据与控制字符", () => {
+    expect(isSafeHttpUrl("https://user:pw@example.com")).toBe(false);
+    expect(isSafeHttpUrl("https://exa\nmple.com")).toBe(false);
+    expect(isSafeHttpUrl("https://example.com/path")).toBe(true);
   });
 });

@@ -275,7 +275,7 @@ function renderOrderMail(order: Order, kind: MailKind): { subject: string; text:
     ].join("\n");
     const html = `<p>您的订单已成功支付，我们已收到款项。</p>
 <table>${row("订单号", `<code>${order.orderNo}</code>`)}${row("商品", `${escapeHtml(order.productName)} × ${order.quantity}`)}${row("金额", total)}</table>
-<p>该商品为人工发货，我们会尽快处理；完成后将发送交付内容至本邮箱。<br>您也可以随时凭「订单号 + 下单邮箱」在 <a href="${lookupUrl}">订单查询</a> 页查看进度。</p>`;
+<p>该商品为人工发货，我们会尽快处理；完成后将发送交付内容至本邮箱。<br>您也可以随时凭「订单号 + 下单邮箱」在 <a href="${escapeHtml(lookupUrl)}">订单查询</a> 页查看进度。</p>`;
     return { subject, text, html };
   }
 
@@ -298,7 +298,7 @@ function renderOrderMail(order: Order, kind: MailKind): { subject: string; text:
 <pre style="background:#f7f6f3;border:1px solid #eaeaea;border-radius:8px;padding:16px;font-family:ui-monospace,monospace;font-size:13px;white-space:pre-wrap;word-break:break-all;">${escapeHtml(content)}</pre>
 <hr style="border:none;border-top:1px solid #eaeaea">
 <table>${row("订单号", `<code>${order.orderNo}</code>`)}${row("商品", `${escapeHtml(order.productName)} × ${order.quantity}`)}${row("金额", total)}</table>
-<p>查询订单：<a href="${lookupUrl}">订单查询</a></p>`;
+<p>查询订单：<a href="${escapeHtml(lookupUrl)}">订单查询</a></p>`;
   return { subject, text, html };
 }
 

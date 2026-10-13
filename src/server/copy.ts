@@ -28,6 +28,8 @@ export const COPY_DEFAULTS = {
   pending_hint: "支付完成后凭「订单号 + 邮箱」在「订单查询」页查看卡密或交付内容。本页可收藏，随时回来查看支付状态。",
   /** 页脚右侧 */
   footer_powered: "Powered by liteshop",
+  /** 联系客服入口文案 */
+  support_label: "联系客服",
 } as const;
 
 export type CopyKey = keyof typeof COPY_DEFAULTS;
@@ -65,4 +67,5 @@ export const COPY_FIELDS: { key: CopyKey; label: string; multiline?: boolean }[]
   { key: "lookup_desc", label: "查单页 · 副标题", multiline: true },
   { key: "pending_hint", label: "待支付页 · 脚注", multiline: true },
   { key: "footer_powered", label: "页脚 · 右侧文案" },
+  { key: "support_label", label: "联系客服 · 入口文案" },
 ];

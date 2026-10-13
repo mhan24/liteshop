@@ -284,3 +284,10 @@ export const REPURCHASE_RULE: RateLimitRule = { windowMs: 600_000, max: 3 };
 export function checkRepurchaseLimit(sourceOrderNo: string, ip: string): RateLimitResult {
   return consume(`repurchase:${sourceOrderNo}:${ip}`, REPURCHASE_RULE);
 }
+
+/** 独立轮询预算：一个标签页约 30 次/分钟；不占双因子查单预算。 */
+export function checkOrderStatusRateLimit(ip: string, orderNo: string): RateLimitResult {
+  const perIp = consume(`status:ip:${ip}`, { windowMs: 60_000, max: 120 });
+  if (!perIp.ok) return perIp;
+  return consume(`status:order:${ip}:${orderNo.slice(0, 64)}`, { windowMs: 60_000, max: 60 });
+}

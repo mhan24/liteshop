@@ -1,5 +1,6 @@
 "use server";
 
+import { grantOrderAccess } from "@/server/order/access";
 import { clientIpFromHeaders } from "@/server/security/client-ip";
 import {
   checkCancelRateLimit,
@@ -46,6 +47,7 @@ export async function createOrderAction(
 
   try {
     const result: CreateOrderResult = await createOrder({ slug, email, quantity, note });
+    await grantOrderAccess(result.orderNo);
     // 先落「待支付页」：从收银台回退/误关后仍可继续支付
     return {
       paymentUrl: `/pay/pending?order_no=${encodeURIComponent(result.orderNo)}`,
@@ -102,6 +104,7 @@ export async function lookupOrderAction(
     }
     return { error: "没有找到匹配的订单，请核对订单号与邮箱" };
   }
+  await grantOrderAccess(order.orderNo);
   return { order };
 }
 
@@ -206,6 +209,7 @@ export async function repurchaseOrderAction(
   try {
     // 通过原始订单反查下单参数，创建一笔全新订单
     const fresh = await createOrderForRepurchase(orderNo, email);
+    await grantOrderAccess(fresh.orderNo);
     return {
       ok: true,
       orderNo: fresh.orderNo,

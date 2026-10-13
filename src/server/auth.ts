@@ -165,9 +165,6 @@ export async function login(ip: string, username: string, password: string): Pro
   let okPassword = false;
   if (creds.passwordHash) {
     okPassword = verifyPassword(password, creds.passwordHash);
-  } else if (!envConfig.isProd) {
-    // 开发兜底：完全未配置哈希时允许 ADMIN_PASSWORD（默认 admin123）
-    okPassword = password === envConfig.adminPasswordDev;
   }
   if (!okUser || !okPassword) {
     return { ok: false, message: "用户名或密码错误" };
@@ -211,7 +208,7 @@ export function changeAdminCredentials(input: ChangeCredentialsInput): ChangeCre
   const creds = getAdminCredentials();
   const currentOk = creds.passwordHash
     ? verifyPassword(input.currentPassword, creds.passwordHash)
-    : !envConfig.isProd && input.currentPassword === envConfig.adminPasswordDev;
+    : false;
   if (!currentOk) {
     return { ok: false, message: "当前密码不正确" };
   }
