@@ -48,9 +48,12 @@ describe("P0 复现：人工库存重复回补", () => {
     sweepExpiredOrders();
     expect(stockOf(p.id)).toBe(3); // 释放回 3
 
-    // 管理员再关闭该超时订单
+    // 超时清扫已把订单置为 closed —— 管理员无法再次关闭。
+    // 也就是说「清扫释放 + 手动关闭再释放」这条二次回补路径
+    // 现在在状态机层面就不存在了（比单纯靠幂等守卫更彻底）。
     const res = closeOrder(r.orderNo);
-    expect(res.ok).toBe(true);
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("不能关闭");
 
     // 关键断言：不得变成 4
     expect(stockOf(p.id)).toBe(3);
@@ -109,9 +112,9 @@ describe("P0 补充：统一释放入口的幂等性", () => {
     sweepExpiredOrders();
     expect(reservedOf()).toBe(0);
 
-    // 再次关闭：不应报错，也不应把已释放的卡再动一次
+    // 订单已是 closed：再次关闭被状态机拒绝，也不会动到已释放的卡
     const res = closeOrder(r.orderNo);
-    expect(res.ok).toBe(true);
+    expect(res.ok).toBe(false);
     expect(reservedOf()).toBe(0);
   });
 

@@ -13,6 +13,9 @@ const ALLOWED: Record<OrderStatus, readonly OrderStatus[]> = {
   paid: ["delivering", "completed", "closed"],
   delivering: ["completed", "closed"],
   completed: [],
+  // expired：**历史态**。超时的终态现为 closed（见 expire-orders），
+  // 但旧数据里可能存在 expired 行，且「迟到到账」分支同时接受
+  // expired 与 closed，因此保留该状态与其流转。
   expired: ["closed"],
   closed: [],
 };

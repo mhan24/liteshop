@@ -22,16 +22,25 @@ import { CurrencySelect } from "@/components/currency-select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "系统设置" };
 
+/** 选项卡分组：把原先一长列配置按用途拆开，避免同屏堆叠 */
+const TAB_KEYS = ["site", "pay", "security", "notify", "copy"] as const;
+type TabKey = (typeof TAB_KEYS)[number];
+
 export default async function AdminSettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ flash?: string }>;
+  searchParams: Promise<{ flash?: string; tab?: string }>;
 }) {
-  const { flash: flashId } = await searchParams;
+  const { flash: flashId, tab } = await searchParams;
+  // 保存后回到原选项卡：由各 save action 通过 ?tab= 传回
+  const activeTab: TabKey = (TAB_KEYS as readonly string[]).includes(tab ?? "")
+    ? (tab as TabKey)
+    : "site";
   const flash = takeFlash(flashId);
   const csrf = await csrfToken(getSessionVersion());
   const settings = getAllSettings();
@@ -47,11 +56,21 @@ export default async function AdminSettingsPage({
     <div className="space-y-6">
       <div>
         <h1 className="font-serif text-2xl tracking-tight">设置</h1>
-        <p className="mt-1 text-sm text-muted-foreground">站点、支付渠道、邮件通知与管理员</p>
+        <p className="mt-1 text-sm text-muted-foreground">站点、支付渠道、邮件通知与管理员；按用途分为若干选项卡</p>
       </div>
 
       <Flash ok={flash?.ok} err={flash?.err} />
 
+      <Tabs defaultValue={activeTab}>
+        <TabsList>
+          <TabsTrigger value="site">基础</TabsTrigger>
+          <TabsTrigger value="pay">支付</TabsTrigger>
+          <TabsTrigger value="security">安全</TabsTrigger>
+          <TabsTrigger value="notify">通知</TabsTrigger>
+          <TabsTrigger value="copy">前台文案</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="site" className="mt-5 space-y-6">
       <Card className="border-border bg-card">
         <CardHeader>
           <CardTitle className="text-base">站点</CardTitle>
@@ -121,6 +140,8 @@ export default async function AdminSettingsPage({
           </form>
         </CardContent>
       </Card>
+        </TabsContent>
+        <TabsContent value="pay" className="mt-5 space-y-6">
 
       <Card className="border-border bg-card">
         <CardHeader>
@@ -183,6 +204,8 @@ export default async function AdminSettingsPage({
           </form>
         </CardContent>
       </Card>
+        </TabsContent>
+        <TabsContent value="security" className="mt-5 space-y-6">
 
       <Card className="border-border bg-card">
         <CardHeader>
@@ -218,6 +241,50 @@ export default async function AdminSettingsPage({
           </form>
         </CardContent>
       </Card>
+
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">管理员与后台入口</CardTitle>
+          <CardDescription>
+            修改需要验证当前密码；保存后所有登录会话失效，需重新登录。
+            后台入口路径即地址伪装：改为自定义值后（如 my-panel），后台地址变为
+            <code className="mx-1 rounded bg-secondary px-1 py-0.5 font-mono text-xs">
+              {`https://当前域名/${adminPath === "admin" ? "my-panel" : adminPath}`}
+            </code>
+            ，原 /admin/* 将返回 404。当前入口：/{adminPath}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={changeAdminCredentialsAction} className="grid max-w-xl gap-4 sm:grid-cols-2">
+            <input type="hidden" name="csrf" value={csrf} />
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="a-current">当前密码（必填）</Label>
+              <Input id="a-current" name="currentPassword" type="password" required autoComplete="current-password" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="a-user">新用户名（当前：{creds.username}，留空不改）</Label>
+              <Input id="a-user" name="newUsername" placeholder="留空不修改" autoComplete="off" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="a-path">后台入口路径（留空不改）</Label>
+              <Input id="a-path" name="newPath" placeholder={adminPath === "admin" ? "my-panel" : adminPath} className="font-mono" autoComplete="off" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="a-pass">新密码（留空不改）</Label>
+              <Input id="a-pass" name="newPassword" type="password" placeholder="至少 8 位" autoComplete="new-password" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="a-confirm">确认新密码</Label>
+              <Input id="a-confirm" name="confirmPassword" type="password" autoComplete="new-password" />
+            </div>
+            <div className="flex items-end sm:col-span-2">
+              <Button type="submit">保存管理员设置</Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+        </TabsContent>
+        <TabsContent value="notify" className="mt-5 space-y-6">
 
       <Card className="border-border bg-card">
         <CardHeader>
@@ -299,6 +366,8 @@ export default async function AdminSettingsPage({
           </form>
         </CardContent>
       </Card>
+        </TabsContent>
+        <TabsContent value="copy" className="mt-5 space-y-6">
 
       <Card className="border-border bg-card">
         <CardHeader>
@@ -331,48 +400,8 @@ export default async function AdminSettingsPage({
           </form>
         </CardContent>
       </Card>
-
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="text-base">管理员与后台入口</CardTitle>
-          <CardDescription>
-            修改需要验证当前密码；保存后所有登录会话失效，需重新登录。
-            后台入口路径即地址伪装：改为自定义值后（如 my-panel），后台地址变为
-            <code className="mx-1 rounded bg-secondary px-1 py-0.5 font-mono text-xs">
-              {`https://当前域名/${adminPath === "admin" ? "my-panel" : adminPath}`}
-            </code>
-            ，原 /admin/* 将返回 404。当前入口：/{adminPath}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form action={changeAdminCredentialsAction} className="grid max-w-xl gap-4 sm:grid-cols-2">
-            <input type="hidden" name="csrf" value={csrf} />
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="a-current">当前密码（必填）</Label>
-              <Input id="a-current" name="currentPassword" type="password" required autoComplete="current-password" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="a-user">新用户名（当前：{creds.username}，留空不改）</Label>
-              <Input id="a-user" name="newUsername" placeholder="留空不修改" autoComplete="off" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="a-path">后台入口路径（留空不改）</Label>
-              <Input id="a-path" name="newPath" placeholder={adminPath === "admin" ? "my-panel" : adminPath} className="font-mono" autoComplete="off" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="a-pass">新密码（留空不改）</Label>
-              <Input id="a-pass" name="newPassword" type="password" placeholder="至少 8 位" autoComplete="new-password" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="a-confirm">确认新密码</Label>
-              <Input id="a-confirm" name="confirmPassword" type="password" autoComplete="new-password" />
-            </div>
-            <div className="flex items-end sm:col-span-2">
-              <Button type="submit">保存管理员设置</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -51,13 +51,13 @@ describe("付款先于过期、回调晚于过期", () => {
     const o0 = getOrder(r.orderNo);
     const tradeId = o0.tradeId!;
 
-    // 买家已付款（回调内容已确定），但先让本地清扫把订单置为 expired
+    // 买家已付款（回调内容已确定），但先让本地清扫把订单置为终态 closed
     db.update(orders)
       .set({ expirationTime: new Date(Date.now() - 60_000) })
       .where(eq(orders.orderNo, r.orderNo))
       .run();
     lookupOrder(r.orderNo, "late@test.dev"); // 触发惰性清扫
-    expect(getOrder(r.orderNo).status).toBe("expired");
+    expect(getOrder(r.orderNo).status).toBe("closed");
     // 卡密已被释放
     expect(cardsOf(p.id, "reserved")).toHaveLength(0);
     expect(cardsOf(p.id, "available")).toHaveLength(2);
@@ -78,7 +78,7 @@ describe("付款先于过期、回调晚于过期", () => {
     expect(res.handled).toBe(false);
     // 明确告知已登记待处理
     expect(res.message).toContain("异常到账");
-    expect(getOrder(r.orderNo).status).toBe("expired");
+    expect(getOrder(r.orderNo).status).toBe("closed");
     // 不得发货
     expect(cardsOf(p.id, "sold")).toHaveLength(0);
 
@@ -87,7 +87,7 @@ describe("付款先于过期、回调晚于过期", () => {
     const mine = anomalies.find((a) => a.orderNo === r.orderNo);
     expect(mine).toBeDefined();
     expect(mine!.tradeId).toBe(tradeId);
-    expect(mine!.orderStatusAtArrival).toBe("expired");
+    expect(mine!.orderStatusAtArrival).toBe("closed");
     expect(mine!.kind).toBe("late_payment");
   });
 
@@ -174,7 +174,7 @@ describe("付款先于过期、回调晚于过期", () => {
     const anomaly = listAnomalies({ status: "open" }).find((a) => a.orderNo === r.orderNo)!;
     const res = resolveAnomalyAs(anomaly.id, "refunded", "已退款给买家");
     expect(res.ok).toBe(true);
-    expect(getOrder(r.orderNo).status).toBe("expired");
+    expect(getOrder(r.orderNo).status).toBe("closed");
     expect(cardsOf(p.id, "sold")).toHaveLength(0);
   });
 
@@ -211,7 +211,7 @@ describe("付款先于过期、回调晚于过期", () => {
     expect(countOpenAnomalies()).toBe(before);
     expect(res.message).toContain("不匹配");
     expect(cardsOf(p.id, "sold")).toHaveLength(0);
-    expect(getOrder(r.orderNo).status).toBe("expired");
+    expect(getOrder(r.orderNo).status).toBe("closed");
   });
 
   it("缺少 trade_id 的迟到回调不登记异常", async () => {

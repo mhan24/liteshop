@@ -37,11 +37,15 @@ function expireOne(tx: DbTransaction, order: Order): boolean {
   // 仅处理：pending + 有有效期 + 已过期
   if (order.status !== "pending" || !exp || exp.getTime() > Date.now()) return false;
 
-  assertTransition("pending", "expired");
+  // 超时的终态是 **closed**（不再停在 expired）：
+  // 订单一旦超时即视为结束，避免在列表里长期停留在「已超时」需要人工收尾。
+  // 库存释放与「迟到到账」的处理都不受影响 —— 异常到账分支同时接受
+  // expired 与 closed；expired 仅作为历史数据保留（状态机与文案仍支持）。
+  assertTransition("pending", "closed");
   // 统一释放入口：幂等地回补库存并清除占用标志
   releaseOrderStock(tx, order.orderNo);
   tx.update(orders)
-    .set({ status: "expired" as OrderStatus, updatedAt: new Date() })
+    .set({ status: "closed" as OrderStatus, updatedAt: new Date() })
     .where(eq(orders.id, order.id))
     .run();
   return true;

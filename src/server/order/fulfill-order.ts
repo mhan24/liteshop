@@ -302,13 +302,15 @@ function processNotify(
         message: "超时回调属于非当前交易，已忽略（保留对账记录）",
       };
     }
-    assertTransition("pending", "expired");
+    // 与本地超时清扫保持一致：终态为 closed（见 expire-orders 的说明）
+    assertTransition("pending", "closed");
     // 统一释放入口：幂等回补并清除占用标志
     releaseOrderStock(tx, order.orderNo);
     tx.update(orders)
-      .set({ status: "expired" as OrderStatus, updatedAt: new Date() })
+      .set({ status: "closed" as OrderStatus, updatedAt: new Date() })
       .where(eq(orders.id, order.id))
       .run();
+    // 支付尝试的状态仍是 expired（那是「这笔尝试已失效」，与订单终态无关）
     markAttemptStatus(tx, payload.tradeId, "expired");
     return { handled: true, retryable: false, message: "订单已超时关闭" };
   }

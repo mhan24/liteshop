@@ -60,7 +60,7 @@ describe("重购边界：已付款订单", () => {
     db.update(orders).set({ expirationTime: new Date(Date.now() - 60_000) })
       .where(eq(orders.orderNo, r.orderNo)).run();
     sweepExpiredOrders();
-    expect(getOrder(r.orderNo).status).toBe("expired");
+    expect(getOrder(r.orderNo).status).toBe("closed");
 
     // 延迟的成功回调 → 登记为异常到账（待人工处置）
     handlePaymentNotify("mock", buildMockNotifyBody({
@@ -138,7 +138,7 @@ describe("重购资格由服务端统一计算（前台按钮以此为准）", (
     }));
 
     const view = lookupOrder(r.orderNo, "elig-anom@test.dev")!;
-    expect(view.status).toBe("expired");
+    expect(view.status).toBe("closed");
     expect(view.canRepurchase).toBe(false);
     expect(view.repurchaseBlockedReason).toContain("到账");
   });

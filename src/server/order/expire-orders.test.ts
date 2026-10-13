@@ -50,7 +50,7 @@ describe("超时订单自动关闭（兜底，防库存泄漏）", () => {
     makeOverdue(r.orderNo);
 
     const view = lookupOrder(r.orderNo, "b@test.dev");
-    expect(view!.status).toBe("expired");
+    expect(view!.status).toBe("closed");
     // 卡密已释放回可用
     expect(cardsOf(p.id, "reserved")).toHaveLength(0);
     expect(cardsOf(p.id, "available")).toHaveLength(2);
@@ -63,7 +63,7 @@ describe("超时订单自动关闭（兜底，防库存泄漏）", () => {
     const p = seedAutoProduct(["C1"]);
     const r = await createOrder({ email: "b@test.dev", quantity: 1, slug: p.slug });
     makeOverdue(r.orderNo);
-    expect(getOrderStatusView(r.orderNo)!.status).toBe("expired");
+    expect(getOrderStatusView(r.orderNo)!.status).toBe("closed");
   });
 
   it("未超时订单不受影响（不得误关）", async () => {

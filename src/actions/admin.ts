@@ -83,11 +83,14 @@ async function clientIp(): Promise<string> {
 }
 
 /** 跳回来源页（/admin/... 内部路径自动换算为当前伪装入口）；提示走一次性 Flash（URL 仅含随机 ID） */
-async function back(path: string, msg: string, ok: boolean): Promise<never> {
+async function back(path: string, msg: string, ok: boolean, tab?: string): Promise<never> {
   const base = await getAdminBase();
   const rest = path.startsWith("/admin") ? path.slice("/admin".length) : path;
   const id = putFlash(ok ? { ok: msg } : { err: msg });
-  redirect(`${base}${rest}?flash=${id}`);
+  // tab 用于设置页：保存后回到原选项卡，避免跳回第一个页签
+  const qs = new URLSearchParams({ flash: id });
+  if (tab) qs.set("tab", tab);
+  redirect(`${base}${rest}?${qs.toString()}`);
 }
 
 /* ===== 登录/登出 ===== */
@@ -373,23 +376,23 @@ export async function saveSiteSettingsAction(formData: FormData) {
   const siteName = String(formData.get("siteName") ?? "").trim().slice(0, 60);
   const siteUrl = String(formData.get("siteUrl") ?? "").trim().slice(0, 200);
   if (siteUrl && !normalizeHttpUrl(siteUrl)) {
-    await back("/admin/settings", "站点地址需为不含凭据的有效 http/https 地址", false);
+    await back("/admin/settings", "站点地址需为不含凭据的有效 http/https 地址", false, "site");
   }
   const threshold = Math.max(0, Math.trunc(Number(formData.get("threshold") ?? 5)) || 0);
   const currency = String(formData.get("currency") ?? "").trim().toUpperCase();
   if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
-    await back("/admin/settings", `不支持的币种: ${currency}`, false);
+    await back("/admin/settings", `不支持的币种: ${currency}`, false, "site");
   }
   // 开源仓库地址：会输出为页脚 <a href>，必须校验协议，
   // 否则 javascript:/data: 之类会造成点击即执行的 XSS。
   const repoUrl = String(formData.get("repoUrl") ?? "").trim();
   if (repoUrl !== "" && !isSafeHttpUrl(repoUrl)) {
-    await back("/admin/settings", "开源仓库地址需为 http/https 开头的完整地址", false);
+    await back("/admin/settings", "开源仓库地址需为 http/https 开头的完整地址", false, "site");
   }
   // 联系客服地址同样会输出为 <a href>，必须校验协议
   const supportUrl = String(formData.get("supportUrl") ?? "").trim();
   if (supportUrl !== "" && !isSafeHttpUrl(supportUrl)) {
-    await back("/admin/settings", "联系客服地址需为 http/https 开头的完整地址", false);
+    await back("/admin/settings", "联系客服地址需为 http/https 开头的完整地址", false, "site");
   }
 
   setSetting(SETTING_KEYS.siteName, siteName);
@@ -400,20 +403,20 @@ export async function saveSiteSettingsAction(formData: FormData) {
   setSetting(SETTING_KEYS.currency, currency);
   logAdmin("settings.site", "-", JSON.stringify({ siteName, siteUrl, threshold, currency }), await clientIp(), session.u);
   revalidatePath("/admin/settings");
-  await back("/admin/settings", "站点设置已保存", true);
+  await back("/admin/settings", "站点设置已保存", true, "site");
 }
 
 export async function savePaymentConfigAction(formData: FormData) {
   const session = await requireSession();
   await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const provider = String(formData.get("provider") ?? "");
-  if (provider !== "bepusdt") await back("/admin/settings", "未知支付渠道", false);
+  if (provider !== "bepusdt") await back("/admin/settings", "未知支付渠道", false, "pay");
 
   const enabled = String(formData.get("enabled") ?? "") === "on";
   const apiBase = String(formData.get("apiBase") ?? "").trim();
   const safeApiBase = normalizeBepusdtApiBase(apiBase);
   if (apiBase && !safeApiBase) {
-    await back("/admin/settings", "支付 API 地址不合法或不在服务器允许范围内", false);
+    await back("/admin/settings", "支付 API 地址不合法或不在服务器允许范围内", false, "pay");
   }
   const submittedToken = String(formData.get("token") ?? "").trim();
   // 表单不回显令牌 → 留空表示保持原值；__CLEAR__ 表示清除
@@ -426,13 +429,13 @@ export async function savePaymentConfigAction(formData: FormData) {
   // 因此在保存时就拦下，避免把站点置于「支付中断」状态。
   if (enabled) {
     if (apiBase === "") {
-      await back("/admin/settings", "启用支付渠道前请填写 API 地址", false);
+      await back("/admin/settings", "启用支付渠道前请填写 API 地址", false, "pay");
     }
     if (token === "") {
-      await back("/admin/settings", "启用支付渠道前请填写对接令牌", false);
+      await back("/admin/settings", "启用支付渠道前请填写对接令牌", false, "pay");
     }
     if (!/^https?:\/\/.+/i.test(apiBase)) {
-      await back("/admin/settings", "API 地址需以 http:// 或 https:// 开头", false);
+      await back("/admin/settings", "API 地址需以 http:// 或 https:// 开头", false, "pay");
     }
   }
 
@@ -445,7 +448,7 @@ export async function savePaymentConfigAction(formData: FormData) {
   upsertPaymentConfig(provider, { enabled, configJson });
   logAdmin("settings.payment", provider, `enabled=${enabled}`, await clientIp(), session.u);
   revalidatePath("/admin/settings");
-  await back("/admin/settings", "支付渠道配置已保存", true);
+  await back("/admin/settings", "支付渠道配置已保存", true, "pay");
 }
 
 /* ===== SMTP 邮件 ===== */
@@ -460,12 +463,12 @@ export async function saveSmtpSettingsAction(formData: FormData) {
   const from = String(formData.get("smtpFrom") ?? "").trim();
 
   if (enabled) {
-    if (host === "") await back("/admin/settings", "启用邮件通知需填写 SMTP 服务器地址", false);
+    if (host === "") await back("/admin/settings", "启用邮件通知需填写 SMTP 服务器地址", false, "notify");
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      await back("/admin/settings", "SMTP 端口需为 1-65535 的整数", false);
+      await back("/admin/settings", "SMTP 端口需为 1-65535 的整数", false, "notify");
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) && !/^[^@\s]+<[^@\s]+>$/.test(from)) {
-      await back("/admin/settings", "发件人格式无效（如 noreply@example.com 或 Site <noreply@example.com>）", false);
+      await back("/admin/settings", "发件人格式无效（如 noreply@example.com 或 Site <noreply@example.com>）", false, "notify");
     }
   }
 
@@ -486,7 +489,7 @@ export async function saveSmtpSettingsAction(formData: FormData) {
   setSetting("smtp_from", from);
   logAdmin("settings.smtp", "-", `enabled=${enabled}`, await clientIp(), session.u);
   revalidatePath("/admin/settings");
-  await back("/admin/settings", "邮件通知设置已保存", true);
+  await back("/admin/settings", "邮件通知设置已保存", true, "notify");
 }
 
 export async function sendTestEmailAction(formData: FormData) {
@@ -494,11 +497,11 @@ export async function sendTestEmailAction(formData: FormData) {
   await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
   const to = String(formData.get("testTo") ?? "").trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-    await back("/admin/settings", "请输入有效的测试收件邮箱", false);
+    await back("/admin/settings", "请输入有效的测试收件邮箱", false, "notify");
   }
   const result = await sendTestEmail(to);
   logAdmin("settings.smtp_test", to, result.ok ? "测试邮件已发送" : `失败：${result.error ?? ""}`, await clientIp(), session.u);
-  await back("/admin/settings", result.ok ? `测试邮件已发送至 ${to}` : `发送失败：${result.error ?? "未知错误"}`, result.ok);
+  await back("/admin/settings", result.ok ? `测试邮件已发送至 ${to}` : `发送失败：${result.error ?? "未知错误"}`, result.ok, "notify");
 }
 
 /* ===== 人机验证（Cloudflare Turnstile）===== */
@@ -516,7 +519,7 @@ export async function saveTurnstileSettingsAction(formData: FormData) {
   const secretKey = submitted === "__CLEAR__" ? "" : submitted === "" ? existing : submitted;
 
   if (enabled && (siteKey === "" || secretKey === "")) {
-    await back("/admin/settings", "启用 Turnstile 需填写 Site Key 与 Secret Key", false);
+    await back("/admin/settings", "启用 Turnstile 需填写 Site Key 与 Secret Key", false, "security");
   }
   setSetting("turnstile_enabled", enabled ? "1" : "0");
   setSetting("turnstile_site_key", siteKey);
@@ -524,7 +527,7 @@ export async function saveTurnstileSettingsAction(formData: FormData) {
   logAdmin("settings.turnstile", "-", `enabled=${enabled}`, await clientIp(), session.u);
   revalidatePath("/admin/settings");
   revalidatePath("/");
-  await back("/admin/settings", "人机验证设置已保存", true);
+  await back("/admin/settings", "人机验证设置已保存", true, "security");
 }
 
 /* ===== 前台文案 ===== */
@@ -544,7 +547,7 @@ export async function saveCopySettingsAction(formData: FormData) {
   revalidatePath("/admin/settings");
   revalidatePath("/");
   revalidatePath("/orders");
-  await back("/admin/settings", `前台文案已保存（${changed} 条）`, true);
+  await back("/admin/settings", `前台文案已保存（${changed} 条）`, true, "copy");
 }
 
 /* ===== 管理员凭据 / 入口路径 ===== */
@@ -559,7 +562,7 @@ export async function changeAdminCredentialsAction(formData: FormData) {
   const newPath = String(formData.get("newPath") ?? "");
 
   if (newPassword !== "" && newPassword !== confirmPassword) {
-    await back("/admin/settings", "两次输入的新密码不一致", false);
+    await back("/admin/settings", "两次输入的新密码不一致", false, "security");
   }
 
   const result = changeAdminCredentials({
@@ -576,5 +579,5 @@ export async function changeAdminCredentialsAction(formData: FormData) {
       newPath.trim() !== "" ? `/${newPath.trim().toLowerCase()}` : await getAdminBase();
     redirect(`${base}/login?flash=${putFlash({ ok: result.message })}`);
   }
-  await back("/admin/settings", result.message, result.ok);
+  await back("/admin/settings", result.message, result.ok, "security");
 }

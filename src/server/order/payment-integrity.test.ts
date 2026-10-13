@@ -123,7 +123,7 @@ describe("过期订单重新购买（方案 A：不恢复原单）", () => {
       .where(eq(orders.orderNo, r.orderNo)).run();
 
     const view = lookupOrder(r.orderNo, "exp@test.dev")!;
-    expect(view.status).toBe("expired");
+    expect(view.status).toBe("closed");
     expect(view.productSlug).toBe(p.slug);
   });
 

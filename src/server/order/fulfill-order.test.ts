@@ -208,7 +208,7 @@ describe("mock 全链路：下单 → 支付回调 → 自动发卡", () => {
     });
     const result = handlePaymentNotify("mock", body);
     expect(result.handled).toBe(true);
-    expect(getOrder(r.orderNo).status).toBe("expired");
+    expect(getOrder(r.orderNo).status).toBe("closed");
   });
 });
 
@@ -291,7 +291,7 @@ describe("下单锁定卡密（v1.3）", () => {
     });
     handlePaymentNotify("mock", body);
 
-    expect(getOrder(r.orderNo).status).toBe("expired");
+    expect(getOrder(r.orderNo).status).toBe("closed");
     // 锁定释放：可用恢复为 2
     expect(db.select().from(cards).where(eq(cards.status, "available")).all()).toHaveLength(2);
     expect(db.select().from(cards).where(eq(cards.status, "reserved")).all()).toHaveLength(0);
@@ -391,7 +391,8 @@ describe("买家自助取消订单（仅未支付）", () => {
     );
     const res = cancelPendingOrder(r.orderNo, "buyer@test.dev");
     expect(res.ok).toBe(false);
-    expect(res.message).toContain("已超时");
+    // 超时终态是 closed → 走「已支付或已关闭」分支（expired 仅历史数据）
+    expect(res.message).toContain("无法取消");
   });
 
   it("取消后清理 paymentUrl，订单查询页不再显示继续支付", async () => {
