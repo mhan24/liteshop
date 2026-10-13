@@ -38,7 +38,7 @@ export function BuyForm({
   maxQuantity: number;
   deliveryType: string;
   /** 后台启用了 Turnstile 时由服务端传入 */
-  turnstile?: { enabled: boolean; siteKey: string };
+  turnstile?: { enabled: boolean; siteKey: string; fallback: boolean };
   /** 服务端计算的可选支付方式；不传则不显示选择器 */
   methods?: CheckoutOption[];
   /** 缓存展示用：商品名与格式化金额（由服务端传入） */
@@ -56,8 +56,11 @@ export function BuyForm({
   const { token, setToken, resetToken } = useTurnstileToken();
   const [captchaEpoch, setCaptchaEpoch] = useState(0);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
+  /** 验证不可用（加载失败/超时）：开启降级时允许无 token 提交 */
+  const [captchaUnavailable, setCaptchaUnavailable] = useState(false);
 
   const captchaEnabled = !!turnstile?.enabled && !!turnstile.siteKey;
+  const captchaFallback = captchaEnabled && !!turnstile?.fallback;
 
   // 下单成功 → 先跳待支付页，由待支付页按钮在新窗口打开收银台。
   // 同时写入本地缓存：买家之后可在查单页一键"重新支付 / 取消 / 查询"。
@@ -89,6 +92,9 @@ export function BuyForm({
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="slug" value={slug} />
       {captchaEnabled ? <input type="hidden" name="cfToken" value={token ?? ""} /> : null}
+      {captchaFallback && captchaUnavailable ? (
+        <input type="hidden" name="cfFallback" value="1" />
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
@@ -160,7 +166,12 @@ export function BuyForm({
 
       {captchaEnabled ? (
         <div className="space-y-1">
-          <TurnstileWidget key={captchaEpoch} siteKey={turnstile!.siteKey} onToken={setToken} />
+          <TurnstileWidget
+            key={captchaEpoch}
+            siteKey={turnstile!.siteKey}
+            onToken={setToken}
+            onUnavailable={() => setCaptchaUnavailable(true)}
+          />
           {captchaEnabled && !token ? (
             <p className="text-xs text-muted-foreground">提交前请先完成人机验证</p>
           ) : null}
@@ -173,9 +184,19 @@ export function BuyForm({
         type="submit"
         className="w-full"
         size="lg"
-        disabled={pending || state?.paymentUrl != null || (captchaEnabled && !token)}
+        disabled={
+          pending ||
+          state?.paymentUrl != null ||
+          (captchaEnabled && !token && !(captchaFallback && captchaUnavailable))
+        }
       >
-        {pending ? "正在创建订单…" : state?.paymentUrl ? "正在跳转收银台…" : buttonText}
+        {pending
+          ? "正在创建订单…"
+          : state?.paymentUrl
+            ? "正在跳转收银台…"
+            : captchaEnabled && !token && !(captchaFallback && captchaUnavailable)
+              ? "完成人机验证后可购买"
+              : buttonText}
       </Button>
 
       <p className="text-center text-xs text-muted-foreground whitespace-pre-line">{notice}</p>

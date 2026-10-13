@@ -21,11 +21,11 @@ const securityHeaders = [
       "default-src 'self'",
       // Next.js 会内联少量启动脚本；'unsafe-inline' 为既有渲染所需，
       // 故用 frame-ancestors 与 object-src 'none' 收紧实际可利用面
-      "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+      "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self' data:",
-      "connect-src 'self' https://challenges.cloudflare.com",
+      "connect-src 'self' https://challenges.cloudflare.com https://cloudflareinsights.com",
       "frame-src https://challenges.cloudflare.com",
       "frame-ancestors 'none'",
       "object-src 'none'",

@@ -33,9 +33,14 @@ it("没有凭据及跨订单、篡改、过期凭据均拒绝",async()=>{
 it("正常下单签发凭据；仅订单号不能读 API 或付款页，双因子查单可恢复",async()=>{
   const p=seedAuto(["access-card"]);
   const form=new FormData();form.set("slug",p.slug);form.set("email","owner@example.test");form.set("quantity","1");
-  const result=await createOrderAction(null,form);
-  expect(result.error).toBeUndefined();expect(result.orderNo).toBeDefined();
-  const no=result.orderNo!;
+  // 成功下单现在以 NEXT_REDIRECT（服务端 redirect 到待支付页）表达；
+  // 从 redirect 目标 URL 中解析订单号继续断言
+  let no="";
+  try{await createOrderAction(null,form);throw new Error("should redirect");}catch(e:unknown){
+    if(!(e instanceof Error&&"digest" in e&&String((e as {digest:string}).digest).startsWith("NEXT_REDIRECT")))throw e;
+    no=/order_no=([A-Z0-9]+)/.exec(String(e.digest))![1];
+  }
+  expect(no).toMatch(/^LS/);
   const request=()=>new Request(`https://shop.example/api/orders/status?order_no=${no}`,{headers:{"x-forwarded-for":"192.0.2.23"}});
   expect((await GET(request())).status).toBe(200);
   values.clear();

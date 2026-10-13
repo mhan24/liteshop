@@ -1,4 +1,4 @@
-import { getTurnstileSecretKey, isTurnstileEnforced } from "@/server/settings";
+import { getTurnstileSecretKey, isTurnstileEnforced, isTurnstileFallbackEnabled } from "@/server/settings";
 import { verifyTurnstileToken } from "@/lib/turnstile";
 import { checkOrderRateLimit } from "@/server/security/rate-limit";
 import { clientIpFromHeaders } from "@/server/security/client-ip";
@@ -37,12 +37,19 @@ export async function guardOrderCreation(
   formData: FormData,
   email: string
 ): Promise<OrderGuardResult> {
-  // 人机验证：仅当「开关开启 + Site/Secret 齐备」时强制（与前端渲染条件一致）
+  // 人机验证：仅当「开关开启 + Site/Secret 齐备」时强制（与前端渲染条件一致）。
+  // 降级开关（后台）开启时：前端拿不到 token（验证服务在买家网络不可达）
+  // 的提交被放行，由下方频率限制兜底——购买可用性优先于验证覆盖率。
+  // 注意：有 token 仍严格校验（一次性、防伪造）；仅对「空 token」降级。
   if (isTurnstileEnforced()) {
     const token = String(formData.get("cfToken") ?? "");
-    const verify = await verifyTurnstileToken(token, getTurnstileSecretKey());
-    if (!verify.ok) {
-      return { ok: false, error: "人机验证未通过，请重新完成验证后提交" };
+    if (token.trim() === "" && isTurnstileFallbackEnabled()) {
+      // 降级放行：走限流
+    } else {
+      const verify = await verifyTurnstileToken(token, getTurnstileSecretKey());
+      if (!verify.ok) {
+        return { ok: false, error: "人机验证未通过，请重新完成验证后提交" };
+      }
     }
   }
 

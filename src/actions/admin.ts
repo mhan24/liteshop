@@ -587,10 +587,12 @@ export async function saveTurnstileSettingsAction(formData: FormData) {
   if (enabled && (siteKey === "" || secretKey === "")) {
     await back("/admin/settings", "启用 Turnstile 需填写 Site Key 与 Secret Key", false, "security");
   }
+  const fallback = String(formData.get("turnstileFallback") ?? "") === "on";
   setSetting("turnstile_enabled", enabled ? "1" : "0");
   setSetting("turnstile_site_key", siteKey);
   setSetting("turnstile_secret_key", secretKey);
-  logAdmin("settings.turnstile", "-", `enabled=${enabled}`, await clientIp(), session.u);
+  setSetting("turnstile_fallback_enabled", fallback ? "1" : "0");
+  logAdmin("settings.turnstile", "-", `enabled=${enabled} fallback=${fallback}`, await clientIp(), session.u);
   revalidatePath("/admin/settings");
   revalidatePath("/");
   await back("/admin/settings", "人机验证设置已保存", true, "security");

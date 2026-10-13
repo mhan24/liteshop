@@ -346,7 +346,22 @@ export default async function AdminSettingsPage({
                 defaultChecked={settings["turnstile_enabled"] === "1"}
                 className="size-4"
               />
-              启用下单人机验证
+              启用下单与查单人机验证
+            </label>
+            <label className="flex items-start gap-2 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                name="turnstileFallback"
+                defaultChecked={settings["turnstile_fallback_enabled"] === "1"}
+                className="mt-0.5 size-4"
+              />
+              <span>
+                验证服务加载失败时允许提交（降级）
+                <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                  买家网络到 Cloudflare 验证服务不稳定时（验证码一直「加载中」或提示失败），
+                  允许其无验证提交，由下单/查单频率限制兜底。关闭则必须完成验证才能提交。
+                </span>
+              </span>
             </label>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="t-site">Site Key（前台公开）</Label>

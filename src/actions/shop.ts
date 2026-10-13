@@ -1,5 +1,6 @@
 "use server";
 
+import { redirect } from "next/navigation";
 import { grantOrderAccess } from "@/server/order/access";
 import { clientIpFromHeaders } from "@/server/security/client-ip";
 import {
@@ -17,7 +18,7 @@ import type { CreateOrderResult } from "@/server/order/create-order";
 import { lookupOrder, type PublicOrderView } from "@/server/order/query-order";
 import { cancelPendingOrder } from "@/server/order/fulfill-order";
 import { createExchangeOrder } from "@/server/exchange/create-order";
-import { getTurnstileSecretKey, isTurnstileEnforced } from "@/server/settings";
+import { getTurnstileSecretKey, isTurnstileFallbackEnabled, isTurnstileEnforced } from "@/server/settings";
 import { verifyTurnstileToken } from "@/lib/turnstile";
 import { checkRepurchaseLimit } from "@/server/security/rate-limit";
 import { guardOrderCreation } from "@/server/security/order-guard";
@@ -54,16 +55,22 @@ export async function createOrderAction(
         ? await createExchangeOrder({ slug, email, quantity, note })
         : await createOrder({ slug, email, quantity, note, paymentMethod: paymentMethod === "bepusdt" ? "bepusdt" : undefined });
     await grantOrderAccess(result.orderNo);
-    // 先落「待支付页」：从收银台回退/误关后仍可继续支付
-    return {
-      paymentUrl: `/pay/pending?order_no=${encodeURIComponent(result.orderNo)}`,
-      orderNo: result.orderNo,
-    };
+    // 服务端 redirect 到「待支付页」：
+    // - React 接管时由 Next 处理跳转
+    // - JS 完全失败（渐进增强原生提交）时浏览器跟随 303，同样到达待支付页
+    //   —— 下单链路不依赖任何客户端脚本时序
+    redirect(`/pay/pending?order_no=${encodeURIComponent(result.orderNo)}&email=${encodeURIComponent(email)}`);
   } catch (err) {
+    // redirect() 以 NEXT_REDIRECT 异常实现，必须放行给框架处理
+    if (err && typeof err === "object" && "digest" in err && typeof (err as { digest?: string }).digest === "string" && (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")) {
+      throw err;
+    }
     if (err instanceof OrderError) return { error: err.message };
     console.error("[createOrderAction]", err);
     return { error: "下单失败，请稍后重试" };
   }
+  // 不可达：redirect() 正常抛出已被放行；此处仅满足类型收窄
+  return { error: "未预期的下单流程状态" };
 }
 
 /* ===== 查单（订单号 + 邮箱 + 人机验证）===== */
@@ -81,12 +88,13 @@ export async function lookupOrderAction(
   const email = String(formData.get("email") ?? "");
 
   if (isTurnstileEnforced()) {
-    const verify = await verifyTurnstileToken(
-      String(formData.get("cfToken") ?? ""),
-      getTurnstileSecretKey()
-    );
-    if (!verify.ok) {
-      return { error: "人机验证未通过，请重新完成验证后查询" };
+    const token = String(formData.get("cfToken") ?? "");
+    // 空 token 且开启降级 → 放行（查单另有独立限流）；有 token 仍严格校验
+    if (!(token.trim() === "" && isTurnstileFallbackEnabled())) {
+      const verify = await verifyTurnstileToken(token, getTurnstileSecretKey());
+      if (!verify.ok) {
+        return { error: "人机验证未通过，请重新完成验证后查询" };
+      }
     }
   }
 

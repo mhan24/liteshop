@@ -122,16 +122,32 @@ export function isTurnstileEnforced(): boolean {
 }
 
 /** Turnstile 前台配置（仅站点 Key，Secret 只在服务端使用） */
-export function getTurnstileClientConfig(): { enabled: boolean; siteKey: string } {
+export function getTurnstileClientConfig(): {
+  enabled: boolean;
+  siteKey: string;
+  /** 验证不可用时允许提交（与后台降级开关联动） */
+  fallback: boolean;
+} {
   const enforced = isTurnstileEnforced();
   return {
     enabled: enforced,
     siteKey: enforced ? (getSetting("turnstile_site_key")?.trim() ?? "") : "",
+    fallback: isTurnstileFallbackEnabled(),
   };
 }
 
 export function getTurnstileSecretKey(): string {
   return getSetting("turnstile_secret_key")?.trim() ?? "";
+}
+
+/**
+ * 验证服务不可用时的降级开关：
+ * 开启后，前端拿不到 Turnstile token（加载失败）仍可提交，
+ * 服务端跳过 siteverify，由既有的下单/查单频率限制兜底。
+ * 适用于买家网络到 challenges.cloudflare.com 不稳定（如中国大陆）的场景。
+ */
+export function isTurnstileFallbackEnabled(): boolean {
+  return getSetting("turnstile_fallback_enabled") === "1";
 }
 
 export interface PaymentConfigRow {

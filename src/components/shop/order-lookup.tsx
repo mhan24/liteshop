@@ -15,7 +15,7 @@ import { CancelOrder } from "@/components/shop/order-status-poll";
 export function OrderLookupClient({
   turnstile,
 }: {
-  turnstile?: { enabled: boolean; siteKey: string };
+  turnstile?: { enabled: boolean; siteKey: string; fallback: boolean };
 }) {
   const [state, formAction, pending] = useActionState<LookupState | null, FormData>(
     lookupOrderAction,
@@ -32,6 +32,8 @@ export function OrderLookupClient({
   const [email, setEmail] = useState("");
 
   const captchaEnabled = !!turnstile?.enabled && !!turnstile.siteKey;
+  const captchaFallback = captchaEnabled && !!turnstile?.fallback;
+  const [captchaUnavailable, setCaptchaUnavailable] = useState(false);
 
   // 查询失败 → token 已消费，重挂载挑战（渲染期调整状态模式）
   if (state?.error !== lastError) {
@@ -119,17 +121,27 @@ export function OrderLookupClient({
           />
         </div>
         <div className="flex items-end">
-          <Button type="submit" className="w-full sm:w-auto" disabled={pending || (captchaEnabled && !token)}>
+          <Button
+            type="submit"
+            className="w-full sm:w-auto"
+            disabled={pending || (captchaEnabled && !token && !(captchaFallback && captchaUnavailable))}
+          >
             {pending ? "查询中…" : "查询"}
           </Button>
         </div>
         {captchaEnabled ? (
           <div className="sm:col-span-3">
-            <TurnstileWidget key={captchaEpoch} siteKey={turnstile!.siteKey} onToken={setToken} />
+            <TurnstileWidget
+              key={captchaEpoch}
+              siteKey={turnstile!.siteKey}
+              onToken={setToken}
+              onUnavailable={() => setCaptchaUnavailable(true)}
+            />
             {/* 必须把 token 随表单提交：lookupOrderAction 校验的是 formData 里的
                 cfToken。缺少这个隐藏域时，服务端永远收到空串，
                 导致「人机验证未通过」——即使验证码已在客户端通过。 */}
             <input type="hidden" name="cfToken" value={token ?? ""} />
+        {captchaFallback && captchaUnavailable ? <input type="hidden" name="cfFallback" value="1" /> : null}
             {!token ? (
               <p className="text-xs text-muted-foreground">查询前请先完成人机验证</p>
             ) : null}
