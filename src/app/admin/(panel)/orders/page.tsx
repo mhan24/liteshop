@@ -90,9 +90,9 @@ export default async function AdminOrdersPage({
               ⚠ 异常到账待处理（{anomalies.length}）
             </CardTitle>
             <p className="text-xs text-muted-foreground">
-              这些订单已超时/关闭，但收到了**金额匹配的成功回调**。常见成因：买家在有效期内
-              完成链上付款，回调在订单被清扫后到达。卡密当时已释放，可能已被他人买走，
-              因此不能自动恢复原订单 —— 请核对链上到账后处置：
+              这些订单收到经过交易归属和金额校验的历史、迟到或重复付款通知。
+              已释放的卡密可能已被他人买走，因此请先核对链上到账再处置。
+              已完成的订单不再补发，请核对是否需要退款：
               自动卡密商品用「补发商品」（从卡池重新取卡）；
               人工发货商品用「转入人工发货」后到订单页录入内容；
               已退款的请用「确认已退款」并填写链上凭证（系统不会自动退款）。
@@ -107,6 +107,9 @@ export default async function AdminOrdersPage({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="space-y-0.5">
                     <div className="font-mono text-xs">{a.orderNo}</div>
+                    <div className="text-xs">
+                      {a.kind === "duplicate_payment" ? "重复付款（已交付，请核对退款）" : "迟到或历史交易到账"}
+                    </div>
                     <div className="text-xs text-muted-foreground">
                       {a.productName ?? "—"} · {a.amount} {a.currency} · 回调时状态{" "}
                       {a.orderStatusAtArrival}
@@ -125,31 +128,35 @@ export default async function AdminOrdersPage({
                   </div>
                   {a.status === "open" ? (
                     <div className="flex flex-wrap gap-2">
-                      <form action={reissueAnomalyAction} className="flex items-center gap-1">
-                        <input type="hidden" name="csrf" value={csrf} />
-                        <input type="hidden" name="id" value={a.id} />
-                        <input type="hidden" name="orderNo" value={a.orderNo} />
-                        <input
-                          name="note"
-                          placeholder="补发备注"
-                          className="w-28 rounded-md border border-input bg-transparent px-2 py-1 text-xs"
-                        />
-                        <Button type="submit" size="sm">
-                          补发商品
-                        </Button>
-                      </form>
-                      <form action={acceptAnomalyManualAction} className="flex items-center gap-1">
-                        <input type="hidden" name="csrf" value={csrf} />
-                        <input type="hidden" name="id" value={a.id} />
-                        <input
-                          name="note"
-                          placeholder="备注"
-                          className="w-24 rounded-md border border-input bg-transparent px-2 py-1 text-xs"
-                        />
-                        <Button type="submit" size="sm" variant="outline">
-                          转入人工发货
-                        </Button>
-                      </form>
+                      {a.orderStatus !== "completed" ? (
+                        <>
+                          <form action={reissueAnomalyAction} className="flex items-center gap-1">
+                            <input type="hidden" name="csrf" value={csrf} />
+                            <input type="hidden" name="id" value={a.id} />
+                            <input type="hidden" name="orderNo" value={a.orderNo} />
+                            <input
+                              name="note"
+                              placeholder="补发备注"
+                              className="w-28 rounded-md border border-input bg-transparent px-2 py-1 text-xs"
+                            />
+                            <Button type="submit" size="sm">
+                              补发商品
+                            </Button>
+                          </form>
+                          <form action={acceptAnomalyManualAction} className="flex items-center gap-1">
+                            <input type="hidden" name="csrf" value={csrf} />
+                            <input type="hidden" name="id" value={a.id} />
+                            <input
+                              name="note"
+                              placeholder="备注"
+                              className="w-24 rounded-md border border-input bg-transparent px-2 py-1 text-xs"
+                            />
+                            <Button type="submit" size="sm" variant="outline">
+                              转入人工发货
+                            </Button>
+                          </form>
+                        </>
+                      ) : null}
                       <form action={resolveAnomalyAction} className="flex items-center gap-1">
                         <input type="hidden" name="csrf" value={csrf} />
                         <input type="hidden" name="id" value={a.id} />

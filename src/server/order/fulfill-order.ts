@@ -139,7 +139,8 @@ function markHandled(id: number, handled: boolean): void {
 function recordLatePaymentAnomaly(
   tx: DbTransaction,
   order: Order,
-  payload: import("@/server/payment").NotifyPayload
+  payload: import("@/server/payment").NotifyPayload,
+  kind: "late_payment" | "duplicate_payment" = "late_payment"
 ): number | string {
   if (payload.tradeId) {
     const existing = tx
@@ -163,7 +164,7 @@ function recordLatePaymentAnomaly(
       amount: String(payload.amount ?? ""),
       currency: order.currency,
       orderStatusAtArrival: order.status,
-      kind: "late_payment",
+      kind,
       status: "open",
       payload: JSON.stringify({
         amount: payload.amount,
@@ -326,7 +327,24 @@ function processNotify(
   const ownership = validateSuccessOwnership(tx, order, payload);
   if (!ownership.ok) return { handled: false, retryable: false, message: ownership.message };
   if (order.status === "completed") {
-    return { handled: true, retryable: false, message: "订单已完成（幂等重入）" };
+    const current = getCurrentAttempt(order.orderNo, tx);
+    // 没有 attempt 的旧订单可沿用已支付快照，但不能忽略另一笔已补发的款项。
+    const otherPaid = !current && tx.select({ id: paymentAttempts.id }).from(paymentAttempts)
+      .where(and(eq(paymentAttempts.orderNo, order.orderNo), eq(paymentAttempts.status, "paid"),
+        sql`${paymentAttempts.tradeId} != ${payload.tradeId}`)).get();
+    const otherResolved = !current && tx.select({ id: paymentAnomalies.id }).from(paymentAnomalies)
+      .where(and(eq(paymentAnomalies.orderNo, order.orderNo), eq(paymentAnomalies.status, "reissued"),
+        sql`${paymentAnomalies.tradeId} != ${payload.tradeId}`)).get();
+    const legacyPaid = !current && order.paidAt && order.tradeId === payload.tradeId && !otherPaid && !otherResolved;
+    if (current?.status === "paid" || legacyPaid) {
+      return { handled: true, retryable: false, message: "订单已完成（该交易已确认到账，幂等重入）" };
+    }
+    // 例如旧交易 A 的异常已补发，但当前 B 尚未确认到账。
+    // B 的成功通知是另一笔款项，必须独立留在人工核对队列，不能再次发货。
+    const anomalyId = recordLatePaymentAnomaly(tx, order, payload, "duplicate_payment");
+    markAttemptStatus(tx, payload.tradeId, "paid", new Date());
+    return { handled: false, retryable: false,
+      message: `已交付订单收到另一笔到账，已登记重复付款待核对（#${anomalyId}）` };
   }
   if (order.status === "expired" || order.status === "closed") {
     const anomalyId = recordLatePaymentAnomaly(tx, order, payload);

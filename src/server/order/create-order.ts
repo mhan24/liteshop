@@ -10,6 +10,7 @@ import { createAttempt, getLatestAttempt } from "@/server/payment/attempts";
 import { sha256Hex } from "@/lib/signature";
 import { shouldChargeStock } from "@/lib/stock";
 import { assertTransition } from "./state-machine";
+import { checkActiveOrderCapacity } from "@/server/security/rate-limit";
 
 /** 下单服务：库存校验 → 建单（商品快照）→ 渠道创建支付 → 回写交易快照 */
 
@@ -62,6 +63,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   // 仍按事务外读取的旧模式建单。
   const { orderNo, product } = db.transaction(
     (tx) => {
+      const capacity = checkActiveOrderCapacity(tx);
+      if (!capacity.ok) throw new OrderError("ORDER_CAPACITY", capacity.message ?? "当前订单数量已达上限");
       const product = tx.select().from(products)
         .where(and(eq(products.slug, input.slug), eq(products.status, "on"))).get();
       if (!product) throw new OrderError("PRODUCT_NOT_FOUND", "商品不存在或已下架");

@@ -292,7 +292,7 @@ export const paymentAnomalies = sqliteTable(
     currency: text("currency").notNull().default(""),
     /** 订单在异常发生时的状态（一般为 expired / closed） */
     orderStatusAtArrival: text("order_status_at_arrival").notNull(),
-    /** 异常类型：late_payment=超时后到账 */
+    /** 异常类型：late_payment=迟到/历史到账；duplicate_payment=已交付后的另一笔到账 */
     kind: text("kind").notNull().default("late_payment"),
     status: text("status").notNull().default(AnomalyStatus.open),
     /** 处理备注（管理员填写） */

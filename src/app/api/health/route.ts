@@ -7,9 +7,7 @@ export async function GET() {
     db.get(sql`SELECT 1`);
     return Response.json({ ok: true });
   } catch (err) {
-    return Response.json(
-      { ok: false, error: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
-    );
+    console.error("[health] 数据库探测失败", err);
+    return Response.json({ ok: false }, { status: 500 });
   }
 }

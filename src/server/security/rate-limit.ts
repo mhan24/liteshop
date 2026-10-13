@@ -1,5 +1,5 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
-import { db } from "@/db";
+import { db, type DbTransaction } from "@/db";
 import { orders } from "@/db/schema";
 
 /**
@@ -169,13 +169,20 @@ export function checkOrderRateLimit(ip: string, email: string): RateLimitResult 
     };
   }
 
+  return checkActiveOrderCapacity();
+}
+
+/** 前置检查减少压力；建单事务中再次调用，保证总量约束与插入原子。 */
+export function checkActiveOrderCapacity(
+  database: Pick<DbTransaction, "select"> = db
+): RateLimitResult {
   // 全局兜底：防止攻击者疯狂换 IP/邮箱占满库存。
   //
   // 必须同时统计 **reconciling（待对账）**：这类订单是「创建支付结果未知」
   // 时保留的，**同样占用库存/卡密，且不会因普通超时而自动释放**
   // （网关可能已建单）。若不计入，网关故障期间连续产生 reconciling 订单
   // 就能绕过本限制持续锁库存，最终导致长期无货可售。
-  const active = db
+  const active = database
     .select({ c: sql<number>`count(*)` })
     .from(orders)
     .where(inArray(orders.status, ["pending", "reconciling"]))
@@ -189,7 +196,7 @@ export function checkOrderRateLimit(ip: string, email: string): RateLimitResult 
 
   // 待对账订单单独监控：达到独立阈值时告警式拒绝。
   // 这些订单无法自动释放，堆积即意味着库存被长期锁定，需人工介入。
-  const reconciling = db
+  const reconciling = database
     .select({ c: sql<number>`count(*)` })
     .from(orders)
     .where(eq(orders.status, "reconciling"))
