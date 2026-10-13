@@ -32,6 +32,14 @@ export interface OrderStatusPayload {
   canRepurchase?: boolean;
   /** 不能重购的原因，用于前台提示 */
   repurchaseBlockedReason?: string | null;
+  /** 交易所转账指引；非交易所渠道为 null */
+  transferInstructions?: {
+    exchange: string;
+    accountId: string;
+    amount: string;
+    asset: string;
+    expiresAtText: string | null;
+  } | null;
 }
 
 /** 客服入口：地址为空时不渲染由 SupportLink 内部处理 */
@@ -169,7 +177,32 @@ export function OrderStatusPoll({
         </p>
       ) : null}
 
-      {order.status === "pending" && payCTA && order.paymentUrl ? (
+      {/* 交易所转账：没有收银台地址，必须给出账户与**精确金额**，
+          否则买家无从付款（金额必须分毫不差，系统靠它识别到账）。 */}
+      {order.status === "pending" && payCTA && order.transferInstructions ? (
+        <div className="mt-5 space-y-4 rounded-lg border border-border bg-secondary p-4 text-sm">
+          <div className="leading-relaxed">
+            请在 <b>{order.transferInstructions.exchange}</b>{" "}
+            通过「内部转账」向下方账户付款，转账金额必须与页面显示**完全一致**
+            （多付或少付都无法自动识别）。
+          </div>
+          <dl className="space-y-2">
+            <TransferRow label="收款账户" value={order.transferInstructions.accountId} mono />
+            <TransferRow
+              label="转账金额"
+              value={`${order.transferInstructions.amount} ${order.transferInstructions.asset}`}
+              mono
+            />
+            {order.transferInstructions.expiresAtText ? (
+              <TransferRow label="请在此时间前完成" value={order.transferInstructions.expiresAtText} />
+            ) : null}
+          </dl>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            到账后系统会自动识别并发货，通常 1 分钟内完成；若超时仍未到账，
+            请勿重复下单，请联系客服并提供订单号与转账截图。
+          </p>
+        </div>
+      ) : order.status === "pending" && payCTA && order.paymentUrl ? (
         <button
           type="button"
           onClick={() => openPaymentWindow(toAbsoluteUrl(order.paymentUrl!))}
@@ -202,6 +235,16 @@ export function OrderStatusPoll({
           前往订单查询取货
         </a>
       ) : null}
+    </div>
+  );
+}
+
+/** 转账指引中的一行（值可复制，故给 mono 字体） */
+function TransferRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd className={`text-right ${mono ? "select-all break-all font-mono text-xs" : ""}`}>{value}</dd>
     </div>
   );
 }

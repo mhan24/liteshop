@@ -1,6 +1,7 @@
 import { getPaymentConfig, listPaymentConfigs } from "@/server/settings";
 import { bepusdtProvider } from "./bepusdt";
 import { mockProvider } from "./mock";
+import { findEnabledExchange } from "@/server/exchange/channel";
 
 /**
  * PaymentProvider 接口（PLAN §9 Engineering Constraints）：
@@ -118,21 +119,70 @@ export function getProvider(name: string): PaymentProvider {
   }
 }
 
+/** 前台可选的支付方式标识（对外契约，前端按此提交） */
+export type CheckoutMethod = "bepusdt" | "exchange";
+
+/**
+ * 列出**前台可选**的支付方式。
+ *
+ * 历史问题：`auto` 直接取 payment_configs 返回顺序的第一个启用渠道，
+ * 而该顺序无保证。启用交易所渠道后，可能出现「买家被分配到交易所转账，
+ * 但前台没有转账指引 → 订单无法付款」的悬空订单。
+ *
+ * 现在 auto 只从**网关型**渠道中选（交易所需在下单时显式指定）。
+ * 交易所渠道单独走 createExchangeOrder()，其可用性以配置是否完整为准。
+ */
+export function listCheckoutMethods(): CheckoutMethod[] {
+  const out: CheckoutMethod[] = [];
+  if (isProviderEnabled("bepusdt")) out.push("bepusdt");
+  if (isExchangeCheckoutAvailable()) out.push("exchange");
+  return out;
+}
+
+/** 交易所收款是否已配置完整可供买家选择 */
+function isExchangeCheckoutAvailable(): boolean {
+  return findEnabledExchange() !== null;
+}
+
+/**
+ * 解析下单使用的**网关型**渠道。
+ *
+ * - 指定 method 且非 exchange：校验后使用（前台显式选择）
+ * - 未指定 / 指定 exchange：走 auto，仅取网关渠道
+ *   （交易所收款由 createExchangeOrder 单独处理，不经过本函数）
+ */
+export function resolvePaymentProvider(requested?: string): PaymentProvider {
+  if (requested && requested !== "bepusdt" && requested !== "exchange") {
+    throw new PaymentError("UNKNOWN_PAYMENT_METHOD", `未知的支付方式: ${requested}`);
+  }
+  return resolvePaymentProviderDefault();
+}
+
 /**
  * 当前下单使用的渠道：
  * - PAYMENT_DRIVER=mock|bepusdt：显式指定
- * - auto：取 payment_configs 中已启用的渠道
+ * - auto：仅取 payment_configs 中**已启用的网关型**渠道
  */
-export function resolvePaymentProvider(): PaymentProvider {
+export function resolvePaymentProviderDefault(): PaymentProvider {
   const driver = process.env.PAYMENT_DRIVER ?? "auto";
   if (driver === "mock") return mockProvider();
   if (driver === "bepusdt") {
     return bepusdtProvider(getPaymentConfig("bepusdt")?.configJson ?? {});
   }
-  const enabled = listPaymentConfigs().filter((c) => c.enabled).map((c) => c.provider);
-  if (enabled.length === 0) {
+  // auto：**只**从网关型渠道中选，且按固定优先级，保证结果确定。
+  //
+  // 历史缺陷：直接取 payment_configs 返回顺序的第一个启用渠道。启用交易所
+  // 渠道后顺序无保证，可能选中交易所 → 买家被分配到一条前台没有指引、
+  // 无从付款的通道（下单成功却付不了，属可用性事故）。
+  const enabled = new Set(
+    listPaymentConfigs().filter((c) => c.enabled).map((c) => c.provider)
+  );
+  // 固定优先级：bepusdt → 其余网关渠道（按名称排序保证可复现）
+  const gatewayCandidates = ["bepusdt", ...[...enabled].filter((p) => p !== "bepusdt").sort()];
+  const chosen = gatewayCandidates.find((p) => enabled.has(p) && isProviderEnabled(p));
+  if (!chosen) {
     if (process.env.NODE_ENV !== "production") return mockProvider();
     throw new PaymentError("NO_PAYMENT_CHANNEL", "未启用任何支付渠道，请到后台设置");
   }
-  return getProvider(enabled[0]);
+  return getProvider(chosen);
 }

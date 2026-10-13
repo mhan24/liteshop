@@ -16,6 +16,7 @@ import {
 import type { CreateOrderResult } from "@/server/order/create-order";
 import { lookupOrder, type PublicOrderView } from "@/server/order/query-order";
 import { cancelPendingOrder } from "@/server/order/fulfill-order";
+import { createExchangeOrder } from "@/server/exchange/create-order";
 import { getTurnstileSecretKey, isTurnstileEnforced } from "@/server/settings";
 import { verifyTurnstileToken } from "@/lib/turnstile";
 import { checkRepurchaseLimit } from "@/server/security/rate-limit";
@@ -38,6 +39,7 @@ export async function createOrderAction(
   const email = String(formData.get("email") ?? "");
   const note = String(formData.get("note") ?? "");
   const quantity = Number(formData.get("quantity") ?? 1);
+  const paymentMethod = String(formData.get("paymentMethod") ?? "");
 
   // 统一入口防护（人机验证 + 频率限制）。
   // 注意：**不要**在此之外再做一次 Turnstile 校验——Token 是一次性的，
@@ -46,7 +48,11 @@ export async function createOrderAction(
   if (!guard.ok) return { error: guard.error };
 
   try {
-    const result: CreateOrderResult = await createOrder({ slug, email, quantity, note });
+    // 交易所收款走独立入口：需要分配唯一应付金额（memo 不可用）
+    const result: CreateOrderResult =
+      paymentMethod === "exchange"
+        ? await createExchangeOrder({ slug, email, quantity, note })
+        : await createOrder({ slug, email, quantity, note, paymentMethod: paymentMethod === "bepusdt" ? "bepusdt" : undefined });
     await grantOrderAccess(result.orderNo);
     // 先落「待支付页」：从收银台回退/误关后仍可继续支付
     return {

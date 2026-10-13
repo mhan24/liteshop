@@ -72,6 +72,10 @@ export function OrderLookupClient({
         {captchaEnabled ? (
           <div className="sm:col-span-3">
             <TurnstileWidget key={captchaEpoch} siteKey={turnstile!.siteKey} onToken={setToken} />
+            {/* 必须把 token 随表单提交：lookupOrderAction 校验的是 formData 里的
+                cfToken。缺少这个隐藏域时，服务端永远收到空串，
+                导致「人机验证未通过」——即使验证码已在客户端通过。 */}
+            <input type="hidden" name="cfToken" value={token ?? ""} />
             {!token ? (
               <p className="text-xs text-muted-foreground">查询前请先完成人机验证</p>
             ) : null}

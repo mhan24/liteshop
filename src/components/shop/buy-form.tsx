@@ -15,11 +15,19 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+/** 前台可选的支付方式（与服务端 CheckoutMethod 对应） */
+export interface CheckoutOption {
+  value: "bepusdt" | "exchange";
+  label: string;
+  hint: string;
+}
+
 export function BuyForm({
   slug,
   maxQuantity,
   deliveryType,
   turnstile,
+  methods,
   buttonText = "立即购买",
   notice = "",
 }: {
@@ -28,6 +36,8 @@ export function BuyForm({
   deliveryType: string;
   /** 后台启用了 Turnstile 时由服务端传入 */
   turnstile?: { enabled: boolean; siteKey: string };
+  /** 服务端计算的可选支付方式；不传则不显示选择器 */
+  methods?: CheckoutOption[];
   buttonText?: string;
   notice?: string;
 }) {
@@ -99,6 +109,34 @@ export function BuyForm({
           <Label htmlFor="buy-note">备注（选填）</Label>
           <Textarea id="buy-note" name="note" rows={3} placeholder="补充你的需求，便于人工处理" />
         </div>
+      ) : null}
+
+      {methods && methods.length > 1 ? (
+        <fieldset className="space-y-1.5">
+          <legend className="text-sm font-medium">支付方式</legend>
+          <div className="space-y-2 pt-1">
+            {methods.map((m) => (
+              <label
+                key={m.value}
+                className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border p-3 text-sm transition-colors hover:bg-secondary has-[:checked]:border-primary"
+              >
+                <input
+                  type="radio"
+                  name="paymentMethod"
+                  value={m.value}
+                  defaultChecked={m.value === methods[0].value}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">{m.label}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{m.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : methods && methods.length === 1 ? (
+        <input type="hidden" name="paymentMethod" value={methods[0].value} />
       ) : null}
 
       {captchaEnabled ? (

@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { getShopProduct } from "@/server/shop";
 import { getCopy } from "@/server/copy";
 import { getTurnstileClientConfig } from "@/server/settings";
-import { BuyForm } from "@/components/shop/buy-form";
+import { BuyForm, type CheckoutOption } from "@/components/shop/buy-form";
+import { listCheckoutMethods } from "@/server/payment";
 import { Reveal } from "@/components/reveal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,17 @@ export default async function ProductDetailPage({
   if (!product) notFound();
 
   const turnstile = getTurnstileClientConfig();
+  // 支付方式由服务端判定：只有配置完整的渠道才对买家可见，
+  // 避免"选了却付不了"。
+  const checkoutOptions: CheckoutOption[] = listCheckoutMethods().map((m) =>
+    m === "exchange"
+      ? {
+          value: m,
+          label: "交易所转账（USDT / USDC）",
+          hint: "按页面给出的收款账户与精确金额转账，到账后自动发货",
+        }
+      : { value: m, label: "在线支付", hint: "跳转收银台完成支付" }
+  );
   const copy = { payHint: getCopy("detail_pay_hint") };
   const soldOut = !product.onSale;
   const maxQuantity =
@@ -95,6 +107,7 @@ export default async function ProductDetailPage({
                   maxQuantity={maxQuantity}
                   deliveryType={product.deliveryType}
                   turnstile={turnstile}
+                  methods={checkoutOptions}
                   buttonText={getCopy("buy_button")}
                   notice={getCopy("buy_notice")}
                 />

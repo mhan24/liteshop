@@ -3,6 +3,7 @@ import { db, type DbTransaction } from "@/db";
 import { notifyLogs, orders, paymentAnomalies, products } from "@/db/schema";
 import type { OrderStatus, Product } from "@/db/schema";
 import { generateOrderNo } from "@/lib/order-no";
+import type { CheckoutMethod } from "@/server/payment";
 import { getSiteUrl } from "@/server/settings";
 import { resolvePaymentProvider, PaymentCreationError } from "@/server/payment";
 import { releaseOrderStock } from "@/server/delivery/release-stock";
@@ -27,6 +28,8 @@ export interface CreateOrderInput {
   email: string;
   quantity: number;
   note?: string;
+  /** 前台选择的支付方式；缺省走 auto（仅网关渠道） */
+  paymentMethod?: CheckoutMethod;
 }
 
 export interface CreateOrderResult {
@@ -55,7 +58,11 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     throw new OrderError("INVALID_INPUT", "备注过长（最多 500 字）");
   }
 
-  const provider = resolvePaymentProvider();
+  // 交易所收款走独立入口（需分配唯一应付金额），此处拒绝而非静默忽略
+  if (input.paymentMethod === "exchange") {
+    throw new OrderError("UNSUPPORTED_METHOD", "交易所收款暂不支持从该入口下单");
+  }
+  const provider = resolvePaymentProvider(input.paymentMethod);
   const siteUrl = getSiteUrl();
   const startedAt = Date.now();
 
