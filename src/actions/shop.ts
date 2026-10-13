@@ -1,5 +1,11 @@
 "use server";
 
+import { clientIpFromHeaders } from "@/server/security/client-ip";
+import {
+  checkCancelRateLimit,
+  checkLookupMissRateLimit,
+  checkLookupRateLimit,
+} from "@/server/security/rate-limit";
 import {
   canRepurchase,
   createOrder,
@@ -79,8 +85,21 @@ export async function lookupOrderAction(
   if (!orderNo.trim() || !email.trim()) {
     return { error: "请填写订单号与下单邮箱" };
   }
+
+  // 独立限流：查单是双因子接口，不限流会成为邮箱枚举通道
+  const ip = await clientIpFromHeaders();
+  const lim = checkLookupRateLimit(ip);
+  if (!lim.ok) {
+    return { error: lim.message ?? "查询过于频繁，请稍后再试" };
+  }
+
   const order = lookupOrder(orderNo, email);
   if (!order) {
+    // 双因子不匹配单独计数：用更紧的预算压制撞库/枚举
+    const miss = checkLookupMissRateLimit(ip);
+    if (!miss.ok) {
+      return { error: miss.message ?? "查询失败次数过多，请稍后再试" };
+    }
     return { error: "没有找到匹配的订单，请核对订单号与邮箱" };
   }
   return { order };
@@ -103,6 +122,12 @@ export async function cancelOrderAction(
 
   if (!orderNo.trim() || !email.trim()) {
     return { error: "请填写订单号与下单邮箱后再取消" };
+  }
+
+  // 独立限流：取消是写操作（会释放库存），需与查单分开预算
+  const cancelLim = checkCancelRateLimit(await clientIpFromHeaders());
+  if (!cancelLim.ok) {
+    return { error: cancelLim.message ?? "操作过于频繁，请稍后再试" };
   }
 
   const result = cancelPendingOrder(orderNo, email);

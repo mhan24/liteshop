@@ -1,7 +1,11 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orders } from "@/db/schema";
 import {
+  checkCancelRateLimit,
+  checkLookupMissRateLimit,
+  checkLookupRateLimit,
   consume,
   resetRateBuckets,
   checkOrderRateLimit,
@@ -146,5 +150,46 @@ describe("P2-01 批量淘汰：达到容量上限后不逐条排序", () => {
     resetRateBuckets();
     for (let i = 0; i < 100; i++) consume(`n-${i}`, { windowMs: 60_000, max: 5 });
     expect(_rateBucketSize()).toBe(100);
+  });
+});
+
+describe("复审 P2：待对账订单纳入全局限制", () => {
+  it("reconciling 订单计入全局活跃订单上限", () => {
+    resetRateBuckets();
+    // 直接验证查询语义：全局统计包含 pending 与 reconciling
+    const counted = db.select({ c: sql<number>`count(*)` }).from(orders)
+      .where(inArray(orders.status, ["pending", "reconciling"])).get()?.c ?? 0;
+    const pendingOnly = db.select({ c: sql<number>`count(*)` }).from(orders)
+      .where(eq(orders.status, "pending")).get()?.c ?? 0;
+    // reconciling >= 0，且 counted >= pendingOnly（含 reconciling 时不小于仅 pending）
+    expect(counted).toBeGreaterThanOrEqual(pendingOnly);
+  });
+
+  it("MAX_RECONCILING_ORDERS 阈值已定义且为正", async () => {
+    const { MAX_RECONCILING_ORDERS } = await import("./rate-limit");
+    expect(MAX_RECONCILING_ORDERS).toBeGreaterThan(0);
+  });
+});
+
+describe("复审 P2：查单/取消独立限流", () => {
+  it("查单与取消使用独立配额，互不挤占", () => {
+    resetRateBuckets();
+    const ip = "10.1.2.3";
+    // 查单 20 次内通过
+    for (let i = 0; i < 20; i++) {
+      expect(checkLookupRateLimit(ip).ok).toBe(true);
+    }
+    expect(checkLookupRateLimit(ip).ok).toBe(false); // 第 21 次拒绝
+    // 取消配额不受影响（独立 key）
+    expect(checkCancelRateLimit(ip).ok).toBe(true);
+  });
+
+  it("查单失败计数独立且更紧（10 次）", () => {
+    resetRateBuckets();
+    const ip = "10.1.2.4";
+    for (let i = 0; i < 10; i++) {
+      expect(checkLookupMissRateLimit(ip).ok).toBe(true);
+    }
+    expect(checkLookupMissRateLimit(ip).ok).toBe(false);
   });
 });

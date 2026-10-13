@@ -250,7 +250,7 @@ describe("manual 商品全链路", () => {
 });
 
 describe("回跳页受限视图", () => {
-  it("不含交付内容，含掩码邮箱", async () => {
+  it("不含交付内容，且不泄露邮箱线索", async () => {
     const p = seedAutoProduct(["C1"]);
     const r = await createOrder({ email: "someone@example.com", quantity: 1, slug: p.slug });
     handlePaymentNotify("mock", paySuccess(r.orderNo));
@@ -258,7 +258,8 @@ describe("回跳页受限视图", () => {
     const v = getOrderStatusView(r.orderNo);
     expect(v?.status).toBe("completed");
     expect(v?.deliveryContent).toBeNull();
-    expect(v?.emailMasked).toBe("so***@example.com");
+    // 仅凭订单号即可访问 → 不得返回可推测的脱敏邮箱
+    expect(v?.emailMasked).toBe("***");
   });
 });
 

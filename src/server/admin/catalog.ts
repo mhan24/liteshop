@@ -162,9 +162,16 @@ export function updateProduct(id: number, input: ProductInput): { ok: boolean; m
   // 旧订单仍然有效、仍可能付款并要求交付，库存系统却不再承认其占用，
   // 于是切回有限库存后可再次卖出 → 实际承诺超过可用库存（超卖）。
   // 正确做法是要求管理员先完成、取消或核对相关订单，再做模式切换。
-  if (modeChanged && existing.deliveryType === "manual") {
+  //
+  // 判定依据必须是**未结束订单的下单快照**（orders.delivery_type），
+  // 而不是商品当前的 delivery_type —— 商品类型可被反复修改，
+  // 而旧订单始终按下单时的类型履约与释放库存。
+  // 只看商品当前类型会被「manual → auto → manual」序列绕过：
+  // 第二次编辑时 existing.deliveryType 已是 auto，守卫不触发，
+  // 于是有限库存 1 件可被买家 B 买走，而 A 的人工订单仍然有效。
+  if (modeChanged) {
     const activeOrder = db
-      .select({ orderNo: orders.orderNo })
+      .select({ orderNo: orders.orderNo, deliveryType: orders.deliveryType })
       .from(orders)
       .where(
         and(
@@ -176,7 +183,9 @@ export function updateProduct(id: number, input: ProductInput): { ok: boolean; m
     if (activeOrder) {
       return {
         ok: false,
-        message: `该商品存在未结束订单（${activeOrder.orderNo}），请先完成或取消后再切换库存模式`,
+        message: `该商品存在未结束订单（${activeOrder.orderNo}，下单时为${
+          activeOrder.deliveryType === "auto" ? "自动发卡" : "人工发货"
+        }），请先完成或取消后再切换库存模式`,
       };
     }
   }

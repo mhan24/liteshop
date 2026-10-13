@@ -74,3 +74,47 @@ describe("P1-01 库存模式切换导致超卖", () => {
     expect(stockOf(p.id)).toBe(0);
   });
 });
+
+describe("P1 复审：守卫只查商品当前类型，未查历史订单快照", () => {
+  const baseInput = (slug: string) => ({
+    name: "切换测试",
+    slug,
+    description: "d",
+    imageUrl: "",
+    priceCentsText: "1.00",
+    currency: "USD",
+    deliveryType: "manual",
+    status: "on",
+    sort: 0,
+  });
+
+  it("manual → auto → manual 序列不再绕过守卫（修复后）", async () => {
+    const { createOrder } = await import("./create-order");
+    const { updateProduct } = await import("@/server/admin/catalog");
+    const p = seedManual(-1);
+
+    // 买家 A 按人工发货下单（不限库存）
+    const a = await createOrder({ email: "a@test.dev", quantity: 1, slug: p.slug });
+    const aCharged = db.select().from(orders).where(eq(orders.orderNo, a.orderNo)).get()!;
+    expect(aCharged.deliveryType).toBe("manual");
+    expect(aCharged.status).toBe("pending");
+
+    // ① 人工 → 自动（库存仍不限）
+    expect(updateProduct(p.id, { ...baseInput(p.slug), deliveryType: "auto", stockLimit: -1 }).ok).toBe(true);
+
+    // ② 自动 → 人工 + 有限库存 1：A 的人工订单仍未结束 → 必须被拒绝
+    const res = updateProduct(p.id, { ...baseInput(p.slug), deliveryType: "manual", stockLimit: 1 });
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("未结束订单");
+    expect(res.message).toContain("人工发货"); // 提示依据的是订单快照
+
+    // 库存仍是不限，未被写成 1
+    expect(stockOf(p.id)).toBe(-1);
+
+    // A 取消后才允许切换
+    const { cancelPendingOrder } = await import("./fulfill-order");
+    expect(cancelPendingOrder(a.orderNo, "a@test.dev").ok).toBe(true);
+    expect(updateProduct(p.id, { ...baseInput(p.slug), deliveryType: "manual", stockLimit: 1 }).ok).toBe(true);
+    expect(stockOf(p.id)).toBe(1);
+  });
+});

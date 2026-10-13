@@ -68,7 +68,11 @@ export function getOrderStatusView(orderNo: string): PublicOrderView | null {
   expireOrderIfOverdue(no);
   const order = db.select().from(orders).where(eq(orders.orderNo, no)).get();
   if (!order) return null;
-  return toPublicView(order, { includeDelivery: false });
+  // 不返回邮箱：本接口**仅凭订单号**即可访问，而脱敏邮箱会暴露
+  // 「查单 + 取货」双因子的第二项线索（如 ab***@example.com 很容易猜全）。
+  // 邮箱只在双因子校验通过后的 lookupOrder() 结果里展示。
+  const view = toPublicView(order, { includeDelivery: false });
+  return { ...view, emailMasked: "***" };
 }
 
 function toPublicView(order: Order, opts?: { includeDelivery?: boolean }): PublicOrderView {

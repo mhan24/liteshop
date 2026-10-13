@@ -1,4 +1,4 @@
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orders } from "@/db/schema";
 
@@ -31,6 +31,8 @@ export const ORDER_RATE_RULES = {
   perEmail: { windowMs: 600_000, max: 3 } as RateLimitRule,
 } as const;
 
+/** 待对账订单上限：这类订单占用库存且不会自动释放，需单独约束 */
+export const MAX_RECONCILING_ORDERS = 20;
 /** 全局同时存在的待支付订单上限（防换 IP/邮箱绕过） */
 export const MAX_ACTIVE_PENDING_ORDERS = 200;
 /** 同一邮箱同时存在的待支付订单上限 */
@@ -120,6 +122,29 @@ export function resetRateBuckets(): void {
 }
 
 /**
+ * 查单/取消的频率限制（独立于下单与回调）。
+ *
+ * 背景：查单接口是「订单号 + 邮箱」双因子，若不限流会成为邮箱枚举的通道；
+ * 取消订单同样按订单号 + 邮箱校验，需要独立预算，避免与其它入口
+ * 共用额度而互相挤占。
+ */
+
+/** 查单：同一 IP 每分钟 20 次 */
+export function checkLookupRateLimit(ip: string): RateLimitResult {
+  return consume(`lookup:${ip}`, { windowMs: 60_000, max: 20 });
+}
+
+/** 取消订单：同一 IP 每分钟 10 次（写操作，配额更紧） */
+export function checkCancelRateLimit(ip: string): RateLimitResult {
+  return consume(`cancel:${ip}`, { windowMs: 60_000, max: 10 });
+}
+
+/** 双因子不匹配：同一 IP 每分钟 10 次，防邮箱枚举 */
+export function checkLookupMissRateLimit(ip: string): RateLimitResult {
+  return consume(`lookup-miss:${ip}`, { windowMs: 60_000, max: 10 });
+}
+
+/**
  * 下单前的综合限流检查。
  * 顺序：IP 频率 → 邮箱频率 → 邮箱活跃订单数 → 全局活跃订单数。
  */
@@ -144,16 +169,35 @@ export function checkOrderRateLimit(ip: string, email: string): RateLimitResult 
     };
   }
 
-  // 全局兜底：防止攻击者疯狂换 IP/邮箱占满库存
+  // 全局兜底：防止攻击者疯狂换 IP/邮箱占满库存。
+  //
+  // 必须同时统计 **reconciling（待对账）**：这类订单是「创建支付结果未知」
+  // 时保留的，**同样占用库存/卡密，且不会因普通超时而自动释放**
+  // （网关可能已建单）。若不计入，网关故障期间连续产生 reconciling 订单
+  // 就能绕过本限制持续锁库存，最终导致长期无货可售。
   const active = db
     .select({ c: sql<number>`count(*)` })
     .from(orders)
-    .where(eq(orders.status, "pending"))
+    .where(inArray(orders.status, ["pending", "reconciling"]))
     .get()?.c ?? 0;
   if (active >= MAX_ACTIVE_PENDING_ORDERS) {
     return {
       ok: false,
       message: "当前下单人数较多，请稍后再试",
+    };
+  }
+
+  // 待对账订单单独监控：达到独立阈值时告警式拒绝。
+  // 这些订单无法自动释放，堆积即意味着库存被长期锁定，需人工介入。
+  const reconciling = db
+    .select({ c: sql<number>`count(*)` })
+    .from(orders)
+    .where(eq(orders.status, "reconciling"))
+    .get()?.c ?? 0;
+  if (reconciling >= MAX_RECONCILING_ORDERS) {
+    return {
+      ok: false,
+      message: "系统有待核对的支付订单，请稍后再试或联系客服",
     };
   }
 
