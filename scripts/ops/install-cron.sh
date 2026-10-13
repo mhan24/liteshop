@@ -16,9 +16,10 @@ APP_DIR="${LITESHOP_APP_DIR:-/opt/liteshop}"
 
 EXPIRE="$APP_DIR/scripts/ops/expire-cron.sh"
 BACKUP="$APP_DIR/scripts/ops/backup-cron.sh"
+EXCHANGE="$APP_DIR/scripts/ops/exchange-cron.sh"
 LOG="${LITESHOP_CRON_LOG:-/var/log/liteshop-cron.log}"
 
-for f in "$EXPIRE" "$BACKUP"; do
+for f in "$EXPIRE" "$BACKUP" "$EXCHANGE"; do
   if [ ! -f "$f" ]; then
     echo "✗ 缺少脚本：${f} (请先执行 deploy.sh 同步仓库)" >&2
     exit 1
@@ -34,6 +35,7 @@ crontab -l 2>/dev/null | grep -v 'liteshop' > "$TMP" || true
 cat >> "$TMP" <<EOF
 */5 * * * * $EXPIRE >> $LOG 2>&1
 30 3 * * * $BACKUP >> $LOG 2>&1
+* * * * * $EXCHANGE >> $LOG 2>&1
 EOF
 crontab "$TMP"
 rm -f "$TMP"

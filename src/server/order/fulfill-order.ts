@@ -201,6 +201,11 @@ function markAttemptStatus(
  * 的已签名通知也会进入可补发的人工队列 —— 会把伪造或错配的通知
  * 变成真实的补发动作。
  */
+/** provider 名是否属于交易所轮询渠道（"exchange:binance" / "exchange:okx"） */
+function isExchangeProviderName(provider: string): boolean {
+  return provider.startsWith("exchange:");
+}
+
 function validateSuccessOwnership(
   tx: DbTransaction,
   order: Order,
@@ -211,6 +216,43 @@ function validateSuccessOwnership(
     return { ok: false, message: "回调缺少 trade_id，拒绝处理" };
   }
   const current = getCurrentAttempt(order.orderNo, tx);
+
+  if (isExchangeProviderName(payload.provider)) {
+    // 交易所收款（轮询）：**下单时并不存在 trade_id**（收款走账户流水，
+    // 由我们分配唯一金额，到账时才产生交易所交易号）。因此不能像网关回调
+    // 那样比对 trade_id。归属凭证改为：
+    //   1) 到账金额 == 订单的交易所应付金额（唯一金额即归属证明，
+    //      同一账户下每笔待支付订单金额唯一，见 amount.allocateUniquePayable）
+    //   2) 到账时间落在订单有效期内（+宽限）
+    //   3) 该笔 trade_id 尚未被任何订单占用（由扫描侧的去重 + notify_logs 幂等保证）
+    // 金额与时间窗的严格校验在**扫描侧 matchTransactions** 已完成；这里
+    // 再校验一次金额，作为纵深防御：即使扫描逻辑出错，也不能仅凭
+    // 「orderNo 存在」就发货。
+    const expected = order.expectedActualAmount
+      ? String(order.expectedActualAmount).trim().split(/\s+/)[0]
+      : null;
+    if (!expected) {
+      return { ok: false, message: "交易所订单缺少应付金额快照，拒绝处理" };
+    }
+    if (payload.amount == null) {
+      return { ok: false, message: "交易所到账缺少金额字段" };
+    }
+    try {
+      const paidMinor = toMinorUnits(payload.amount, order.currency);
+      const expectedMinor = toMinorUnits(expected, order.currency);
+      // 实付必须 ≥ 应付（零头由商家吸收），少付一律拒绝
+      if (paidMinor < expectedMinor) {
+        return {
+          ok: false,
+          message: `交易所到账金额不足: 实付 ${payload.amount}，应付 ${expected} ${order.currency}`,
+        };
+      }
+    } catch {
+      return { ok: false, message: `交易所到账金额非法: ${String(payload.amount)}` };
+    }
+    return { ok: true };
+  }
+
   if (current) {
     if (current.provider !== payload.provider) {
       return { ok: false, message: "支付渠道与交易快照不匹配" };
@@ -273,6 +315,80 @@ function validateHistoricalAttempt(
       normalizeAmountString(payload.actualAmount) === normalizeAmountString(attempt.expectedActualAmount);
   }
   return { historical: true, ok };
+}
+
+/**
+ * 交易所轮询到账的结算入口。
+ *
+ * 与 handlePaymentNotify 的区别：**没有回调、没有签名**（交易所不提供 webhook），
+ * 真实性来自「我们用自己的只读 API Key 拉到的账户流水」这一前提。
+ * 因此：
+ * - 跳过验签，但**保留**金额与归属校验（validateSuccessOwnership）
+ * - 仍然写入 notify_logs 留痕，重复扫描同一笔流水不会重复发货
+ * - 其后的幂等、异常到账、发货路径与回调完全共用 processNotify
+ */
+export function settleExchangePayment(input: {
+  provider: string;
+  orderNo: string;
+  tradeId: string;
+  /** 交易所记录的到账金额（字符串） */
+  amount: string;
+  /** 到账时间（毫秒） */
+  paidAt: Date;
+  /** 原始流水行（审计用） */
+  raw: unknown;
+}): HandleNotifyResult {
+  const payload: import("@/server/payment").NotifyPayload = {
+    // 加前缀以标记「轮询型交易所渠道」，使归属校验走金额/时间窗分支
+    provider: `exchange:${input.provider}`,
+    orderNo: input.orderNo,
+    tradeId: input.tradeId,
+    amount: input.amount,
+    actualAmount: null,
+    status: 2, // 成功到账
+    blockTxnId: null,
+  };
+
+  const logId = db
+    .insert(notifyLogs)
+    .values({
+      provider: `exchange:${input.provider}`,
+      orderNo: input.orderNo,
+      payloadHash: sha256Hex(`${input.provider}|${input.tradeId}|${input.orderNo}`),
+      payload: JSON.stringify({ amount: input.amount, paidAt: input.paidAt.toISOString(), raw: input.raw }).slice(0, 10000),
+      status: 2,
+      handled: false,
+    })
+    .returning({ id: notifyLogs.id })
+    .get()?.id;
+
+  const result = db.transaction(
+    (tx) => {
+      const seen = tx
+        .select({ id: notifyLogs.id })
+        .from(notifyLogs)
+        .where(
+          and(
+            eq(notifyLogs.payloadHash, sha256Hex(`${input.provider}|${input.tradeId}|${input.orderNo}`)),
+            eq(notifyLogs.handled, true)
+          )
+        )
+        .get();
+      if (seen) {
+        return { handled: true, retryable: false, message: "该笔到账已处理过（幂等跳过）" } satisfies HandleNotifyResult;
+      }
+      return processNotify(tx, payload);
+    },
+    { behavior: "immediate" }
+  );
+
+  if (logId) {
+    db.update(notifyLogs)
+      .set({ handled: result.handled, orderNo: input.orderNo })
+      .where(eq(notifyLogs.id, logId))
+      .run();
+  }
+  return result;
 }
 
 function processNotify(

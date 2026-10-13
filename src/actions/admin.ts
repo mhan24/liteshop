@@ -3,6 +3,11 @@
 import { envConfig } from "@/lib/env";
 import { secureCookie } from "@/lib/cookie-policy";
 import { normalizeHttpUrl } from "@/lib/http-url";
+import { getExchangeClient } from "@/server/exchange";
+import {
+  loadExchangeCredentials,
+  saveExchangeChannel,
+} from "@/server/exchange/channel";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -404,6 +409,67 @@ export async function saveSiteSettingsAction(formData: FormData) {
   logAdmin("settings.site", "-", JSON.stringify({ siteName, siteUrl, threshold, currency }), await clientIp(), session.u);
   revalidatePath("/admin/settings");
   await back("/admin/settings", "站点设置已保存", true, "site");
+}
+
+/**
+ * 保存交易所收款渠道配置（凭据加密存储，前端不回显密钥）。
+ */
+export async function saveExchangeChannelAction(formData: FormData) {
+  const session = await requireSession();
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
+  const provider = String(formData.get("provider") ?? "");
+  if (provider !== "binance" && provider !== "okx") {
+    await back("/admin/settings", "未知的交易所渠道", false, "pay");
+  }
+  const result = saveExchangeChannel(provider as "binance" | "okx", {
+    enabled: formData.get("enabled") === "on" || formData.get("enabled") === "true",
+    accountId: String(formData.get("accountId") ?? ""),
+    // checkbox：勾选提交 "USDC"，未勾选则字段缺失 → 默认 USDT
+    asset: String(formData.get("asset") ?? "USDT") === "USDC" ? "USDC" : "USDT",
+    rate: String(formData.get("rate") ?? "1"),
+    apiKey: String(formData.get("apiKey") ?? ""),
+    // 留空 = 保留原密钥（避免回显后误清空）
+    apiSecret: String(formData.get("apiSecret") ?? ""),
+    passphrase: String(formData.get("passphrase") ?? ""),
+  });
+  if (!result.ok) {
+    await back("/admin/settings", result.error ?? "保存失败", false, "pay");
+  }
+  logAdmin(
+    "settings.exchange",
+    provider,
+    JSON.stringify({ accountId: String(formData.get("accountId") ?? "").trim(), enabled: result.ok }),
+    await clientIp(),
+    session.u
+  );
+  await back("/admin/settings", `交易所渠道 ${provider} 已保存`, true, "pay");
+}
+
+/** 校验交易所凭据是否可用（不落库，仅测试连通性与只读权限） */
+export async function testExchangeChannelAction(formData: FormData) {
+  await requireSession();
+  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
+  const provider = String(formData.get("provider") ?? "");
+  if (provider !== "binance" && provider !== "okx") {
+    await back("/admin/settings", "未知的交易所渠道", false, "pay");
+  }
+  const loaded = loadExchangeCredentials(provider as "binance" | "okx");
+  if (!loaded) {
+    await back("/admin/settings", "请先保存渠道配置再测试", false, "pay");
+  }
+  const check = await getExchangeClient(provider as "binance" | "okx").validateCredentials(loaded!.cred);
+  if (!check.ok) {
+    await back("/admin/settings", `凭据校验失败：${check.error ?? "未知原因"}`, false, "pay");
+  }
+  if (check.accountId && check.accountId !== loaded!.cred.accountId) {
+    await back(
+      "/admin/settings",
+      `账户不匹配：API Key 返回 UID ${check.accountId}，但配置为 ${loaded!.cred.accountId}`,
+      false,
+      "pay"
+    );
+  }
+  await back("/admin/settings", `凭据校验通过（账户 ${check.accountId}）`, true, "pay");
 }
 
 export async function savePaymentConfigAction(formData: FormData) {

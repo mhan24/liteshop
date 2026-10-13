@@ -30,13 +30,19 @@ describe("交易所凭据加密", () => {
   });
 
   it("篡改密文后认证失败 → 返回 null（绝不返回半解数据）", () => {
-    const enc = encryptSecret("important");
-    const parts = enc.split(":");
-    // 翻转密文最后一个字符
-    const ct = parts[4];
-    const flipped = ct.slice(0, -2) + (ct.endsWith("A") ? "B" : "A") + ct.slice(-1);
-    const tampered = [parts[0], parts[1], parts[2], parts[3], flipped].join(":");
-    expect(decryptSecret(tampered)).toBeNull();
+    // 注意：必须**真正改动**密文的一个字符。原实现只替换倒数第二位，
+    // 当该位本就不是 "A" 时会得到与原文相同的串 → 用例变成随机通过/失败。
+    for (let i = 0; i < 40; i += 1) {
+      const enc = encryptSecret("important");
+      const parts = enc.split(":");
+      // 取第 i 个字符翻转（覆盖 IV/标签/密文各区域）
+      const idx = i % parts[4].length;
+      const ch = parts[4][idx];
+      const flipped = ch === "A" ? "B" : "A";
+      const tampered = [...parts];
+      tampered[4] = parts[4].slice(0, idx) + flipped + parts[4].slice(idx + 1);
+      expect(decryptSecret(tampered.join(":")), `第 ${idx} 位翻转`).toBeNull();
+    }
   });
 
   it("篡改认证标签同样失败", () => {

@@ -2,6 +2,8 @@ import { csrfToken } from "@/lib/session";
 import { getSessionVersion } from "@/server/auth";
 import {
   changeAdminCredentialsAction,
+  saveExchangeChannelAction,
+  testExchangeChannelAction,
   savePaymentConfigAction,
   saveSiteSettingsAction,
   saveCopySettingsAction,
@@ -12,6 +14,7 @@ import {
 import { getAdminCredentials } from "@/server/auth";
 import { DEFAULT_REPO_URL, DEFAULT_SUPPORT_URL } from "@/server/settings";
 import { getAdminPath } from "@/lib/admin-path";
+import { getExchangeChannelView } from "@/server/exchange/channel";
 import { COPY_FIELDS, getCopyAll } from "@/server/copy";
 import { takeFlash } from "@/lib/flash-store";
 import { getPaymentConfig, getAllSettings, getSiteCurrency, SETTING_KEYS } from "@/server/settings";
@@ -51,6 +54,8 @@ export default async function AdminSettingsPage({
   const smtpEnabled = settings["smtp_enabled"] === "1";
   const siteCurrency = getSiteCurrency();
   const copyValues = getCopyAll();
+  const binanceChannel = getExchangeChannelView("binance");
+  const okxChannel = getExchangeChannelView("okx");
 
   return (
     <div className="space-y-6">
@@ -201,6 +206,122 @@ export default async function AdminSettingsPage({
             <div className="flex items-end sm:col-span-2">
               <Button type="submit">保存渠道配置</Button>
             </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">支付渠道 · 交易所收款（币安 / 欧易）</CardTitle>
+          <CardDescription>
+            买家通过「内部转账」把 <b>精确金额</b> 转入你的交易所账户，到账由定时扫描自动识别并发货。
+            适用于无法接入 bepusdt 自建网关的场景。**只读** API Key 即可，请勿开启提现权限。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={saveExchangeChannelAction} className="grid max-w-2xl gap-5">
+            <input type="hidden" name="csrf" value={csrf} />
+            <input type="hidden" name="provider" value="binance" />
+            <div className="flex items-center gap-6">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="enabled" defaultChecked={binanceChannel.enabled} />
+                启用币安（Binance）
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="asset" value="USDC" defaultChecked={binanceChannel.asset === "USDC"} />
+                收款币种为 USDC（不勾选则 USDT）
+              </label>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="ex-account">Binance ID（收款账户 UID）</Label>
+                <Input id="ex-account" name="accountId" inputMode="numeric" defaultValue={binanceChannel.accountId} placeholder="123456789" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ex-rate">汇率（1 USDT 值多少站点币种）</Label>
+                <Input id="ex-rate" name="rate" defaultValue={binanceChannel.rate} placeholder="1" />
+                <p className="text-xs text-muted-foreground">
+                  站点币种为 USD 时填 1；为 CNY 时填当前汇率（如 7.25）。
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ex-apikey">API Key（只读）</Label>
+                <Input id="ex-apikey" name="apiKey" defaultValue="" placeholder={binanceChannel.hasApiKey ? "已保存（留空保持不变）" : "填写 API Key"} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ex-secret">API Secret（加密存储）</Label>
+                <Input id="ex-secret" name="apiSecret" type="password" defaultValue="" placeholder={binanceChannel.hasSecret ? "已保存（留空保持不变）" : "填写 API Secret"} />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              密钥以 AES-256-GCM 加密后入库，页面只显示「是否已保存」，永不回显明文。
+              建议在交易所后台把本服务器 IP 加入 API Key 白名单。
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <Button type="submit">保存币安渠道</Button>
+            </div>
+          </form>
+
+          <form action={testExchangeChannelAction} className="mt-4 border-t border-border pt-4">
+            <input type="hidden" name="csrf" value={csrf} />
+            <input type="hidden" name="provider" value="binance" />
+            <Button type="submit" variant="outline">校验币安凭据</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">支付渠道 · 交易所收款（欧易 OKX）</CardTitle>
+          <CardDescription>
+            与币安同一套流程；OKX 额外需要 API Key 的 passphrase。收款 UID 必须与 API Key 所属账户一致。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={saveExchangeChannelAction} className="grid max-w-2xl gap-5">
+            <input type="hidden" name="csrf" value={csrf} />
+            <input type="hidden" name="provider" value="okx" />
+            <div className="flex items-center gap-6">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="enabled" defaultChecked={okxChannel.enabled} />
+                启用欧易（OKX）
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="asset" value="USDC" defaultChecked={okxChannel.asset === "USDC"} />
+                收款币种为 USDC（不勾选则 USDT）
+              </label>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="okx-account">OKX UID（收款账户）</Label>
+                <Input id="okx-account" name="accountId" inputMode="numeric" defaultValue={okxChannel.accountId} placeholder="987654321" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="okx-rate">汇率（1 USDT 值多少站点币种）</Label>
+                <Input id="okx-rate" name="rate" defaultValue={okxChannel.rate} placeholder="1" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="okx-apikey">API Key（只读）</Label>
+                <Input id="okx-apikey" name="apiKey" defaultValue="" placeholder={okxChannel.hasApiKey ? "已保存（留空保持不变）" : "填写 API Key"} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="okx-secret">API Secret（加密存储）</Label>
+                <Input id="okx-secret" name="apiSecret" type="password" defaultValue="" placeholder={okxChannel.hasSecret ? "已保存（留空保持不变）" : "填写 API Secret"} />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="okx-passphrase">Passphrase</Label>
+                <Input id="okx-passphrase" name="passphrase" type="password" defaultValue="" placeholder={okxChannel.hasPassphrase ? "已保存（留空保持不变）" : "创建 API Key 时设置的 passphrase"} />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-end gap-3">
+              <Button type="submit">保存欧易渠道</Button>
+            </div>
+          </form>
+
+          <form action={testExchangeChannelAction} className="mt-4 border-t border-border pt-4">
+            <input type="hidden" name="csrf" value={csrf} />
+            <input type="hidden" name="provider" value="okx" />
+            <Button type="submit" variant="outline">校验欧易凭据</Button>
           </form>
         </CardContent>
       </Card>

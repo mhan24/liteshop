@@ -243,7 +243,7 @@ function markOrderUnknown(orderNo: string, provider: string, err: unknown): void
   );
 }
 
-function insertOrderWithRetry(
+export function insertOrderWithRetry(
   tx: DbTransaction,
   product: Product,
   data: { email: string; note: string; quantity: number }
