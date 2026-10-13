@@ -167,7 +167,19 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
       }
       const parsed = json as CreateOrderResponse;
       const data = parsed.data;
-      if (!data?.trade_id || !data.payment_url) {
+      // 关键字段**类型**校验：必须是**非空字符串**。
+      //
+      // 仅用 `!data.trade_id` 判断不够 —— 对象/数组/数字都是 truthy，
+      // 会通过检查后被当成字符串写入 SQLite 文本列。
+      // 绑定失败发生在 createPayment() 返回**之后**（订单回写阶段），
+      // 已超出 createOrder() 的 try/catch 范围 → 订单停留在 pending、
+      // 无有效期，却已占用库存（人工商品）或卡密（自动商品）。
+      if (
+        typeof data?.trade_id !== "string" ||
+        data.trade_id.trim() === "" ||
+        typeof data?.payment_url !== "string" ||
+        data.payment_url.trim() === ""
+      ) {
         // HTTP 200 但缺少 trade_id / payment_url —— **不能**断定未建单。
         // 网关可能已创建交易，只是响应数据不完整（异常回包、代理截断等）。
         // 若按 rejected 处理，上层会补偿关单并释放库存，
