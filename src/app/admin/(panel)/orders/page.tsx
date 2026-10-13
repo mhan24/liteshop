@@ -108,7 +108,7 @@ export default async function AdminOrdersPage({
                   <div className="space-y-0.5">
                     <div className="font-mono text-xs">{a.orderNo}</div>
                     <div className="text-xs">
-                      {a.kind === "duplicate_payment" ? "重复付款（已交付，请核对退款）" : "迟到或历史交易到账"}
+                      {a.kind === "duplicate_payment" ? "另一笔付款（请核对退款）" : "迟到或历史交易到账"}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {a.productName ?? "—"} · {a.amount} {a.currency} · 回调时状态{" "}
@@ -128,7 +128,7 @@ export default async function AdminOrdersPage({
                   </div>
                   {a.status === "open" ? (
                     <div className="flex flex-wrap gap-2">
-                      {a.orderStatus !== "completed" ? (
+                      {a.orderStatus !== "completed" && a.kind !== "duplicate_payment" ? (
                         <>
                           <form action={reissueAnomalyAction} className="flex items-center gap-1">
                             <input type="hidden" name="csrf" value={csrf} />

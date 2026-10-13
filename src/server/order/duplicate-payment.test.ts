@@ -3,11 +3,11 @@ import { eq } from "drizzle-orm";
 import { expect, it } from "vitest";
 import { db } from "@/db";
 import { cards, orders, paymentAttempts, paymentAnomalies } from "@/db/schema";
-import { reissueAnomaly } from "@/server/admin/anomalies";
+import { acceptAnomalyForManualDelivery, reissueAnomaly, resolveAnomalyAs } from "@/server/admin/anomalies";
 import { buildMockNotifyBody } from "@/server/payment/mock";
-import { seedAuto } from "./test-helpers";
+import { seedAuto, seedManual } from "./test-helpers";
 import { createOrder } from "./create-order";
-import { handlePaymentNotify } from "./fulfill-order";
+import { handlePaymentNotify, manualDeliver } from "./fulfill-order";
 
 for (const missingCurrent of [false, true]) {
 it(`历史到账补发后，当前交易另行到账必须登记且只交付一次（缺失尝试=${missingCurrent}）`, async () => {
@@ -52,3 +52,34 @@ it("没有支付尝试记录的传统已交付订单仍可按已支付快照幂�
   expect(notify().handled).toBe(true);
   expect(db.select().from(paymentAnomalies).where(eq(paymentAnomalies.orderNo,o.orderNo)).all()).toHaveLength(0);
 });
+
+
+for(const completed of [false,true]){
+  it(`人工商品核实旧款后，另一笔新到账独立登记（已交付=${completed}）`,async()=>{
+    const p=seedManual(2);
+    const r=await createOrder({slug:p.slug,email:"manual-double@example.test",quantity:1});
+    const o=db.select().from(orders).where(eq(orders.orderNo,r.orderNo)).get()!;
+    const old=randomUUID();
+    db.insert(paymentAttempts).values({orderNo:o.orderNo,provider:"mock",tradeId:old,
+      amountCents:o.totalCents,currency:o.currency,status:"expired",isCurrent:false}).run();
+    const notify=(tradeId:string)=>handlePaymentNotify("mock",buildMockNotifyBody({orderNo:o.orderNo,
+      tradeId,amountCents:BigInt(o.totalCents),currency:o.currency,status:2}));
+    notify(old);
+    const a=db.select().from(paymentAnomalies).where(eq(paymentAnomalies.orderNo,o.orderNo)).get()!;
+    expect(acceptAnomalyForManualDelivery(a.id,"核实旧款").ok).toBe(true);
+    expect(db.select().from(paymentAttempts).where(eq(paymentAttempts.tradeId,old)).get()!.status).toBe("paid");
+    if(completed)expect(manualDeliver(o.orderNo,"manual delivery").ok).toBe(true);
+    const before=db.select().from(orders).where(eq(orders.orderNo,o.orderNo)).get()!;
+    expect(notify(o.tradeId!).handled).toBe(false);
+    const rows=db.select().from(paymentAnomalies).where(eq(paymentAnomalies.orderNo,o.orderNo)).all();
+    expect(rows).toHaveLength(2);
+    const extra=rows.find(a=>a.tradeId===o.tradeId)!;
+    expect(extra.kind).toBe("duplicate_payment");
+    expect(acceptAnomalyForManualDelivery(extra.id,"不可重复认领").ok).toBe(false);
+    expect(reissueAnomaly(extra.id,"不可重复补发").ok).toBe(false);
+    expect(resolveAnomalyAs(extra.id,"refunded","核对后已退款").ok).toBe(true);
+    expect(db.select().from(orders).where(eq(orders.orderNo,o.orderNo)).get()).toEqual(before);
+    expect(notify(o.tradeId!).handled).toBe(true);
+    expect(db.select().from(paymentAnomalies).where(eq(paymentAnomalies.orderNo,o.orderNo)).all()).toHaveLength(2);
+  });
+}

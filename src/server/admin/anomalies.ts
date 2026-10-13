@@ -184,6 +184,13 @@ export function acceptAnomalyForManualDelivery(anomalyId: number, note: string):
         .where(eq(orders.id, order.id))
         .run();
 
+      // 管理员核实的是异常对应的交易，而不是订单当前仍待付款的另一笔。
+      if (loaded.anomaly.tradeId) {
+        tx.update(paymentAttempts)
+          .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
+          .where(eq(paymentAttempts.tradeId, loaded.anomaly.tradeId)).run();
+      }
+
       tx.update(paymentAnomalies)
         .set({
           status: "reissued",
@@ -214,6 +221,9 @@ function loadAnomalyForAction(
   if (!anomaly) return { ok: false, message: "异常记录不存在" };
   if (anomaly.status !== "open") {
     return { ok: false, message: `该异常已处理（${anomaly.status}）` };
+  }
+  if (anomaly.kind === "duplicate_payment") {
+    return { ok: false, message: "另一笔付款仅供核对退款，不能再次补发或转入人工发货" };
   }
   const order = tx.select().from(orders).where(eq(orders.orderNo, anomaly.orderNo)).get();
   if (!order) return { ok: false, message: "关联订单不存在" };
