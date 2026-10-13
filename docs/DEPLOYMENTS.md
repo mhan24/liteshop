@@ -4,6 +4,80 @@
 
 ---
 
+## 2026-10-13 · `e1d1c5e`（当前生产）
+
+**状态**：已上线并通过验收（审计完全通过后发布）
+
+### 提交
+
+| 项 | 值 |
+|---|---|
+| SHA | `e1d1c5e10579b0d01d47241e215d33435c932a67` |
+| 短 SHA | `e1d1c5e` |
+| 部署时间 | 2026-10-13T12:08+08:00 |
+| 上一版本 | `92a607b4aca8bb698b584f1b02d3a969d68cbd44` |
+| CI | ✅ success |
+| 新迁移 | **无**（仍为 9） |
+
+### 本次追赶的提交
+
+| SHA | 内容 |
+|---|---|
+| `19ff248` | 部署记录（文档） |
+| `8df87d3` | 库存模式切换守卫、网关异常分类、回调日志不落库、限流容量 |
+| `0c979b2` | 限流批量淘汰、网关 408/429 分类、重试路径真实测试 |
+| `96d10ab` | 网关响应 null/标量/数组按 unknown、错误分类加固 |
+| `e1d1c5e` | 关键字段类型校验（防库存滞留） |
+
+### 数据库
+
+| 项 | 值 |
+|---|---|
+| 迁移数 | 9（与部署前一致，无新迁移） |
+| integrity_check | ok |
+| foreign_key_check | ok |
+| 数据 | orders 5 / products 1 / cards 2 / payment_attempts 5 / payment_anomalies 0 |
+
+### 部署前备份
+
+- `pre-e1d1c5e-20261013-120841.db`（216K，VACUUM INTO）
+- `env-pre-e1d1c5e-20261013-120841.bak`
+
+### 验收项目
+
+| 项目 | 结果 |
+|---|---|
+| 容器健康 | 应用 + Caddy 双 healthy（`--wait` 门控） |
+| 部署自检 | ✅ 运维脚本就位、cron 指向有效 |
+| 数据完整性 | integrity ok / foreign_key ok |
+| 数据量 | 与部署前完全一致 |
+| **服务器 vs git** | ✅ **156 个文件逐文件 sha256 完全一致** |
+| 站点 | `/` `/orders` `/products/voxi` `/admin/login` 全 200 |
+| 支付页面 | 回跳页、待支付页均 200 |
+| 安全响应头 | 3/3（CSP / HSTS / Permissions-Policy） |
+| mock 回调入口 | 404 |
+| cron 端点 | 正常 |
+| **真实网关建单** | ✅ `expiration_time=899`；`trade_id`/`payment_url` 均为 string |
+| **冷启动** | ✅ 停容器后重启，健康通过 |
+| cron 脚本 | ✅ expire-cron.sh / backup-cron.sh 均存在可执行 |
+
+### 本轮加固的行为确认（生产实况）
+
+| 检查项 | 结果 |
+|---|---|
+| 重购资格 | 已收款订单 `canRepurchase=false`；未收款 `closed` 可重购 |
+| 人工商品 | 0（P1-01 库存模式守卫当前无触发对象） |
+| 未结束订单 | 0 |
+
+### 回滚方式
+
+```bash
+git checkout 92a607b4aca8bb698b584f1b02d3a969d68cbd44
+./scripts/deploy.sh
+```
+
+---
+
 ## 2026-10-12 · `92a607b`（当前生产）
 
 **状态**：已上线并通过验收（发布候选版本）
