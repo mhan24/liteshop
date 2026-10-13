@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/money";
 import { formatDateTime } from "@/lib/datetime";
 import { isValidOrderNo } from "@/lib/order-no";
 import { expireOrderIfOverdue } from "./expire-orders";
+import * as exchangeChannel from "@/server/exchange/channel";
 import { canRepurchase as canRepurchaseStatus, repurchaseBlockedReason } from "./create-order";
 
 /** 查单服务：前台查单页（订单号+邮箱双因子）与支付回跳页轮询 */
@@ -60,6 +61,8 @@ export interface PublicOrderView {
     asset: string;
     /** 支付截止时间 */
     expiresAtText: string | null;
+    /** 截止毫秒时间戳（收银台倒计时用） */
+    expiresAtMs?: number | null;
   } | null;
 }
 
@@ -208,13 +211,10 @@ function computeTransferInstructions(order: Order): {
   if (!stored) return { transferInstructions: null };
   const m = /^([0-9.]+)\s+([A-Za-z]+)$/.exec(stored);
   if (!m) return { transferInstructions: null };
-  let channel;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    channel = require("@/server/exchange/channel") as typeof import("@/server/exchange/channel");
-  } catch {
-    return { transferInstructions: null };
-  }
+  // 注意：必须静态 import——standalone/Turbopack 产物不会为运行时动态
+  // require 别名模块打包，动态形式在生产环境必然失败（静默吞掉后转账
+  // 指引永远为 null，表现为「交易所订单没有收银台」）。
+  const channel = exchangeChannel;
   const asset = m[2].toUpperCase();
   const view = ["binance", "okx"]
     .map((id) => channel.getExchangeChannelView(id as "binance" | "okx"))
@@ -228,6 +228,7 @@ function computeTransferInstructions(order: Order): {
       asset,
       expiresAtText:
         order.status === "pending" ? formatDateTime(order.expirationTime) : null,
+      expiresAtMs: order.expirationTime ? order.expirationTime.getTime() : null,
     },
   };
 }

@@ -35,6 +35,8 @@ export async function GET(request: Request) {
       // 重购资格由服务端计算，前台按钮直接以此为准
       canRepurchase: view.canRepurchase,
       repurchaseBlockedReason: view.repurchaseBlockedReason,
+      // 交易所转账指引：轮询响应必须携带，否则首帧指引会被轮询覆盖抹掉
+      transferInstructions: view.transferInstructions,
     },
   }, { headers: { "Cache-Control": "no-store" } });
 }

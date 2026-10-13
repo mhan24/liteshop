@@ -3,6 +3,7 @@
 import { useEffect, useState, useActionState } from "react";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/admin/status-badge";
+import { ExchangeCashier } from "@/components/shop/exchange-cashier";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TurnstileWidget, useTurnstileToken } from "@/components/shop/turnstile-widget";
@@ -39,6 +40,8 @@ export interface OrderStatusPayload {
     amount: string;
     asset: string;
     expiresAtText: string | null;
+    /** 毫秒时间戳：收银台倒计时用 */
+    expiresAtMs?: number | null;
   } | null;
 }
 
@@ -192,28 +195,15 @@ export function OrderStatusPoll({
       {/* 交易所转账：没有收银台地址，必须给出账户与**精确金额**，
           否则买家无从付款（金额必须分毫不差，系统靠它识别到账）。 */}
       {order.status === "pending" && payCTA && order.transferInstructions ? (
-        <div className="mt-5 space-y-4 rounded-lg border border-border bg-secondary p-4 text-sm">
-          <div className="leading-relaxed">
-            请在 <b>{order.transferInstructions.exchange}</b>{" "}
-            通过「内部转账」向下方账户付款，转账金额必须与页面显示**完全一致**
-            （多付或少付都无法自动识别）。
-          </div>
-          <dl className="space-y-2">
-            <TransferRow label="收款账户" value={order.transferInstructions.accountId} mono />
-            <TransferRow
-              label="转账金额"
-              value={`${order.transferInstructions.amount} ${order.transferInstructions.asset}`}
-              mono
-            />
-            {order.transferInstructions.expiresAtText ? (
-              <TransferRow label="请在此时间前完成" value={order.transferInstructions.expiresAtText} />
-            ) : null}
-          </dl>
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            到账后系统会自动识别并发货，通常 1 分钟内完成；若超时仍未到账，
-            请勿重复下单，请联系客服并提供订单号与转账截图。
-          </p>
-        </div>
+        <ExchangeCashier
+          data={{
+            exchange: order.transferInstructions.exchange,
+            accountId: order.transferInstructions.accountId,
+            amount: order.transferInstructions.amount,
+            asset: order.transferInstructions.asset,
+            expiresAtMs: order.transferInstructions.expiresAtMs ?? null,
+          }}
+        />
       ) : order.status === "pending" && payCTA && order.paymentUrl ? (
         <button
           type="button"
@@ -247,16 +237,6 @@ export function OrderStatusPoll({
           前往订单查询取货
         </a>
       ) : null}
-    </div>
-  );
-}
-
-/** 转账指引中的一行（值可复制，故给 mono 字体） */
-function TransferRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <dt className="shrink-0 text-muted-foreground">{label}</dt>
-      <dd className={`text-right ${mono ? "select-all break-all font-mono text-xs" : ""}`}>{value}</dd>
     </div>
   );
 }

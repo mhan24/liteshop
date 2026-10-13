@@ -269,3 +269,12 @@ README 内容：Docker 部署、bepusdt 配置说明（Token 获取路径：bepu
 - 用户报告「使用交易所转账不跳转收银台」：下单跳转本身正常；死角在**换浏览器/丢 cookie 打开待支付链接**时，页面只有「请前往订单查询」——而查单页验证码在买家网络同样不可用，形成死循环，买家看不到任何付款方式。
 - 新增待支付页**就地访问验证**（OrderAccessGate）：输入下单邮箱（订单号已在 URL，双因子不变）→ verifyOrderAccessAction 校验 + 限流 + 签发访问凭据 → redirect 回待支付页看转账指引。Turnstile 与降级逻辑与查单一致。
 - 无权限提示文案同步更新；渐进增强（redirect）路径同样可用。
+
+### 2026-10-13 · v1.9：交易所收银台 + 超时关单定时器
+
+对照 HashPay 补齐两类缺陷：
+1. **交易所订单「没有收银台」**（两层叠加）：
+   - `computeTransferInstructions` 用运行时 `require("@/server/exchange/channel")`，standalone/Turbopack 产物不为动态 require 打包别名模块 → 生产环境必然失败被静默吞掉，转账指引永远为 null。改静态 import。
+   - 订单状态轮询 API 未返回 `transferInstructions`，首帧指引 2 秒内被轮询响应覆盖抹掉。补齐。
+   - 新增 `ExchangeCashier` 收银台段：大号唯一应付金额、秒级倒计时（<5 分钟变警示色）、收款 UID/金额一键复制、分步转账指引。
+2. **超时订单一直不取消**：惰性清扫只在有人打开订单页时触发、cron 端点依赖外部定时器（未配置）→ 无人访问的过期订单永远 pending。新增 `instrumentation.ts`：standalone 单进程内启动定时器（启动 5s 后首扫，此后每分钟清扫过期 pending（closed + 释放卡密/库存）+ 每小时清理日志）。实测过期单 1 分钟内自动关闭。

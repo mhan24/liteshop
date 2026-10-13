@@ -174,6 +174,9 @@ if (process.argv[4] === "observe-buy") {
       url: location.href,
       onPending: location.pathname === '/pay/pending',
       bodyHas订单状态: document.body.textContent.includes('订单状态'),
+      cashierText: document.body.innerText.includes('转账金额（须完全一致）') ? 'cashier-rendered' : 'no-cashier',
+      countdown: /支付倒计时/.test(document.body.innerText),
+     innerText: document.body.innerText.slice(0, 400),
     })`,
   }, sessionId).then(r => r.result.value);
   console.log("AFTER:", after);
