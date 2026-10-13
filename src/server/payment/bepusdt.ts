@@ -144,14 +144,29 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
           `bepusdt 创建订单 HTTP ${res.status}`
         );
       }
-      let json: CreateOrderResponse;
+      let json: unknown;
       try {
-        json = (await res.json()) as CreateOrderResponse;
+        json = await res.json();
       } catch {
         // 响应体无法解析：网关可能已建单，但回包损坏 → unknown
         throw new PaymentCreationError("unknown", "bepusdt 创建订单响应无法解析");
       }
-      const data = json.data;
+      // 结构校验：必须是**对象**（非 null、非数组、非标量）。
+      //
+      // 注意 `res.json()` 能成功解析字面量 `null`（和 `"[]"`、`"123"`），
+      // 但随后访问 `json.data` 会抛 TypeError。该异常既不是
+      // PaymentCreationError，也不匹配上层 isUnknownResultError() 的
+      // 网络错误特征（"Cannot read properties of null"），
+      // 因此会被当成"明确失败"而走补偿关单、释放库存。
+      // 而 HTTP 200 + 合法 JSON 并不能证明网关未建单 —— 必须按 unknown 处理。
+      if (typeof json !== "object" || json === null || Array.isArray(json)) {
+        throw new PaymentCreationError(
+          "unknown",
+          `bepusdt 创建订单响应结构异常: ${JSON.stringify(json)?.slice(0, 200) ?? "null"}`
+        );
+      }
+      const parsed = json as CreateOrderResponse;
+      const data = parsed.data;
       if (!data?.trade_id || !data.payment_url) {
         // HTTP 200 但缺少 trade_id / payment_url —— **不能**断定未建单。
         // 网关可能已创建交易，只是响应数据不完整（异常回包、代理截断等）。
@@ -162,14 +177,14 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
         // 例外：报文里带了明确的业务失败信息（status_code >= 400 且有 message），
         // 说明是网关拒绝本次请求，可按 rejected 处理。
         const bizRejected =
-          typeof json.status_code === "number" &&
-          json.status_code >= 400 &&
-          json.message != null;
+          typeof parsed.status_code === "number" &&
+          parsed.status_code >= 400 &&
+          parsed.message != null;
         throw new PaymentCreationError(
           bizRejected ? "rejected" : "unknown",
           `bepusdt 创建订单响应不完整（缺 ${
             !data?.trade_id ? "trade_id" : "payment_url"
-          }）: ${json.message ?? JSON.stringify(json).slice(0, 200)}`
+          }）: ${parsed.message ?? JSON.stringify(parsed).slice(0, 200)}`
         );
       }
       // 注意：bepusdt 的 expiration_time 是「剩余有效期（秒）」，不是 Unix 时间戳。

@@ -372,3 +372,99 @@ describe("网关异常响应的结果分类（P1-02）", () => {
     }
   });
 });
+
+describe("复审 P2：HTTP 200 返回合法 JSON null / 标量 / 数组", () => {
+  const CFG = { api_base: "https://pay.example.com", token: "tok" };
+  const mk = (body: string) =>
+    vi.fn(async () => new Response(body, { status: 200 }));
+  const call = (provider: ReturnType<typeof bepusdtProvider>, no: string) =>
+    provider.createPayment({
+      orderNo: no, amountCents: 100n, currency: "CNY", subject: "T",
+      notifyUrl: "https://s/n", redirectUrl: "https://s/r",
+    });
+
+  it("响应体为 null → unknown（不能证明未建单）", async () => {
+    // 关键回归：res.json() 能解析 null，但随后 json.data 会抛 TypeError，
+    // 该异常会绕过 PaymentCreationError 与 isUnknownResultError 的匹配，
+    // 被上层当成"明确失败"而补偿关单释放库存。
+    vi.stubGlobal("fetch", mk("null"));
+    await expect(call(bepusdtProvider(CFG), "LS20261013NULL00001")).rejects.toMatchObject({
+      outcome: "unknown",
+    });
+  });
+
+  it("响应体为 JSON 数组 → unknown", async () => {
+    vi.stubGlobal("fetch", mk("[]"));
+    await expect(call(bepusdtProvider(CFG), "LS20261013ARR000001")).rejects.toMatchObject({
+      outcome: "unknown",
+    });
+  });
+
+  it("响应体为标量数字 → unknown", async () => {
+    vi.stubGlobal("fetch", mk("123"));
+    await expect(call(bepusdtProvider(CFG), "LS20261013NUM000001")).rejects.toMatchObject({
+      outcome: "unknown",
+    });
+  });
+
+  it("响应体为字符串 → unknown", async () => {
+    vi.stubGlobal("fetch", mk('"ok"'));
+    await expect(call(bepusdtProvider(CFG), "LS20261013STR000001")).rejects.toMatchObject({
+      outcome: "unknown",
+    });
+  });
+
+  it("正常成功响应不受影响（回归保护）", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      status_code: 200, message: "success",
+      data: { trade_id: "gw_ok", payment_url: "https://gw/pay/x", expiration_time: 900 },
+    }), { status: 200 })));
+    const r = await call(bepusdtProvider(CFG), "LS20261013OK0000001");
+    expect(r.tradeId).toBe("gw_ok");
+  });
+
+  it("HTTP 408 / 429 → unknown（复审补充）", async () => {
+    for (const code of [408, 429]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("timeout", { status: code })));
+      await expect(call(bepusdtProvider(CFG), `LS20261013T${code}000001`)).rejects.toMatchObject({
+        outcome: "unknown",
+      });
+    }
+  });
+
+  it("HTTP 400 / 401 / 404 → rejected（明确请求侧拒绝）", async () => {
+    for (const code of [400, 401, 404]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("bad request", { status: code })));
+      await expect(call(bepusdtProvider(CFG), `LS20261013R${code}000001`)).rejects.toMatchObject({
+        outcome: "rejected",
+      });
+    }
+  });
+});
+
+describe("复审 P2：上层 isUnknownResultError 的解析类兜底", () => {
+  it("解析 null 抛出的 TypeError 被识别为 unknown（不会补偿关单）", async () => {
+    const { isUnknownResultError } = await import("@/server/order/create-order");
+    const err = new TypeError("Cannot read properties of null (reading 'data')");
+    expect(isUnknownResultError(err)).toBe(true);
+  });
+
+  it("其它解析类异常同样归为 unknown", async () => {
+    const { isUnknownResultError } = await import("@/server/order/create-order");
+    for (const msg of [
+      "Unexpected token 'n', \"null\" is not valid JSON",
+      "Invalid JSON",
+      "json is not a function",
+    ]) {
+      expect(isUnknownResultError(new Error(msg))).toBe(true);
+    }
+  });
+
+  it("明确的业务错误仍归为 rejected（不会误留待对账）", async () => {
+    const { isUnknownResultError } = await import("@/server/order/create-order");
+    const { PaymentCreationError } = await import("@/server/payment");
+    expect(isUnknownResultError(new PaymentCreationError("rejected", "参数错误"))).toBe(false);
+    // 普通校验错误
+    expect(isUnknownResultError(new Error("Invalid email address"))).toBe(false);
+  });
+});

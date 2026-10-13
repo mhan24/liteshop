@@ -180,7 +180,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
  * 判断渠道错误是否属于「结果未知」（网关可能已建单，只是我们没拿到响应）。
  * 这类错误必须与业务拒绝区分：前者不能关单释放库存。
  */
-function isUnknownResultError(err: unknown): boolean {
+export function isUnknownResultError(err: unknown): boolean {
   // 优先使用渠道给出的显式分类（bepusdt 会区分 4xx/5xx 与解析失败）
   if (err instanceof PaymentCreationError) {
     return err.outcome === "unknown";
@@ -191,9 +191,17 @@ function isUnknownResultError(err: unknown): boolean {
   const msg = err.message;
   // AbortSignal.timeout 触发 TimeoutError；网络层失败为 TypeError
   if (name === "TimeoutError" || name === "AbortError") return true;
-  return /timed? ?out|timeout|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|socket hang up|fetch failed|\b5\d\d\b/i.test(
-    msg
-  );
+  if (/timed? ?out|timeout|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|socket hang up|fetch failed|\b5\d\d\b/i.test(msg)) {
+    return true;
+  }
+  // 响应解析/结构类异常（如 "Cannot read properties of null"）：
+  // 说明网关回了**能解析但不符合预期**的报文。HTTP 200 + 合法 JSON
+  // 并不能证明未建单，因此按 unknown 处理（保留待对账），
+  // 而不是当成"明确失败"去补偿关单、释放库存。
+  if (/Cannot read propert|is not a function|Unexpected token|Invalid JSON|JSON/i.test(msg)) {
+    return true;
+  }
+  return false;
 }
 
 function markOrderUnknown(orderNo: string, provider: string, err: unknown): void {
