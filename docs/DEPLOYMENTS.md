@@ -4,6 +4,103 @@
 
 ---
 
+## 2026-10-13 · `714fb2f`（当前生产）
+
+**状态**：已上线并通过验收
+
+### 提交
+
+| 项 | 值 |
+|---|---|
+| SHA | `714fb2f19d523f112326bd71a93b7556e847a89b` |
+| 短 SHA | `714fb2f` |
+| 部署时间 | 2026-10-13T16:54+08:00 |
+| 上一版本 | `163f3ba640a5b82c977647ff61db410a082eb459` |
+| CI | ✅ success |
+| 新迁移 | **无**（仍为 10） |
+
+### 追赶的提交
+
+| SHA | 内容 |
+|---|---|
+| `4a1ad3b` | 部署记录（文档） |
+| `4fda9ed` | 修复查单人机验证恒失败；前台支付方式选择 |
+| `714fb2f` | 本地缓存订单（重新支付 / 取消 / 查询） |
+
+### 修复的线上故障
+
+**查单页「人机验证未通过」恒定出现**（查单功能实际不可用）
+
+- 根因：`order-lookup.tsx` 渲染了 TurnstileWidget，但表单缺少 `cfToken` 隐藏域，
+  `lookupOrderAction` 校验的 `formData.get("cfToken")` 永远为空串。
+- 该问题在关闭验证码时不可见（`isTurnstileEnforced()` 为 false 会跳过校验），
+  只有开启后才暴露。
+- 线上验证：查单页现已下发 `name="cfToken"`。
+
+**支付方式无选择**
+
+- 原 `auto` 直接取 `payment_configs` 返回顺序的第一个启用渠道，顺序无保证。
+- 现改为只从网关渠道中选且优先级固定（bepusdt 优先），结果确定可复现。
+- 前台仅展示**配置完整**的渠道，避免「选了却付不了」。
+
+### 数据库
+
+| 项 | 值 |
+|---|---|
+| 迁移数 | 10（无新增） |
+| integrity_check | ok |
+| foreign_key_check | ok |
+| 数据 | orders 9 / products 1 / cards 2 / payment_attempts 9 |
+| 限流计数 | 11 行（持久化生效中） |
+
+### 部署前备份
+
+- `pre-714fb2f-20261013-165458.db`（268K，VACUUM INTO）
+- `env-pre-714fb2f-20261013-165458.bak`
+
+### 验收项目
+
+| 项目 | 结果 |
+|---|---|
+| 容器健康 | 应用 + Caddy 双 healthy（`--wait` 门控） |
+| 部署自检 | ✅ 运维脚本就位、cron 指向有效 |
+| 数据完整性 | integrity ok / foreign_key ok |
+| 站点 | `/` `/orders` `/products/voxi` `/admin/login` 全 200 |
+| **查单页 cfToken** | ✅ 已下发 `name="cfToken"`（修复生效） |
+| **商品页支付方式** | ✅ 已渲染 `支付方式` + `paymentMethod` |
+| 安全响应头 | 5/5 |
+| mock 回调入口 | 404 |
+| cron 端点 | 超时清扫正常；交易所扫描正常 |
+| **交易所扫描降级** | ✅ 凭据未配置时 `errors:[]`、订单未被误改（静默降级） |
+| **服务器 vs git** | ✅ 198 个文件逐文件 sha256 完全一致 |
+| 定时任务 | ✅ expire(5min) / backup(3:30) / exchange(1min) 三项在运行 |
+| 目录卫生 | 0 个 AppleDouble，`.env` 保留 |
+
+### 订单状态分布
+
+| 状态 | 数量 |
+|---|---|
+| closed | 8 |
+| completed | 1 |
+| pending | 1（USDC 交易所订单，凭据未配置） |
+
+### 遗留事项（不阻塞）
+
+- `exchange:binance` 与 `exchange:okx` 两渠道**已勾选启用但未填凭据**
+  （accountId / API Key / Secret 均为空）。因此 `findEnabledExchange()`
+  返回 null，前台不会展示交易所支付方式，扫描器也仅做静默降级——
+  当前不影响买家付款（走 bepusdt）。
+- 待办：要么补齐凭据并联调，要么在后台取消勾选以消除歧义。
+
+### 回滚方式
+
+```bash
+git checkout 163f3ba640a5b82c977647ff61db410a082eb459
+./scripts/deploy.sh
+```
+
+---
+
 ## 2026-10-13 · `163f3ba`（当前生产）
 
 **状态**：已上线并通过验收
