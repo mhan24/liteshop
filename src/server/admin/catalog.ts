@@ -138,75 +138,71 @@ export function createProduct(input: ProductInput): { ok: boolean; message: stri
 }
 
 export function updateProduct(id: number, input: ProductInput): { ok: boolean; message: string } {
-  // 必须先取出原商品，才能在其币种留空时用原币种解析价格
-  const existing = db.select().from(products).where(eq(products.id, id)).get();
-  if (!existing) return { ok: false, message: "商品不存在" };
-  const v = validateProductInput({ ...input, existingCurrency: existing.currency });
-  if (!v.ok) return v;
-  const dup = db
-    .select({ id: products.id })
-    .from(products)
-    .where(and(eq(products.slug, v.data.slug), sql`${products.id} != ${id}`))
-    .get();
-  if (dup) return { ok: false, message: `标识已被占用: ${v.data.slug}` };
-
-  // 检测「有限库存 ↔ 不限库存」的模式切换。
-  // validateProductInput 已通过 normalizeStockLimit 保证 stockLimit 为数字
-  const nextStockLimit = v.data.stockLimit ?? STOCK_UNLIMITED;
-  const modeChanged =
-    isUnlimitedStock(existing.stockLimit) !== isUnlimitedStock(nextStockLimit);
-
-  // 模式切换守卫：存在未结束的人工订单时**禁止**切换库存模式。
-  //
-  // 早期做法是在切换时清除旧订单的 stockCharged，但那只是把问题转移：
-  // 旧订单仍然有效、仍可能付款并要求交付，库存系统却不再承认其占用，
-  // 于是切回有限库存后可再次卖出 → 实际承诺超过可用库存（超卖）。
-  // 正确做法是要求管理员先完成、取消或核对相关订单，再做模式切换。
-  //
-  // 判定依据必须是**未结束订单的下单快照**（orders.delivery_type），
-  // 而不是商品当前的 delivery_type —— 商品类型可被反复修改，
-  // 而旧订单始终按下单时的类型履约与释放库存。
-  // 只看商品当前类型会被「manual → auto → manual」序列绕过：
-  // 第二次编辑时 existing.deliveryType 已是 auto，守卫不触发，
-  // 于是有限库存 1 件可被买家 B 买走，而 A 的人工订单仍然有效。
-  if (modeChanged) {
-    const activeOrder = db
-      .select({ orderNo: orders.orderNo, deliveryType: orders.deliveryType })
-      .from(orders)
-      .where(
-        and(
-          eq(orders.productId, id),
-          inArray(orders.status, ["pending", "reconciling", "paid", "delivering"])
-        )
-      )
+  return db.transaction((tx) => {
+    // 必须先取出原商品，才能在其币种留空时用原币种解析价格
+    const existing = tx.select().from(products).where(eq(products.id, id)).get();
+    if (!existing) return { ok: false, message: "商品不存在" };
+    const v = validateProductInput({ ...input, existingCurrency: existing.currency });
+    if (!v.ok) return v;
+    const dup = tx
+      .select({ id: products.id })
+      .from(products)
+      .where(and(eq(products.slug, v.data.slug), sql`${products.id} != ${id}`))
       .get();
-    if (activeOrder) {
-      return {
-        ok: false,
-        message: `该商品存在未结束订单（${activeOrder.orderNo}，下单时为${
-          activeOrder.deliveryType === "auto" ? "自动发卡" : "人工发货"
-        }），请先完成或取消后再切换库存模式`,
-      };
+    if (dup) return { ok: false, message: `标识已被占用: ${v.data.slug}` };
+
+    // 检测「有限库存 ↔ 不限库存」的模式切换。
+    // validateProductInput 已通过 normalizeStockLimit 保证 stockLimit 为数字
+    const nextStockLimit = v.data.stockLimit ?? STOCK_UNLIMITED;
+    const modeChanged =
+      isUnlimitedStock(existing.stockLimit) !== isUnlimitedStock(nextStockLimit);
+
+    // 模式切换守卫：存在未结束的人工订单时**禁止**切换库存模式。
+    //
+    // 早期做法是在切换时清除旧订单的 stockCharged，但那只是把问题转移：
+    // 旧订单仍然有效、仍可能付款并要求交付，库存系统却不再承认其占用，
+    // 于是切回有限库存后可再次卖出 → 实际承诺超过可用库存（超卖）。
+    // 正确做法是要求管理员先完成、取消或核对相关订单，再做模式切换。
+    //
+    // 判定依据必须是**未结束订单的下单快照**（orders.delivery_type），
+    // 而不是商品当前的 delivery_type —— 商品类型可被反复修改，
+    // 而旧订单始终按下单时的类型履约与释放库存。
+    // 只看商品当前类型会被「manual → auto → manual」序列绕过：
+    // 第二次编辑时 existing.deliveryType 已是 auto，守卫不触发，
+    // 于是有限库存 1 件可被买家 B 买走，而 A 的人工订单仍然有效。
+    if (modeChanged) {
+      const activeOrder = tx
+        .select({ orderNo: orders.orderNo, deliveryType: orders.deliveryType })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.productId, id),
+            inArray(orders.status, ["pending", "reconciling", "paid", "delivering"])
+          )
+        )
+        .get();
+      if (activeOrder) {
+        return {
+          ok: false,
+          message: `该商品存在未结束订单（${activeOrder.orderNo}，下单时为${
+            activeOrder.deliveryType === "auto" ? "自动发卡" : "人工发货"
+          }），请先完成或取消后再切换库存模式`,
+        };
+      }
     }
-  }
 
-  db.transaction(
-    (tx) => {
-      tx.update(products)
-        .set({
-          ...v.data,
-          // 编辑留空币种 → 保持原值
-          currency: input.currency?.trim() ? v.data.currency : existing.currency,
-          updatedAt: new Date(),
-        })
-        .where(eq(products.id, id))
-        .run();
+    tx.update(products)
+      .set({
+        ...v.data,
+        // 编辑留空币种 → 保持原值
+        currency: input.currency?.trim() ? v.data.currency : existing.currency,
+        updatedAt: new Date(),
+      })
+      .where(eq(products.id, id))
+      .run();
 
-    },
-    { behavior: "immediate" }
-  );
-
-  return { ok: true, message: "商品已更新" };
+    return { ok: true, message: "商品已更新" };
+  }, { behavior: "immediate" });
 }
 
 /** 下架（软删，交易数据保留）；存在订单时禁止硬删 */

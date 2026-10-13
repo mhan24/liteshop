@@ -31,3 +31,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 服务器目录 `/opt/liteshop`；备份在 `/root/liteshop-backups/`
 - 部署前脚本会自动校验 `.env` 指纹，防止覆盖生产配置
 
+
+## 审计工作流程
+
+用户约定：每轮审计都包含修复发现的问题、补充回归测试、本地验证、提交并推送 GitHub，以及更新审计报告。不要只出具报告后停止。生产部署仍遵守上述发布流程，等待用户当次明确部署指令。

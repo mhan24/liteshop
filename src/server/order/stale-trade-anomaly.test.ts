@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { db } from "@/db";
-import { orders, paymentAnomalies, paymentAttempts, products } from "@/db/schema";
+import { orders, paymentAnomalies, paymentAttempts } from "@/db/schema";
 import { seedAuto } from "./test-helpers";
 
 /**

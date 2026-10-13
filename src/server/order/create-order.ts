@@ -54,25 +54,22 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     throw new OrderError("INVALID_INPUT", "备注过长（最多 500 字）");
   }
 
-  const product = db
-    .select()
-    .from(products)
-    .where(and(eq(products.slug, input.slug), eq(products.status, "on")))
-    .get();
-  if (!product) throw new OrderError("PRODUCT_NOT_FOUND", "商品不存在或已下架");
-
-  const totalCents = BigInt(product.priceCents) * BigInt(quantity);
-
   const provider = resolvePaymentProvider();
   const siteUrl = getSiteUrl();
-  // 记录创建支付请求的起点，用于识别「期间是否有回调/并发路径推进了订单」
   const startedAt = Date.now();
 
-  // 建单：IMMEDIATE 事务（auto 型下单即锁定卡密；manual 型条件扣减库存；订单号撞唯一索引重试）
-  const orderNo = db.transaction(
-    (tx) => insertOrderWithRetry(tx, product, { email, note, quantity }),
+  // 商品快照与占库建单使用同一写事务，避免独立写入者切换库存模式后
+  // 仍按事务外读取的旧模式建单。
+  const { orderNo, product } = db.transaction(
+    (tx) => {
+      const product = tx.select().from(products)
+        .where(and(eq(products.slug, input.slug), eq(products.status, "on"))).get();
+      if (!product) throw new OrderError("PRODUCT_NOT_FOUND", "商品不存在或已下架");
+      return { orderNo: insertOrderWithRetry(tx, product, { email, note, quantity }), product };
+    },
     { behavior: "immediate" }
   );
+  const totalCents = BigInt(product.priceCents) * BigInt(quantity);
 
   let created;
   try {

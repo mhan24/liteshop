@@ -211,6 +211,9 @@ function validateSuccessOwnership(
   }
   const current = getCurrentAttempt(order.orderNo, tx);
   if (current) {
+    if (current.provider !== payload.provider) {
+      return { ok: false, message: "支付渠道与交易快照不匹配" };
+    }
     if (current.tradeId !== payload.tradeId) {
       return { ok: false, message: "trade_id 非当前交易，拒绝处理" };
     }
@@ -238,10 +241,9 @@ function validateSuccessOwnership(
 
   // actual_amount 与创建交易快照一致（位数可不同的等值字符串）
   if (
-    payload.actualAmount != null &&
     order.expectedActualAmount != null &&
     order.expectedActualAmount !== "" &&
-    normalizeAmountString(payload.actualAmount) !== normalizeAmountString(order.expectedActualAmount)
+    (payload.actualAmount == null || normalizeAmountString(payload.actualAmount) !== normalizeAmountString(order.expectedActualAmount))
   ) {
     return { ok: false, message: "actual_amount 与创建交易快照不匹配" };
   }
@@ -249,32 +251,27 @@ function validateSuccessOwnership(
   return { ok: true };
 }
 
-/** trade_id 是否是本订单的某笔历史支付尝试（含已过期/已关闭的） */
-function isHistoricalAttempt(
+/** 历史交易按自身快照验证，不能借用当前交易的实付金额。 */
+function validateHistoricalAttempt(
   tx: DbTransaction,
-  orderNo: string,
-  tradeId: string | null
-): boolean {
-  if (!tradeId) return false;
-  const row = tx
-    .select({ id: paymentAttempts.id })
-    .from(paymentAttempts)
-    .where(and(eq(paymentAttempts.orderNo, orderNo), eq(paymentAttempts.tradeId, tradeId)))
-    .get();
-  return !!row;
-}
-
-/** 回调金额是否与订单金额一致（按币种最小单位，禁浮点） */
-function isAmountMatching(
   order: Order,
   payload: import("@/server/payment").NotifyPayload
-): boolean {
-  if (payload.amount == null) return false;
+): { historical: boolean; ok: boolean } {
+  const attempt = payload.tradeId ? tx.select().from(paymentAttempts).where(
+    and(eq(paymentAttempts.orderNo, order.orderNo), eq(paymentAttempts.tradeId, payload.tradeId))
+  ).get() : undefined;
+  if (!attempt || attempt.isCurrent) return { historical: false, ok: false };
+  let ok = attempt.provider === payload.provider && attempt.currency === order.currency;
   try {
-    return toMinorUnits(payload.amount, order.currency) === BigInt(order.totalCents);
-  } catch {
-    return false;
+    ok = ok && payload.amount != null &&
+      toMinorUnits(payload.amount, attempt.currency) === BigInt(attempt.amountCents);
+  } catch { ok = false; }
+  // 旧数据没有实付金额快照时保留兼容；有快照则必须提供并匹配。
+  if (attempt.expectedActualAmount) {
+    ok = ok && payload.actualAmount != null &&
+      normalizeAmountString(payload.actualAmount) === normalizeAmountString(attempt.expectedActualAmount);
   }
+  return { historical: true, ok };
 }
 
 function processNotify(
@@ -315,57 +312,29 @@ function processNotify(
     return { handled: true, retryable: false, message: "订单已超时关闭" };
   }
 
-  // ===== status=2 支付成功 =====
+  // 所有订单状态先识别历史交易，终态也需要追踪另一笔真实到账。
+  const historical = validateHistoricalAttempt(tx, order, payload);
+  if (historical.historical) {
+    if (!historical.ok) {
+      return { handled: false, retryable: false, message: "历史交易的渠道或金额快照不匹配" };
+    }
+    const anomalyId = recordLatePaymentAnomaly(tx, order, payload);
+    return { handled: false, retryable: false,
+      message: `非当前交易的到账已登记为异常待人工核对（#${anomalyId}）` };
+  }
+
+  const ownership = validateSuccessOwnership(tx, order, payload);
+  if (!ownership.ok) return { handled: false, retryable: false, message: ownership.message };
   if (order.status === "completed") {
     return { handled: true, retryable: false, message: "订单已完成（幂等重入）" };
   }
-  // reconciling 表示「创建支付的结果未知」：网关可能已建单，此时收到
-  // 经签名与金额核实的成功回调，正是缺失的对账闭环，应当恢复履约。
-  // 但不能简单把它加进放行列表——reconciling 订单往往**没有 trade_id 快照**，
-  // 归属校验必须更严（见下方 requireFreshTradeOwnership）。
-  if (!["pending", "paid", "delivering", "reconciling"].includes(order.status)) {
-    // 异常到账：超时/关闭的订单收到了**已验签且金额匹配**的成功回调。
-    // 典型成因：买家在有效期内完成链上付款，但回调在本地清扫置为 expired 之后才到。
-    // 此时卡密已释放，**不能直接恢复原订单**（可能已被他人买走 → 一卡多卖）。
-    // 因此登记为待人工处置的异常，核对链上到账后补发或退款。
-    if (order.status === "expired" || order.status === "closed") {
-      // 先做归属与金额校验：只有**确实属于本订单**的到账才进入人工补发队列。
-      // 否则一条金额不符或交易号错配的已签名通知就能触发真实补发。
-      const ownership = validateSuccessOwnership(tx, order, payload);
-      if (!ownership.ok) {
-        return {
-          handled: false,
-          retryable: false,
-          message: `超时订单收到不匹配的成功回调，已记录但未登记补发：${ownership.message}`,
-        };
-      }
-      const anomalyId = recordLatePaymentAnomaly(tx, order, payload);
-      return {
-        handled: false,
-        retryable: false, // 重试也无法自动解决，需人工核对
-        message: `超时/关闭订单收到成功回调，已登记为异常到账待处理（#${anomalyId}）`,
-      };
-    }
-    return { handled: false, retryable: false, message: `订单状态 ${order.status} 不接受支付通知` };
+  if (order.status === "expired" || order.status === "closed") {
+    const anomalyId = recordLatePaymentAnomaly(tx, order, payload);
+    return { handled: false, retryable: false,
+      message: `超时/关闭订单收到成功回调，已登记为异常到账待处理（#${anomalyId}）` };
   }
-
-  // 归属与金额校验（与异常到账分支共用同一实现，避免两处逻辑漂移）
-  const ownership = validateSuccessOwnership(tx, order, payload);
-  if (!ownership.ok) {
-    // 若回调**已验签、金额正确**，只是 trade_id 属于本订单的一笔历史尝试
-    // （买家付到了已过期的旧地址），必须登记异常到账。
-    // 否则这笔真实的钱只会留在普通通知日志里，人工对账队列发现不了。
-    // 注意：仍**不自动履约**（归属校验必须拦住，防止错配交易推动状态）。
-    const hist = isHistoricalAttempt(tx, order.orderNo, payload.tradeId);
-    if (hist && isAmountMatching(order, payload)) {
-      const anomalyId = recordLatePaymentAnomaly(tx, order, payload);
-      return {
-        handled: false,
-        retryable: false,
-        message: `旧交易的到账已登记为异常待人工核对（#${anomalyId}）：${ownership.message}`,
-      };
-    }
-    return { handled: false, retryable: false, message: ownership.message };
+  if (!["pending", "paid", "delivering", "reconciling"].includes(order.status)) {
+    return { handled: false, retryable: false, message: `订单状态 ${order.status} 不接受支付通知` };
   }
 
   const product = order.productId

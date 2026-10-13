@@ -27,6 +27,7 @@ UI 遵循 [taste-skill · minimalist-ui](https://github.com/Leonxlnx/taste-skill
 
 ```bash
 git clone <repo> liteshop && cd liteshop
+npm ci
 cp .env.example .env
 
 # 生成会话密钥
@@ -38,7 +39,7 @@ npm run hash-password -- <你的密码>   # 输出填入 .env 的 ADMIN_PASSWORD
 docker compose up -d --build
 ```
 
-访问 `http://服务器IP:3000`（前台），`http://服务器IP:3000/admin`（后台）。
+Compose 默认仅绑定服务器回环地址。服务器本机可访问 `http://127.0.0.1:3000`（前台）和 `/admin`（后台）；远程调试使用 SSH 端口转发。对外访问应按 [运维手册](./docs/OPERATIONS.md) 配置 Caddy 与 HTTPS。
 
 生产必须通过反向代理（Nginx / Caddy）提供 **HTTPS**：会话 Cookie 依赖 `Secure`，支付回调也要求公网可达。
 

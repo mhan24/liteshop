@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import Database from "better-sqlite3";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { products, orders } from "@/db/schema";
+import { seedManual } from "@/server/order/test-helpers";
+import { updateProduct } from "@/server/admin/catalog";
+
+const p=seedManual(2);
+const second=new Database(process.env.DATABASE_PATH!);
+second.pragma("foreign_keys = ON");
+second.pragma("busy_timeout = 5000");
+const original=db.transaction;
+const orderNo=`AUDIT_RACE_${Date.now()}`;
+let injected=false;
+// 故障注入：模拟独立数据库写入者在守卫查询与 BEGIN IMMEDIATE 之间提交建单。
+// 第二连接真实提交订单和扣库存；不代表单进程事件循环可以自然在此交错。
+db.transaction=((...args: Parameters<typeof original>) => {
+  injected=true;
+  second.transaction(() => {
+    second.prepare("UPDATE products SET stock_limit=stock_limit-1 WHERE id=?").run(p.id);
+    second.prepare("INSERT INTO orders(order_no,product_id,product_name,unit_price_cents,currency,quantity,total_cents,email,status,stock_charged,delivery_type) VALUES(?,?,'race',100,'USD',1,100,'audit@example.test','pending',1,'manual')").run(orderNo,p.id);
+  }).immediate();
+  db.transaction=original;
+  return original.apply(db,args);
+}) as typeof original;
+let result;
+try {
+ result=updateProduct(p.id,{name:"race",slug:p.slug,description:"d",imageUrl:"",priceCentsText:"1.00",currency:"USD",deliveryType:"manual",stockLimit:-1,status:"on",sort:0});
+} finally { db.transaction=original; second.close(); }
+const active=db.select().from(orders).where(eq(orders.orderNo,orderNo)).get();
+const product=db.select().from(products).where(eq(products.id,p.id)).get()!;
+assert.equal(injected,true);
+assert.equal(result!.ok,true);
+assert.equal(active!.status,"pending");
+assert.equal(product.stockLimit,-1);
+console.log(JSON.stringify({case:"guard-to-transaction/two-connection-injection",injectedIndependentCommit:true,updateAccepted:result!.ok,activeOrderStatus:active!.status,stockLimit:product.stockLimit,limitation:"第二连接故障注入；未证明当前单 Node 进程部署自然可触发，未做生产测试"},null,2));

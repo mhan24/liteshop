@@ -1,5 +1,6 @@
+import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { orders, products } from "@/db/schema";
 import { seedManual } from "./test-helpers";
@@ -117,4 +118,45 @@ describe("P1 复审：守卫只查商品当前类型，未查历史订单快照"
     expect(updateProduct(p.id, { ...baseInput(p.slug), deliveryType: "manual", stockLimit: 1 }).ok).toBe(true);
     expect(stockOf(p.id)).toBe(1);
   });
+});
+
+
+it("独立连接在编辑事务开始前提交订单，守卫必须看到该订单（P2-03）", async () => {
+  const { updateProduct } = await import("@/server/admin/catalog");
+  const p = seedManual(2);
+  const second = new Database(db.$client.name);
+  second.pragma("foreign_keys = ON");
+  const original = db.transaction.bind(db);
+  const no = `audit-race-${Date.now()}`;
+  const spy = vi.spyOn(db, "transaction").mockImplementationOnce((...args) => {
+    second.transaction(() => {
+      second.prepare("UPDATE products SET stock_limit=stock_limit-1 WHERE id=?").run(p.id);
+      second.prepare("INSERT INTO orders(order_no,product_id,product_name,unit_price_cents,currency,quantity,total_cents,email,status,stock_charged,delivery_type) VALUES(?,?,'race',100,'USD',1,100,'race@example.test','pending',1,'manual')").run(no,p.id);
+    }).immediate();
+    return original(...args);
+  });
+  try {
+    const result = updateProduct(p.id, { ...baseInput(p.slug), stockLimit: -1 });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("未结束订单");
+    expect(stockOf(p.id)).toBe(1);
+    expect(db.select().from(orders).where(eq(orders.orderNo,no)).get()!.stockCharged).toBe(true);
+  } finally { spy.mockRestore(); second.close(); }
+});
+
+
+it("建单在事务内读取独立连接刚提交的库存模式", async () => {
+  const { createOrder } = await import("./create-order");
+  const p = seedManual(-1);
+  const second = new Database(db.$client.name);
+  const original = db.transaction.bind(db);
+  const spy = vi.spyOn(db, "transaction").mockImplementationOnce((...args) => {
+    second.prepare("UPDATE products SET stock_limit=1 WHERE id=?").run(p.id);
+    return original(...args);
+  });
+  try {
+    const r = await createOrder({ slug:p.slug, email:"fresh@example.test", quantity:1 });
+    expect(stockOf(p.id)).toBe(0);
+    expect(db.select().from(orders).where(eq(orders.orderNo,r.orderNo)).get()!.stockCharged).toBe(true);
+  } finally { spy.mockRestore(); second.close(); }
 });

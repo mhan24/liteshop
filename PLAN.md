@@ -20,7 +20,7 @@
 | 数据库 | SQLite + Drizzle ORM（better-sqlite3） | 单文件库 `/app/data/liteshop.db`，Docker 卷挂载 |
 | 会话 | HMAC 签名 HttpOnly Cookie | 管理员登录态；账密来自 `.env` |
 | 测试 | vitest | 签名 / 幂等 / 并发 / 金额解析单测 |
-| 部署 | Docker 多阶段构建（node:20-alpine，standalone 输出） | 附 docker-compose.yml |
+| 部署 | Docker 多阶段构建（node:22.23-bookworm-slim，standalone 输出） | 附 docker-compose.yml |
 | 界面语言 | 中文 | |
 
 ## 2. 目录架构
@@ -49,21 +49,25 @@ src/
 
 > 迁移必须全部 additive，禁止修改历史迁移文件。
 
-- **products**：`name / slug / description / image_url / price(分,INTEGER) / currency(默认CNY) / extra(JSON 扩展位) / delivery_type(auto|manual) / stock_limit(manual 用，0=不限) / status(上下架) / sort`
+- **products**：`name / slug / description / image_url / price(分,INTEGER) / currency(默认CNY) / extra(JSON 扩展位) / delivery_type(auto|manual) / stock_limit(manual 用，-1=不限，0=售罄，正数=剩余数量) / status(上下架) / sort`
 - **cards**（卡密池）：`product_id / content / status / order_id / sold_at`
   - `CardStatus = "available" | "reserved" | "sold"`
-  - 生命周期：`available --fulfill--> reserved（占卡，写入 order_id）--成功--> sold（落 sold_at）`；发货失败 / 关单时 reserved 释放回 available
-  - **UNIQUE(product_id, content)** —— 数据库层拒绝重复导入，代码去重仅作前置
+  - 生命周期：`available --create-order--> reserved（占卡，写入 order_id）--成功--> sold（落 sold_at）`；发货失败 / 关单时 reserved 释放回 available
+  - 允许重复内容按独立卡密行导入；库存安全由条件占卡与事务保证，不以内容唯一性保证
 - **orders**：
   - **order_no 非自增**：`LS + YYYYMMDD + 8位随机(base32) + 2位校验和`（如 `LS2026101112345678A9`），唯一索引 + 插入冲突重试，避免暴露销量
   - 商品快照（name / unit_price / currency）/ quantity / total / email / status / delivery_content / trade_id / expected_actual_amount / expiration_time / block_txn_id / paid_at
-  - `OrderStatus = "pending" | "paid" | "delivering" | "completed" | "expired" | "closed"`
+  - `OrderStatus = "pending" | "paid" | "delivering" | "completed" | "expired" | "closed" | "reconciling"`
     - `paid` = 已支付待处理（manual 型停留态，等待人工发货）
     - `delivering` = 自动发货进行中（占卡中 / 卡池空待补 / 临时失败；后台可补卡后重试发货，或直接人工录入 → completed）
 - **settings**：仅站点级（site_name / site_url 等）
 - **payment_configs**：`provider / enabled / config_json`（bepusdt 的 api_base / token / trade_type / timeout 存 config_json；未来 stripe / paypal / alipay 加行不改表）
 - **admin_logs**：审计（动作 / 目标 / 详情 / IP / 时间）
 - **notify_logs**：回调原始报文 + **payload_hash = sha256(raw_body)**（索引），用于重复通知识别与重放排查
+
+- **payment_attempts**：每次支付尝试独立保存渠道、trade_id、币种、金额与实付金额快照；只有当前尝试推动正常履约。
+- **payment_anomalies**：历史或迟到到账进入人工核对队列；已完成订单不得再次自动补发。
+- **reconciling**：创建支付结果未知，保留占库等待对账；禁止普通超时释放或直接重新购买。
 
 ### 订单状态机
 
@@ -109,7 +113,7 @@ pending ────┤
 
 ## 5. bepusdt 对接（server/payment/bepusdt.ts，已源码级核实）
 
-**创建交易**：`POST {api_base}/api/v1/order/create-transaction`
+**创建交易**：`POST {api_base}/api/v1/order/create-order`
 
 | 参数 | 必填 | 说明 |
 |---|---|---|
@@ -118,10 +122,10 @@ pending ────┤
 | redirect_url | ✅ | `https://站点域名/pay/return?order_no=…` |
 | signature | ✅ | 签名（见下） |
 | amount | ❌ | 法币金额（CNY） |
-| trade_type | ❌ | 默认 `usdt.trc20`，payment_configs 可配 |
+| trade_type | ❌ | 收银台模式不传；买家选择币种与网络 |
 | fiat | ❌ | 默认 `CNY` |
 | name | ❌ | 商品名 |
-| timeout | ❌ | 超时秒数，最低 120，默认 600 |
+| timeout | ❌ | 超时秒数，范围 180–3600；默认值由网关配置决定 |
 
 响应 `data`：`fiat / trade_id / order_id / amount / actual_amount / status / token / expiration_time / payment_url`。
 
@@ -144,7 +148,7 @@ pending ────┤
 1. **卡密库存并发安全**：领卡用条件原子 `UPDATE … WHERE status='available' … RETURNING`（受影响行数判库存，不超卖）；发货在 better-sqlite3 **IMMEDIATE 事务**内（状态机守卫 → 占卡 → 确认/释放 → 提交）；manual 库存条件扣减；SQLite 单写者 + Next standalone 单进程 + compose 单副本；并发单测：同一订单 10 次并发回调仅发 1 卡
 2. **支付金额防篡改**：履约只信服务器间回调（前端回跳页仅展示）；常量时间验签 → trade_id 对快照 → 金额 BigInt 分比较 → status=2 入账；原始报文 + payload_hash 落 notify_logs
 3. **管理后台安全**：`.env` 存 `ADMIN_PASSWORD_HASH`（scrypt，`npm run hash-password` 生成）；HMAC 会话（HttpOnly / SameSite=Lax / Secure 反代 TLS / 8h / session_version 全局登出）；CSRF token + Origin 校验；登录限速（IP+账号 5 次失败锁 15 分钟）；middleware 守护 `/admin/*`；安全响应头；admin_logs 审计；README 强制 HTTPS
-4. **SQLite Docker 部署**：builder 装 python3/make/g++ 编译 better-sqlite3（musl 匹配）；固定 node:20-alpine 具体版本 + `npm ci && npm rebuild better-sqlite3`（防未来升 Node 出 invalid ELF header，README 写升级流程）；启动 PRAGMA（WAL / synchronous=NORMAL / busy_timeout=5000 / foreign_keys=ON）；named volume + healthcheck；`npm run backup`（VACUUM INTO 在线备份）；非 root 运行
+4. **SQLite Docker 部署**：builder 装 python3/make/g++ 编译 better-sqlite3（Debian glibc 匹配）；固定 node:22.23-bookworm-slim 具体版本 + `npm ci && npm rebuild better-sqlite3`（防未来升 Node 出 invalid ELF header，README 写升级流程）；启动 PRAGMA（WAL / synchronous=NORMAL / busy_timeout=5000 / foreign_keys=ON）；named volume + healthcheck；`npm run backup`（VACUUM INTO 在线备份）；非 root 运行
 5. **bepusdt 字段**：以网关源码为准（见 §5），单测对齐官方 PHP SDK
 6. **商品模型扩展性**：currency + extra(JSON) 预留；PaymentProvider / DeliveryStrategy 双接口；additive 迁移；payment_configs 拆表
 
@@ -185,15 +189,12 @@ pending ────┤
 
 ## 11. 里程碑
 
-0. PLAN.md 固化
-1. 项目骨架（Next / Tailwind / shadcn / taste-skill）
-2. 数据层（schema / migration / seed）
-3. 核心业务服务（order service / delivery strategy / payment interface）
-4. mock payment ⭐提前跑通完整链路
-5. 后台
-6. bepusdt 实现
-7. 前台 UI
-8. Docker 发布
+| 里程碑 | 状态 | 验收依据 |
+|---|---|---|
+| 骨架、数据层、核心服务、mock、后台、bepusdt、前台 | 已实现；持续回归 | 当前源码及 `npm test`，修复记录见 docs/audits/2026-10-13/REPORT.md |
+| Docker 与生产发布 | 已有部署记录 | docs/DEPLOYMENTS.md；生产版本与 GitHub 修复版本分别记录 |
+| 支付成功分类与库存事务复审 | 本轮修复，待用户授权部署 | success-classification.test.ts、stock-commitment.test.ts；本地与 CI 验证后推送 |
+| 浏览器端到端与真实支付回归 | 每次发布按影响范围验收 | 需独立记录；单元测试不代替生产验收 |
 
 README 内容：Docker 部署、bepusdt 配置说明（Token 获取路径：bepusdt 后台 → 系统管理 → 基本设置 → API 设置 → 对接令牌；notify_url 填写方式）、首次使用指引、Node 升级注意事项。
 
@@ -229,3 +230,9 @@ README 内容：Docker 部署、bepusdt 配置说明（Token 获取路径：bepu
 1. **深浅主题**：next-themes（class 策略），默认跟随系统；前台页头与后台侧栏/顶栏提供切换按钮，`.dark` 调色板全站覆盖。
 2. **前台文案后台可改**：新增 `server/copy.ts` 文案注册表（首页主/副标题、眉标、空状态、购买按钮/须知、详情与查单与待支付页提示、页脚），后台「前台文案」卡片编辑，留空恢复默认；存储键 `copy_*`。
 3. **后台跳前台**：侧栏与顶栏新增「前往前台」新窗口链接。
+
+### 2026-10-13 · 审计修复
+
+- 成功回调先按具体支付尝试分类，终态订单也登记经过逐尝试快照校验的历史到账；当前交易金额异常不进入历史到账补发队列。
+- 商品编辑的读取、未结束订单守卫、更新以及建单的商品快照读取均置于各自 IMMEDIATE 事务内。
+- 审计固定包含修复、回归验证和 GitHub 推送；生产部署需用户当次明确指令。

@@ -1,0 +1,85 @@
+{
+  "payment": {
+    "baseline": "fa30978",
+    "observations": [
+      {
+        "case": "historical-success/pending",
+        "anomalies": 1,
+        "state": "pending",
+        "soldDelta": 0,
+        "message": "旧交易的到账已登记为异常待人工核对（#1）：trade_id 非当前交易，拒绝处理"
+      },
+      {
+        "case": "historical-success/expired",
+        "anomalies": 0,
+        "state": "expired",
+        "soldDelta": 0,
+        "message": "超时订单收到不匹配的成功回调，已记录但未登记补发：trade_id 非当前交易，拒绝处理"
+      },
+      {
+        "case": "historical-success/closed",
+        "anomalies": 0,
+        "state": "closed",
+        "soldDelta": 0,
+        "message": "超时订单收到不匹配的成功回调，已记录但未登记补发：trade_id 非当前交易，拒绝处理"
+      },
+      {
+        "case": "historical-success/completed",
+        "anomalies": 0,
+        "state": "completed",
+        "soldDelta": 0,
+        "message": "订单已完成（幂等重入）"
+      },
+      {
+        "case": "current-actual-amount-mismatch",
+        "anomalies": 1,
+        "state": "pending",
+        "message": "旧交易的到账已登记为异常待人工核对（#2）：actual_amount 与创建交易快照不匹配"
+      },
+      {
+        "case": "historical-actual-amount-mismatch",
+        "anomalies": 1,
+        "message": "旧交易的到账已登记为异常待人工核对（#3）：trade_id 非当前交易，拒绝处理"
+      },
+      {
+        "case": "unknown-trade",
+        "anomalies": 0,
+        "message": "trade_id 非当前交易，拒绝处理"
+      },
+      {
+        "case": "completed-current-duplicate",
+        "anomalies": 0,
+        "message": "订单已完成（幂等重入）"
+      }
+    ]
+  },
+  "stock_race": {
+    "case": "guard-to-transaction/two-connection-injection",
+    "injectedIndependentCommit": true,
+    "updateAccepted": true,
+    "activeOrderStatus": "pending",
+    "stockLimit": -1,
+    "limitation": "第二连接故障注入；未证明当前单 Node 进程部署自然可触发，未做生产测试"
+  },
+  "date": "2026-10-13",
+  "timezone": "Asia/Shanghai",
+  "baseline": "fa309786350d36cc3b1404f33f61890dd124090d",
+  "validation": {
+    "test_files": 30,
+    "tests_passed": 277,
+    "typecheck": "passed",
+    "lint": {
+      "errors": 0,
+      "warnings": 1
+    }
+  },
+  "repair_validation": {
+    "test_files": 31,
+    "tests_passed": 310,
+    "new_tests": 33,
+    "baseline_failures_in_classification_and_guard_tests": 16,
+    "typecheck": "passed",
+    "lint": "passed",
+    "deployment": "not_performed"
+  }
+}
