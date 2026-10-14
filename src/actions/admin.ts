@@ -532,11 +532,16 @@ export async function saveLitepayConfigAction(formData: FormData) {
   const apiBase = String(formData.get("apiBase") ?? "").trim().replace(/\/+$/, "");
   // 表单字段仍叫 merchantId（沿用既有设置存储键 merchant_id），语义是 litepay 的 Access Key
   const merchantId = String(formData.get("merchantId") ?? "").trim();
+  const upstreamProviderInput = String(formData.get("upstreamProvider") ?? "").trim().toLowerCase();
+  const upstreamProvider = upstreamProviderInput === "okx" ? "okx" : "binance";
   const secret = String(formData.get("secret") ?? "").trim();
   const coin = (String(formData.get("coin") ?? "").trim() || "USDT").toUpperCase();
   const network = String(formData.get("network") ?? "").trim();
 
   if (enabled) {
+    if (upstreamProviderInput !== "binance" && upstreamProviderInput !== "okx") {
+      await back("/admin/settings", "请选择 LitePay 后台已启用的 Binance 或 OKX 账户", false, "pay");
+    }
     if (!apiBase.startsWith("http")) await back("/admin/settings", "litepay 地址需为 http 或 https 地址", false, "pay");
     if (!merchantId || !secret) await back("/admin/settings", "启用前请填写 Access Key 与 Secret", false, "pay");
     // 防历史事故重演：管理台展示的商户密钥是掩码（形如 3a785e…b34c，13 字符），
@@ -556,9 +561,9 @@ export async function saveLitepayConfigAction(formData: FormData) {
 
   upsertPaymentConfig("litepay", {
     enabled,
-    configJson: { api_base: apiBase, merchant_id: merchantId, secret, coin, network },
+    configJson: { api_base: apiBase, merchant_id: merchantId, secret, provider: upstreamProvider, coin, network },
   });
-  logAdmin("settings.litepay", "litepay", `enabled=${enabled} coin=${coin}`, await clientIp(), session.u);
+  logAdmin("settings.litepay", "litepay", `enabled=${enabled} provider=${upstreamProvider} coin=${coin}`, await clientIp(), session.u);
   revalidatePath("/admin/settings");
   await back("/admin/settings", "litepay 配置已保存", true, "pay");
 }

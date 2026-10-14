@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "系统设置" };
@@ -221,6 +222,24 @@ export default async function AdminSettingsPage({
           <form action={saveLitepayConfigAction} className="grid max-w-xl gap-4 sm:grid-cols-2">
             <input type="hidden" name="csrf" value={csrf} />
             <input type="hidden" name="provider" value="litepay" />
+            <div className="space-y-1.5">
+              <Label htmlFor="lp-provider">LitePay 收款账户</Label>
+              <Select
+                name="upstreamProvider"
+                defaultValue={String(litepayConfig["provider"] ?? "binance")}
+              >
+                <SelectTrigger id="lp-provider" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="binance">Binance</SelectItem>
+                  <SelectItem value="okx">OKX</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                必须与 LitePay 后台已启用的交易所账户一致
+              </p>
+            </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="lp-api">litepay 地址</Label>
               <Input

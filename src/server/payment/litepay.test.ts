@@ -102,6 +102,12 @@ describe("parseLitepayConfig", () => {
   it("空字符串视为未配置", () => {
     expect(parseLitepayConfig({ api_base: "   ", secret: "" }).apiBase).toBeUndefined();
   });
+
+  it("兼容旧配置时默认使用 Binance，并允许显式选择 OKX", () => {
+    expect(parseLitepayConfig({}).provider).toBe("binance");
+    expect(parseLitepayConfig({ provider: "okx" }).provider).toBe("okx");
+    expect(parseLitepayConfig({ provider: "unsupported" }).provider).toBeUndefined();
+  });
 });
 
 describe("centsToAmountString", () => {
@@ -158,6 +164,7 @@ describe("createPayment", () => {
     expect(sent.amount).toBe("0.50");
     expect(sent.currency).toBe("USDT");
     expect(sent.network).toBe("TRC20");
+    expect(sent.provider).toBe("binance");
     expect(sent.callback_url).toBe("https://shop.9527.tr/api/pay/notify/litepay");
     expect(sent.expire_in).toBe(900);
     // Go 网关启用了 DisallowUnknownFields，商品名称只能使用 description。
@@ -170,6 +177,21 @@ describe("createPayment", () => {
       litepayMerchantSignString("POST", "/api/v1/orders", headers["X-LitePay-Timestamp"], headers["X-LitePay-Nonce"], body)
     );
     expect(headers["X-LitePay-Signature"]).toBe(expected);
+  });
+
+  it("按设置发送 LitePay 上游 provider", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify(OK_RESPONSE), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await provider({ provider: "okx" }).createPayment(input());
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string).provider).toBe("okx");
   });
 
   it("未配置凭据时直接抛错（不发请求）", async () => {

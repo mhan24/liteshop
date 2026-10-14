@@ -50,6 +50,8 @@ export interface LitepayConfig {
   /** 商户 Access Key（litepay 管理台「商户」页生成） */
   accessKey?: string;
   secret?: string;
+  /** LitePay 网关里实际启用的交易所账户。旧配置默认沿用当前生产账户 Binance。 */
+  provider?: "binance" | "okx";
   /** 结算币种（加密货币），默认 USDT */
   coin?: string;
   /** 结算网络（如 TRC20 / TRON），留空由网关按币种默认网络选择 */
@@ -64,10 +66,13 @@ export interface LitepayConfig {
  */
 export function parseLitepayConfig(config: Record<string, unknown>): LitepayConfig {
   const str = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined);
+  const provider = str(config["provider"])?.toLowerCase();
   return {
     apiBase: str(config["api_base"])?.replace(/\/+$/, ""),
     accessKey: str(config["access_key"]) ?? str(config["merchant_id"]),
     secret: str(config["secret"]),
+    // 兼容已有生产配置：LitePay 当前只启用了 Binance 账户。
+    provider: !provider || provider === "binance" ? "binance" : provider === "okx" ? "okx" : undefined,
     coin: str(config["coin"]),
     network: str(config["network"]),
   };
@@ -202,6 +207,9 @@ export function litepayProvider(rawConfig: Record<string, unknown>): PaymentProv
       if (!config.apiBase || !config.accessKey || !config.secret) {
         throw new Error("litepay 未配置：请在后台填写网关地址与商户 Access Key / Secret");
       }
+      if (!config.provider) {
+        throw new Error("litepay provider 配置无效：请选择 binance 或 okx");
+      }
       const coin = config.coin ?? DEFAULT_LITEPAY_COIN;
       const path = "/api/v1/orders";
       const body = JSON.stringify({
@@ -209,6 +217,7 @@ export function litepayProvider(rawConfig: Record<string, unknown>): PaymentProv
         amount: centsToAmountString(input.amountCents),
         currency: coin,
         ...(config.network ? { network: config.network } : {}),
+        provider: config.provider,
         description: input.subject,
         callback_url: input.notifyUrl,
         ...(input.timeoutSeconds ? { expire_in: Math.trunc(input.timeoutSeconds) } : {}),
