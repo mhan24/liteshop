@@ -147,7 +147,8 @@ echo "✓ 本地镜像构建完成（$(du -h "$IMAGE_ARCHIVE" | cut -f1)）"
 
 ENV_HASH_BEFORE="$("${SSH[@]}" "$TARGET" "sha256sum $REMOTE_DIR/.env | cut -d' ' -f1")"
 
-"${SCP[@]}" "$TARBALL" "$IMAGE_ARCHIVE" "$TARGET:/tmp/"
+"${SCP[@]}" "$TARBALL" "$TARGET:/tmp/liteshop-deploy.tar.gz"
+"${SCP[@]}" "$IMAGE_ARCHIVE" "$TARGET:/tmp/$IMAGE_ARCHIVE_NAME"
 
 "${SSH[@]}" "$TARGET" bash -s <<EOF
 set -euo pipefail
