@@ -14,8 +14,8 @@ export const metadata = { title: "支付订单" };
 /**
  * 交易所转账收银页（litepay 渠道）。
  *
- * 新版 litepay 网关不提供托管收银台，只返回**收款地址 + 备注**，
- * 因此由本站展示转账指引，并轮询订单状态直至到账。
+ * LitePay 不提供托管收银台，只返回交易所 ID 与指定金额，
+ * 因此由本站展示站内转账指引，并轮询订单状态直至到账。
  *
  * 数据来源：订单当前有效支付尝试落库的网关响应快照（`payment_attempts.raw`），
  * 服务端读取，不接受 URL 传入地址——避免买家被诱导转到被篡改的收款地址。
@@ -29,10 +29,12 @@ export default async function PayAddressPage({
   const accessible = orderNo ? await hasOrderAccess(orderNo) : false;
   const view = accessible && orderNo ? getOrderStatusView(orderNo) : null;
 
-  // 仅在待支付阶段展示收款信息：已支付/已关闭的订单再显示地址会诱导重复转账
+  // 仅在待支付阶段展示收款信息：已支付/已关闭的订单再显示目标会诱导重复转账
   const showTarget = view?.status === "pending" || view?.status === "reconciling";
   const attempt = accessible && showTarget && orderNo ? getCurrentAttempt(orderNo) : undefined;
   const target = attempt?.raw ? parseLitepayPaymentTarget(attempt.raw) : null;
+  const isExchangeID = target?.method === "exchange_id";
+  const exchangeName = target?.provider === "binance" ? "币安" : target?.provider === "okx" ? "OKX" : "交易所";
 
   const turnstile = getTurnstileClientConfig();
   const support = { url: getSupportUrl(), label: getCopy("support_label") };
@@ -47,18 +49,27 @@ export default async function PayAddressPage({
     >
       {view && showTarget && target ? (
         <section className="mb-8">
-          <h1 className="mb-1 text-lg font-semibold">请按以下信息完成转账</h1>
+          <h1 className="mb-1 text-lg font-semibold">{isExchangeID ? "请在交易所内转账" : "请按以下信息完成转账"}</h1>
           <p className="mb-5 text-sm leading-relaxed text-muted-foreground">
-            请使用交易所或钱包向下方地址转账<strong>指定金额</strong>。
-            金额不一致将无法自动识别到账，请勿多转或少转。
+            {isExchangeID
+              ? `请在${exchangeName} App 内向下方 ID 发起站内转账，并填写完全一致的指定金额。系统按站内转账记录确认到账。`
+              : "请使用交易所或钱包向下方地址转账指定金额。金额不一致将无法自动识别到账，请勿多转或少转。"}
           </p>
 
           <div className="space-y-3">
             <CopyField
-              label={`收款地址${target.network ? `（${target.network}）` : ""}`}
+              label={
+                isExchangeID
+                  ? `${exchangeName} ID`
+                  : `收款地址${target.network ? `（${target.network}）` : ""}`
+              }
               value={target.address}
               emphasis
-              hint="请务必使用与上方网络一致的链转账，跨链转账会导致资产丢失。"
+              hint={
+                isExchangeID
+                  ? `请确认收款 ID 为此 ${exchangeName} ID，并在${exchangeName} App 内使用站内转账。`
+                  : "请务必使用与上方网络一致的链转账，跨链转账会导致资产丢失。"
+              }
             />
             {target.memo ? (
               <CopyField

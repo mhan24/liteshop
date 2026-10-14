@@ -20,8 +20,8 @@ import type {
  *      `X-LitePay-Nonce`（随机串）、`X-LitePay-Signature`
  *    - 待签串：`METHOD\nPATH\nTIMESTAMP\nNONCE\nSHA256(body)`（hex，HMAC-SHA256）
  *    - 响应：`{ code, message, data }`，`code === "OK"` 为成功；
- *      `data` 内含 `order_no / pay_address / pay_memo / amount / currency /
- *      network / expire_time`（**收款地址，不是收银台 URL**）
+ *      `data` 内含 `order_no / payment_method / pay_id / amount / currency /
+ *      expire_time`（Binance ID / OKX UID 站内转账目标；`pay_address` 仅为兼容旧客户端的别名）
  *
  * 2) 到账回调 `POST {notify_url}`（litepay → 本站）
  *    - 请求头：`X-LitePay-Event`、`X-LitePay-Event-Id`、`X-LitePay-Timestamp`、
@@ -31,10 +31,10 @@ import type {
  *      amount, paid_amount, paid_at, ... }`
  *
  * 与旧版 litepay 的差异（旧版有托管收银台 `cashier_url`）：
- * 新网关只返回**收款地址**，因此买家端由本站 `/pay/address` 页面自行展示
- * 地址/备注/金额，故 `paymentUrl` 指向站内页面而非网关。
+ * 新网关只返回**交易所 ID**，因此买家端由本站 `/pay/address` 页面展示
+ * ID 与指定金额，指引买家在同一交易所 App 内转账，故 `paymentUrl` 指向站内页面。
  *
- * 币种口径：新网关按**加密货币**计价（每笔订单绑定一个充值地址）。
+ * 币种口径：新网关按**加密货币**计价（每笔订单绑定一个交易所账户 ID）。
  * 本站商品以 USD 计价，故按 1:1 折算为 `coin`（默认 USDT），与旧 exchange
  * 渠道的 `asset + rate=1` 口径一致。
  */
@@ -126,11 +126,13 @@ interface LitepayOrderData {
   merchant_order_no?: string;
   status?: string;
   provider?: string;
+  payment_method?: string;
   currency?: string;
   network?: string;
   amount?: string;
   paid_amount?: string;
   pay_address?: string;
+  pay_id?: string;
   pay_memo?: string;
   expire_time?: number;
   created_at?: number;
@@ -146,6 +148,8 @@ interface LitepayEnvelope {
 /** 收款信息（供 `/pay/address` 页面渲染；来源为落库的网关响应快照） */
 export interface LitepayPaymentTarget {
   address: string;
+  method?: string;
+  provider?: string;
   memo: string;
   amount: string | null;
   currency: string | null;
@@ -155,7 +159,7 @@ export interface LitepayPaymentTarget {
 
 /**
  * 从支付尝试落库的原始响应中提取收款信息（纯函数，便于单测）。
- * 非 litepay 结构或缺少地址时返回 null。
+ * 非 litepay 结构或缺少 ID/地址时返回 null。
  */
 export function parseLitepayPaymentTarget(raw: unknown): LitepayPaymentTarget | null {
   let parsed: unknown = raw;
@@ -168,10 +172,14 @@ export function parseLitepayPaymentTarget(raw: unknown): LitepayPaymentTarget | 
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const data = parsed as LitepayOrderData;
-  const address = typeof data.pay_address === "string" ? data.pay_address.trim() : "";
+  const address =
+    (typeof data.pay_id === "string" ? data.pay_id.trim() : "") ||
+    (typeof data.pay_address === "string" ? data.pay_address.trim() : "");
   if (!address) return null;
   return {
     address,
+    ...(typeof data.payment_method === "string" ? { method: data.payment_method } : {}),
+    ...(typeof data.provider === "string" ? { provider: data.provider } : {}),
     memo: typeof data.pay_memo === "string" ? data.pay_memo.trim() : "",
     amount: typeof data.amount === "string" && data.amount !== "" ? data.amount : null,
     currency: typeof data.currency === "string" && data.currency !== "" ? data.currency : null,
@@ -277,7 +285,7 @@ export function litepayProvider(rawConfig: Record<string, unknown>): PaymentProv
       }
 
       const data = envelope.data;
-      if (envelope.code !== "OK" || !data?.order_no || !data.pay_address) {
+      if (envelope.code !== "OK" || !data?.order_no || !(data.pay_id || data.pay_address)) {
         throw new PaymentCreationError(
           "unknown",
           `litepay 创建订单响应异常: ${envelope.message ?? text.slice(0, 200)}`
@@ -288,7 +296,7 @@ export function litepayProvider(rawConfig: Record<string, unknown>): PaymentProv
         provider: "litepay",
         // trade_id 用网关订单号：回调按 order_no 归属该笔支付尝试
         tradeId: data.order_no,
-        // 新网关不提供托管收银台，买家端由本站页面展示收款地址
+        // 新网关不提供托管收银台，买家端由本站页面展示交易所 ID
         paymentUrl: litepayAddressUrl(input.orderNo),
         expectedActualAmount: data.amount ?? null,
         expirationTime:
