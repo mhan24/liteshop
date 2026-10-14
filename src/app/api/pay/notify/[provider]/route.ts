@@ -66,7 +66,7 @@ export async function POST(
 
   let result;
   try {
-    result = handlePaymentNotify(provider, rawBody);
+    result = handlePaymentNotify(provider, rawBody, request.headers);
   } catch (err) {
     // 内部异常（如 DB 忙）：交易状态未知，必须让网关重试而不是当作成功
     console.error("[notify-error]", provider, err);

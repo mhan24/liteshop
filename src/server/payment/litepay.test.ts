@@ -333,6 +333,7 @@ describe("parseLitepayPaymentTarget", () => {
     const target = parseLitepayPaymentTarget(JSON.stringify(OK_RESPONSE.data));
     expect(target).toEqual({
       address: "TN4hGjVXMzy9b4N1aGizqs",
+      provider: "okx",
       memo: "",
       amount: "0.5",
       currency: "USDT",
