@@ -42,6 +42,7 @@ bash -n scripts/deploy.sh && shellcheck --severity=error -e SC1090,SC1091 script
 脚本保证：
 
 - 用 `git archive HEAD` 打包 → 服务器严格等于该提交（无 macOS AppleDouble 垃圾）
+- 本机使用 Docker 构建 `linux/arm64` 镜像并上传；服务器只加载镜像、启动容器，不编译源码
 - rsync `--delete` 同步 → 清除上一版本遗留文件
 - `.env` 全程排除并前后校验指纹 → 绝不被覆盖
 - `docker compose up --wait --timeout 180` → 健康通过才算成功

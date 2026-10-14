@@ -103,7 +103,11 @@ if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
 fi
 
 TARBALL="$(mktemp -t liteshop-deploy-XXXXXX.tar.gz)"
-trap 'rm -f "$TARBALL"' EXIT
+IMAGE_ARCHIVE="$(mktemp -t liteshop-image-XXXXXX.tar.gz)"
+BUILD_CONTEXT=""
+IMAGE_ARCHIVE_NAME="$(basename "$IMAGE_ARCHIVE")"
+IMAGE_NAME="liteshop-liteshop"
+trap 'rm -f "$TARBALL" "$IMAGE_ARCHIVE"; [[ -z "$BUILD_CONTEXT" ]] || rm -rf "$BUILD_CONTEXT"' EXIT
 git archive --format=tar.gz -o "$TARBALL" HEAD
 
 # 防御性检查：归档中不得出现 AppleDouble 条目
@@ -126,25 +130,43 @@ if tar tzf "$TARBALL" | grep -qE '(^|/)\.env$|(^|/)\.deploy\.env$'; then
   exit 1
 fi
 
+echo "→ 在本地构建 Linux ARM64 镜像 ${IMAGE_NAME}:${DEPLOY_SHA_SHORT}"
+BUILD_CONTEXT="$(mktemp -d -t liteshop-build-XXXXXX)"
+tar xzf "$TARBALL" -C "$BUILD_CONTEXT"
+docker build --platform linux/arm64 \
+  -t "${IMAGE_NAME}:${DEPLOY_SHA_SHORT}" \
+  -t "${IMAGE_NAME}:latest" \
+  "$BUILD_CONTEXT"
+IMAGE_PLATFORM="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${IMAGE_NAME}:${DEPLOY_SHA_SHORT}")"
+if [[ "$IMAGE_PLATFORM" != "linux/arm64" ]]; then
+  echo "✗ 镜像架构错误：${IMAGE_PLATFORM}，生产服务器需要 linux/arm64" >&2
+  exit 1
+fi
+docker save "${IMAGE_NAME}:${DEPLOY_SHA_SHORT}" "${IMAGE_NAME}:latest" | gzip -1 > "$IMAGE_ARCHIVE"
+echo "✓ 本地镜像构建完成（$(du -h "$IMAGE_ARCHIVE" | cut -f1)）"
+
 ENV_HASH_BEFORE="$("${SSH[@]}" "$TARGET" "sha256sum $REMOTE_DIR/.env | cut -d' ' -f1")"
 
-"${SCP[@]}" "$TARBALL" "$TARGET:/tmp/liteshop-deploy.tar.gz"
+"${SCP[@]}" "$TARBALL" "$IMAGE_ARCHIVE" "$TARGET:/tmp/"
 
 "${SSH[@]}" "$TARGET" bash -s <<EOF
 set -euo pipefail
 
 REMOTE_DIR="$REMOTE_DIR"
+REMOTE_IMAGE_ARCHIVE="/tmp/$IMAGE_ARCHIVE_NAME"
 STAGING="\$(mktemp -d /tmp/liteshop-release-XXXXXX)"
-trap 'rm -rf "\$STAGING"' EXIT
+trap 'rm -rf "\$STAGING"; rm -f "\$REMOTE_IMAGE_ARCHIVE" /tmp/liteshop-deploy.tar.gz' EXIT
 
-# ── 1. 解包到全新 staging 目录（不原地覆盖）────────────────────────────────
-#
-# 为什么不在原地解压：tar 覆盖解压**不会删除**上一版本已移除的文件。
-# 例如某路由已从仓库删除，服务器上仍留着旧文件，下一次 \`COPY . .\` 可能
-# 把它重新编译进镜像，导致「线上有仓库里不存在的代码」。
-# 改用全新目录后，目录内容严格等于该提交。
+# ── 1. 加载本地镜像并解包到全新 staging 目录 ─────────────────────────────
+# 用全新目录解包，保持生产源码树严格等于该提交，不留旧版本文件。
 tar xzf /tmp/liteshop-deploy.tar.gz -C "\$STAGING"
 rm -f /tmp/liteshop-deploy.tar.gz
+if docker image inspect "$IMAGE_NAME:latest" >/dev/null 2>&1; then
+  docker tag "$IMAGE_NAME:latest" "$IMAGE_NAME:backup-\$(cat /var/lib/liteshop-release/current 2>/dev/null || echo initial)"
+fi
+gzip -dc "\$REMOTE_IMAGE_ARCHIVE" | docker load
+rm -f "\$REMOTE_IMAGE_ARCHIVE"
+docker image inspect "$IMAGE_NAME:$DEPLOY_SHA_SHORT" >/dev/null
 
 # 防御：staging 中不得出现 AppleDouble 或密钥文件
 if find "\$STAGING" -name '._*' -type f | head -1 | grep -q .; then
@@ -190,10 +212,10 @@ if [ "\$NEW_ENV_HASH" != "$ENV_HASH_BEFORE" ]; then
 fi
 echo "✓ .env 未被改动（同步全程排除）"
 
-# ── 3. 构建并等待健康 ─────────────────────────────────────────────────────
+# ── 3. 启动本地构建镜像并等待健康 ─────────────────────────────────────────
 rm -f /tmp/liteshop-deploy.tar.gz
-if ! docker compose $COMPOSE_FILES up -d --build --wait --wait-timeout 180; then
-  echo "✗ 构建或健康检查失败。上一个可用提交：\$PREV_SHA" >&2
+if ! docker compose $COMPOSE_FILES up -d --no-build --wait --wait-timeout 180; then
+  echo "✗ 启动或健康检查失败。上一个可用提交：\$PREV_SHA" >&2
   echo "  查看日志：docker compose $COMPOSE_FILES logs --tail 100 liteshop" >&2
   echo "  回滚方式：git checkout \$PREV_SHA (在本地) 后重新执行 deploy.sh" >&2
   docker compose $COMPOSE_FILES logs --tail 60 liteshop >&2 || true
