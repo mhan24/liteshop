@@ -209,7 +209,7 @@ export function litepayProvider(rawConfig: Record<string, unknown>): PaymentProv
         amount: centsToAmountString(input.amountCents),
         currency: coin,
         ...(config.network ? { network: config.network } : {}),
-        subject: input.subject,
+        description: input.subject,
         callback_url: input.notifyUrl,
         ...(input.timeoutSeconds ? { expire_in: Math.trunc(input.timeoutSeconds) } : {}),
       });

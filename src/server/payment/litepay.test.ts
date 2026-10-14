@@ -160,6 +160,9 @@ describe("createPayment", () => {
     expect(sent.network).toBe("TRC20");
     expect(sent.callback_url).toBe("https://shop.9527.tr/api/pay/notify/litepay");
     expect(sent.expire_in).toBe(900);
+    // Go 网关启用了 DisallowUnknownFields，商品名称只能使用 description。
+    expect(sent.description).toBe("测试商品");
+    expect(sent).not.toHaveProperty("subject");
 
     // 关键：签名必须与网关的待签串完全一致
     const expected = hmacHex(
