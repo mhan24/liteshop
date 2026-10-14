@@ -28,6 +28,8 @@ export interface PaymentAttemptRow {
   status: PaymentAttemptStatusType;
   isCurrent: boolean;
   paidAt: Date | null;
+  /** 渠道原始响应快照（JSON 字符串）；litepay 收款信息页据此展示地址/备注 */
+  raw: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

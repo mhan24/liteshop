@@ -60,7 +60,6 @@ export default async function PayPendingPage({
                 productSlug: view.productSlug,
                 canRepurchase: view.canRepurchase,
                 repurchaseBlockedReason: view.repurchaseBlockedReason,
-                transferInstructions: view.transferInstructions,
               }
             : null
         }

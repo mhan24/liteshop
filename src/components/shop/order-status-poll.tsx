@@ -3,7 +3,6 @@
 import { useEffect, useState, useActionState } from "react";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/admin/status-badge";
-import { ExchangeCashier } from "@/components/shop/exchange-cashier";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TurnstileWidget, useTurnstileToken } from "@/components/shop/turnstile-widget";
@@ -33,16 +32,6 @@ export interface OrderStatusPayload {
   canRepurchase?: boolean;
   /** 不能重购的原因，用于前台提示 */
   repurchaseBlockedReason?: string | null;
-  /** 交易所转账指引；非交易所渠道为 null */
-  transferInstructions?: {
-    exchange: string;
-    accountId: string;
-    amount: string;
-    asset: string;
-    expiresAtText: string | null;
-    /** 毫秒时间戳：收银台倒计时用 */
-    expiresAtMs?: number | null;
-  } | null;
 }
 
 /** 客服入口：地址为空时不渲染由 SupportLink 内部处理 */
@@ -194,17 +183,7 @@ export function OrderStatusPoll({
 
       {/* 交易所转账：没有收银台地址，必须给出账户与**精确金额**，
           否则买家无从付款（金额必须分毫不差，系统靠它识别到账）。 */}
-      {order.status === "pending" && payCTA && order.transferInstructions ? (
-        <ExchangeCashier
-          data={{
-            exchange: order.transferInstructions.exchange,
-            accountId: order.transferInstructions.accountId,
-            amount: order.transferInstructions.amount,
-            asset: order.transferInstructions.asset,
-            expiresAtMs: order.transferInstructions.expiresAtMs ?? null,
-          }}
-        />
-      ) : order.status === "pending" && payCTA && order.paymentUrl ? (
+      {order.status === "pending" && payCTA && order.paymentUrl ? (
         <button
           type="button"
           onClick={() => openPaymentWindow(toAbsoluteUrl(order.paymentUrl!))}

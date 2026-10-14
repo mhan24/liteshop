@@ -58,7 +58,7 @@ export interface HandleNotifyResult {
   emailKind?: MailKind;
 }
 
-export function handlePaymentNotify(providerName: string, rawBody: string): HandleNotifyResult {
+export function handlePaymentNotify(providerName: string, rawBody: string, headers?: Headers): HandleNotifyResult {
   const payloadHash = sha256Hex(rawBody);
   let verificationOk = false;
   let message = "";
@@ -72,7 +72,7 @@ export function handlePaymentNotify(providerName: string, rawBody: string): Hand
   } catch {
     return { handled: false, retryable: false, message: `支付渠道未启用: ${providerName}` };
   }
-  const verification = provider.verifyNotify(rawBody);
+  const verification = provider.verifyNotify(rawBody, headers);
   verificationOk = verification.ok;
   message = verification.error ?? "";
   if (verification.ok && verification.payload) {

@@ -18,5 +18,12 @@ services:
       retries: 3
     # 注意：SQLite 单写者，禁止水平扩容（deploy.replicas / scale 必须为 1）
 
+networks:
+  edge:
+    name: liteshop_edge
+
 volumes:
   liteshop-data:
+
+# litepay（交易所收款网关）接入同一边缘网络：
+# 其自有 compose（/opt/litepay/docker-compose.yml）声明 external network "liteshop_edge"

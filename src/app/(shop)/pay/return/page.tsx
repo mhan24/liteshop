@@ -46,7 +46,6 @@ export default async function PayReturnPage({
           productSlug: order.productSlug,
           canRepurchase: order.canRepurchase,
           repurchaseBlockedReason: order.repurchaseBlockedReason,
-          transferInstructions: order.transferInstructions,
         } : null}
       />
     </main>

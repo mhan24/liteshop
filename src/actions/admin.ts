@@ -3,11 +3,6 @@
 import { envConfig } from "@/lib/env";
 import { secureCookie } from "@/lib/cookie-policy";
 import { normalizeHttpUrl } from "@/lib/http-url";
-import { getExchangeClient } from "@/server/exchange";
-import {
-  loadExchangeCredentials,
-  saveExchangeChannel,
-} from "@/server/exchange/channel";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -427,63 +422,8 @@ export async function saveSiteSettingsAction(formData: FormData) {
 /**
  * 保存交易所收款渠道配置（凭据加密存储，前端不回显密钥）。
  */
-export async function saveExchangeChannelAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const provider = String(formData.get("provider") ?? "");
-  if (provider !== "binance" && provider !== "okx") {
-    await back("/admin/settings", "未知的交易所渠道", false, "pay");
-  }
-  const result = saveExchangeChannel(provider as "binance" | "okx", {
-    enabled: formData.get("enabled") === "on" || formData.get("enabled") === "true",
-    accountId: String(formData.get("accountId") ?? ""),
-    // checkbox：勾选提交 "USDC"，未勾选则字段缺失 → 默认 USDT
-    asset: String(formData.get("asset") ?? "USDT") === "USDC" ? "USDC" : "USDT",
-    rate: String(formData.get("rate") ?? "1"),
-    apiKey: String(formData.get("apiKey") ?? ""),
-    // 留空 = 保留原密钥（避免回显后误清空）
-    apiSecret: String(formData.get("apiSecret") ?? ""),
-    passphrase: String(formData.get("passphrase") ?? ""),
-  });
-  if (!result.ok) {
-    await back("/admin/settings", result.error ?? "保存失败", false, "pay");
-  }
-  logAdmin(
-    "settings.exchange",
-    provider,
-    JSON.stringify({ accountId: String(formData.get("accountId") ?? "").trim(), enabled: result.ok }),
-    await clientIp(),
-    session.u
-  );
-  await back("/admin/settings", `交易所渠道 ${provider} 已保存`, true, "pay");
-}
 
 /** 校验交易所凭据是否可用（不落库，仅测试连通性与只读权限） */
-export async function testExchangeChannelAction(formData: FormData) {
-  await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const provider = String(formData.get("provider") ?? "");
-  if (provider !== "binance" && provider !== "okx") {
-    await back("/admin/settings", "未知的交易所渠道", false, "pay");
-  }
-  const loaded = loadExchangeCredentials(provider as "binance" | "okx");
-  if (!loaded) {
-    await back("/admin/settings", "请先保存渠道配置再测试", false, "pay");
-  }
-  const check = await getExchangeClient(provider as "binance" | "okx").validateCredentials(loaded!.cred);
-  if (!check.ok) {
-    await back("/admin/settings", `凭据校验失败：${check.error ?? "未知原因"}`, false, "pay");
-  }
-  if (check.accountId && check.accountId !== loaded!.cred.accountId) {
-    await back(
-      "/admin/settings",
-      `账户不匹配：API Key 返回 UID ${check.accountId}，但配置为 ${loaded!.cred.accountId}`,
-      false,
-      "pay"
-    );
-  }
-  await back("/admin/settings", `凭据校验通过（账户 ${check.accountId}）`, true, "pay");
-}
 
 export async function savePaymentConfigAction(formData: FormData) {
   const session = await requireSession();
@@ -581,6 +521,46 @@ export async function sendTestEmailAction(formData: FormData) {
   const result = await sendTestEmail(to);
   logAdmin("settings.smtp_test", to, result.ok ? "测试邮件已发送" : `失败：${result.error ?? ""}`, await clientIp(), session.u);
   await back("/admin/settings", result.ok ? `测试邮件已发送至 ${to}` : `发送失败：${result.error ?? "未知错误"}`, result.ok, "notify");
+}
+
+/* ===== litepay 渠道 ===== */
+
+export async function saveLitepayConfigAction(formData: FormData) {
+  const session = await requireSession();
+  await assertCsrf(formData.get("csrf"));
+  const enabled = String(formData.get("enabled") ?? "") === "on";
+  const apiBase = String(formData.get("apiBase") ?? "").trim().replace(/\/+$/, "");
+  // 表单字段仍叫 merchantId（沿用既有设置存储键 merchant_id），语义是 litepay 的 Access Key
+  const merchantId = String(formData.get("merchantId") ?? "").trim();
+  const secret = String(formData.get("secret") ?? "").trim();
+  const coin = (String(formData.get("coin") ?? "").trim() || "USDT").toUpperCase();
+  const network = String(formData.get("network") ?? "").trim();
+
+  if (enabled) {
+    if (!apiBase.startsWith("http")) await back("/admin/settings", "litepay 地址需为 http 或 https 地址", false, "pay");
+    if (!merchantId || !secret) await back("/admin/settings", "启用前请填写 Access Key 与 Secret", false, "pay");
+    // 防历史事故重演：管理台展示的商户密钥是掩码（形如 3a785e…b34c，13 字符），
+    // 若被当作真实密钥保存，会导致该渠道全部请求 401 且难以定位。
+    if (secret.includes("…") || secret.length < 32) {
+      await back(
+        "/admin/settings",
+        "Secret 看起来是掩码或残缺值，请复制管理台的**完整**密钥（64 位十六进制）",
+        false,
+        "pay"
+      );
+    }
+    if (!/^[A-Z0-9]{2,16}$/.test(coin)) {
+      await back("/admin/settings", "结算币种格式不正确（示例：USDT）", false, "pay");
+    }
+  }
+
+  upsertPaymentConfig("litepay", {
+    enabled,
+    configJson: { api_base: apiBase, merchant_id: merchantId, secret, coin, network },
+  });
+  logAdmin("settings.litepay", "litepay", `enabled=${enabled} coin=${coin}`, await clientIp(), session.u);
+  revalidatePath("/admin/settings");
+  await back("/admin/settings", "litepay 配置已保存", true, "pay");
 }
 
 /* ===== 人机验证（Cloudflare Turnstile）===== */

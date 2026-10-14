@@ -58,10 +58,6 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     throw new OrderError("INVALID_INPUT", "备注过长（最多 500 字）");
   }
 
-  // 交易所收款走独立入口（需分配唯一应付金额），此处拒绝而非静默忽略
-  if (input.paymentMethod === "exchange") {
-    throw new OrderError("UNSUPPORTED_METHOD", "交易所收款暂不支持从该入口下单");
-  }
   const provider = resolvePaymentProvider(input.paymentMethod);
   const siteUrl = getSiteUrl();
   const startedAt = Date.now();

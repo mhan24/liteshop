@@ -36,11 +36,11 @@ export default async function ProductDetailPage({
   // 支付方式由服务端判定：只有配置完整的渠道才对买家可见，
   // 避免"选了却付不了"。
   const checkoutOptions: CheckoutOption[] = listCheckoutMethods().map((m) =>
-    m === "exchange"
+    m === "litepay"
       ? {
           value: m,
           label: "交易所转账（USDT / USDC）",
-          hint: "按页面给出的收款账户与精确金额转账，到账后自动发货",
+          hint: "按页面给出的收款地址与精确金额转账，到账后自动发货",
         }
       : { value: m, label: "在线支付", hint: "跳转收银台完成支付" }
   );

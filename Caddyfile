@@ -1,33 +1,32 @@
-{$DOMAIN} {
-	# 反向代理到 liteshop（同 compose 网络）
+{
+	# 双站点边缘代理：shop.9527.tr → liteshop；pay.9527.tr → litepay
+}
+
+shop.9527.tr {
 	reverse_proxy liteshop:3000
 
-	# 安全响应头
 	header {
 		X-Frame-Options DENY
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 		-Server
-
-		# HSTS：强制 HTTPS，防降级/中间人（含子域，preload 便于加入浏览器预载列表）
-		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-
-		# 限制浏览器特性，降低被滥用面
-		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-
-		# CSP：防 XSS 与数据外泄。
-		# - script-src 需 'unsafe-inline'：Next.js 注入的内联引导脚本无 nonce；
-		#   'unsafe-eval' 仅在开发模式需要，生产不放开。
-		# - challenges.cloudflare.com：Turnstile 人机验证（后台可开关）
-		# - frame-src 放行 Turnstile 自身 iframe
-		# - object-src 'none' / base-uri 'self' 阻断插件与 base 标签劫持
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
 	}
 
-	# 回调与 API 不缓存
 	@api path /api/*
 	header @api Cache-Control "no-store"
 
-	# 压缩
+	encode zstd gzip
+}
+
+pay.9527.tr {
+	reverse_proxy litepay:3000
+
+	header {
+		X-Frame-Options DENY
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
 	encode zstd gzip
 }

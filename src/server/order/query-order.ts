@@ -6,7 +6,6 @@ import { formatMoney } from "@/lib/money";
 import { formatDateTime } from "@/lib/datetime";
 import { isValidOrderNo } from "@/lib/order-no";
 import { expireOrderIfOverdue } from "./expire-orders";
-import * as exchangeChannel from "@/server/exchange/channel";
 import { canRepurchase as canRepurchaseStatus, repurchaseBlockedReason } from "./create-order";
 
 /** 查单服务：前台查单页（订单号+邮箱双因子）与支付回跳页轮询 */
@@ -44,26 +43,6 @@ export interface PublicOrderView {
   canRepurchase: boolean;
   /** 不能重购的原因（canRepurchase=false 时有值），用于前台提示 */
   repurchaseBlockedReason: string | null;
-  /**
-   * 交易所转账指引；非交易所渠道为 null。
-   *
-   * 买家必须看到「转多少钱到哪个账户」才能付款 —— 交易所没有收银台地址，
-   * 缺了这块信息就会下单成功却无从支付。
-   */
-  transferInstructions: {
-    /** 交易所名称（币安 / 欧易） */
-    exchange: string;
-    /** 收款账户标识（Binance ID / OKX UID） */
-    accountId: string;
-    /** 必须精确转账的金额（唯一金额，保证到账可被识别） */
-    amount: string;
-    /** 收款币种 */
-    asset: string;
-    /** 支付截止时间 */
-    expiresAtText: string | null;
-    /** 截止毫秒时间戳（收银台倒计时用） */
-    expiresAtMs?: number | null;
-  } | null;
 }
 
 export function lookupOrder(orderNo: string, email: string): PublicOrderView | null {
@@ -124,7 +103,6 @@ function toPublicView(order: Order, opts?: { includeDelivery?: boolean }): Publi
     // 重购资格由服务端统一计算，前台按钮直接以此为准，
     // 避免「按钮显示了但提交才被拒」的不一致体验
     ...computeRepurchaseEligibility(order),
-    ...computeTransferInstructions(order),
   };
 }
 
@@ -193,42 +171,4 @@ function computeRepurchaseEligibility(order: Order): {
     .get();
   const reason = repurchaseBlockedReason(order, !!hasOpenAnomaly);
   return { canRepurchase: reason === null, repurchaseBlockedReason: reason };
-}
-
-/**
- * 计算交易所转账指引。
- *
- * 仅在「交易所渠道 + 仍待支付 + 配置完整」时返回；其余一律 null，
- * 让前台回退到普通收银台入口。
- * 金额取自订单的应付金额快照（"<金额> <币种>"），与扫描器匹配用的是同一份数据，
- * 因此买家看到的数字与系统等待的到账**必然一致**。
- */
-function computeTransferInstructions(order: Order): {
-  transferInstructions: PublicOrderView["transferInstructions"];
-} {
-  if (order.status !== "pending") return { transferInstructions: null };
-  const stored = order.expectedActualAmount?.trim();
-  if (!stored) return { transferInstructions: null };
-  const m = /^([0-9.]+)\s+([A-Za-z]+)$/.exec(stored);
-  if (!m) return { transferInstructions: null };
-  // 注意：必须静态 import——standalone/Turbopack 产物不会为运行时动态
-  // require 别名模块打包，动态形式在生产环境必然失败（静默吞掉后转账
-  // 指引永远为 null，表现为「交易所订单没有收银台」）。
-  const channel = exchangeChannel;
-  const asset = m[2].toUpperCase();
-  const view = ["binance", "okx"]
-    .map((id) => channel.getExchangeChannelView(id as "binance" | "okx"))
-    .find((v) => v.enabled && v.asset.toUpperCase() === asset && v.accountId);
-  if (!view) return { transferInstructions: null };
-  return {
-    transferInstructions: {
-      exchange: view.provider === "binance" ? "币安 Binance" : "欧易 OKX",
-      accountId: view.accountId,
-      amount: m[1],
-      asset,
-      expiresAtText:
-        order.status === "pending" ? formatDateTime(order.expirationTime) : null,
-      expiresAtMs: order.expirationTime ? order.expirationTime.getTime() : null,
-    },
-  };
 }

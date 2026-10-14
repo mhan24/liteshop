@@ -3,7 +3,6 @@ import { db } from "@/db";
 import { paymentConfigs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { listCheckoutMethods, resolvePaymentProviderDefault } from "./index";
-import { saveExchangeChannel } from "@/server/exchange/channel";
 
 /**
  * 支付方式选择（复审后新增）。
@@ -16,9 +15,23 @@ import { saveExchangeChannel } from "@/server/exchange/channel";
 const prevDriver = process.env.PAYMENT_DRIVER;
 
 beforeEach(() => {
-  db.delete(paymentConfigs).where(eq(paymentConfigs.provider, "exchange:binance")).run();
-  db.delete(paymentConfigs).where(eq(paymentConfigs.provider, "exchange:okx")).run();
+  db.delete(paymentConfigs).where(eq(paymentConfigs.provider, "litepay")).run();
 });
+
+function enableLitepay(): void {
+  db.insert(paymentConfigs)
+    .values({
+      provider: "litepay",
+      enabled: true,
+      configJson: { api_base: "https://pay.9527.tr", merchant_id: "m", secret: "s" },
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: paymentConfigs.provider,
+      set: { enabled: true, updatedAt: new Date() },
+    })
+    .run();
+}
 
 afterEach(() => {
   process.env.PAYMENT_DRIVER = prevDriver;
@@ -41,13 +54,9 @@ function enableBepusdt(): void {
 }
 
 describe("auto 只选网关渠道", () => {
-  it("交易所渠道先于 bepusdt 启用时，auto 仍选 bepusdt（确定性）", () => {
+  it("litepay 渠道先于 bepusdt 启用时，auto 仍选 bepusdt（固定优先级）", () => {
     process.env.PAYMENT_DRIVER = "auto";
-    // 故意先插交易所，模拟「返回顺序把交易所排在前面」的最坏情况
-    saveExchangeChannel("binance", {
-      enabled: true, accountId: "123", asset: "USDT", rate: "1",
-      apiKey: "k", apiSecret: "s",
-    });
+    enableLitepay();
     enableBepusdt();
 
     const chosen = resolvePaymentProviderDefault();
@@ -60,24 +69,22 @@ describe("auto 只选网关渠道", () => {
     for (let i = 0; i < 5; i++) expect(resolvePaymentProviderDefault().name).toBe("bepusdt");
   });
 
-  it("只有交易所启用时，auto 报错而不是把买家丢给无指引的通道", () => {
+  it("只有 litepay 启用时，auto 直接选 litepay（它是带收银台的网关渠道）", () => {
     process.env.PAYMENT_DRIVER = "auto";
-    // 关闭 bepusdt（共享测试库可能残留其它用例的配置）
     db.update(paymentConfigs)
       .set({ enabled: false })
       .where(eq(paymentConfigs.provider, "bepusdt"))
       .run();
-    saveExchangeChannel("binance", {
-      enabled: true, accountId: "123", asset: "USDT", rate: "1",
-      apiKey: "k", apiSecret: "s",
-    });
-    // 测试环境 NODE_ENV=test → 回退 mock（生产则抛错）；
-    // 关键是不返回交易所渠道
+    enableLitepay();
     const chosen = resolvePaymentProviderDefault();
-    expect(chosen.name).toBe("mock");
-    expect(chosen.name).not.toContain("exchange");
+    expect(chosen.name).toBe("litepay");
+  });
 
-    // 生产环境必须抛错，而不是把买家丢给无指引的通道
+  it("生产环境无任何启用渠道时必须抛错（不静默降级）", () => {
+    process.env.PAYMENT_DRIVER = "auto";
+    db.update(paymentConfigs)
+      .set({ enabled: false })
+      .run(); // 关闭全部渠道
     vi.stubEnv("NODE_ENV", "production");
     try {
       expect(() => resolvePaymentProviderDefault()).toThrow(/未启用任何支付渠道/);
@@ -88,26 +95,19 @@ describe("auto 只选网关渠道", () => {
 });
 
 describe("前台可选支付方式", () => {
-  it("未配置交易所时只暴露 bepusdt", () => {
+  it("未启用 litepay 时只暴露 bepusdt", () => {
     enableBepusdt();
     expect(listCheckoutMethods()).toEqual(["bepusdt"]);
   });
 
-  it("交易所配置完整且启用时，两者都可选", () => {
+  it("litepay 启用时两者都可选", () => {
     enableBepusdt();
-    saveExchangeChannel("binance", {
-      enabled: true, accountId: "123", asset: "USDT", rate: "1",
-      apiKey: "k", apiSecret: "s",
-    });
-    expect(listCheckoutMethods()).toEqual(["bepusdt", "exchange"]);
+    enableLitepay();
+    expect(listCheckoutMethods()).toEqual(["bepusdt", "litepay"]);
   });
 
-  it("交易所未启用时不暴露（避免选了付不了）", () => {
+  it("litepay 未启用时不暴露（避免选了付不了）", () => {
     enableBepusdt();
-    saveExchangeChannel("binance", {
-      enabled: false, accountId: "123", asset: "USDT", rate: "1",
-      apiKey: "k", apiSecret: "s",
-    });
     expect(listCheckoutMethods()).toEqual(["bepusdt"]);
   });
 });

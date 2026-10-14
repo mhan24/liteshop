@@ -18,7 +18,7 @@ import { rememberOrder } from "@/lib/order-cache";
 
 /** 前台可选的支付方式（与服务端 CheckoutMethod 对应） */
 export interface CheckoutOption {
-  value: "bepusdt" | "exchange";
+  value: "bepusdt" | "litepay";
   label: string;
   hint: string;
 }

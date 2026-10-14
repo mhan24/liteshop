@@ -26,6 +26,9 @@ import {
  *
  * 防刷与「不漏单」的平衡：限流只用来保护写库，不能用来决定是否确认收款。
  * 因此限流命中回 fail（网关会重试），并单独计数以便观测。
+ *
+ * 渠道差异（重要）：litepay 是 Go 网关，**只认 HTTP 状态码**（非 2xx 才重试），
+ * 因此该渠道用 500 表达可重试失败；bepusdt 仍沿用 200 + 文本 "success"/"fail"。
  */
 export async function POST(
   request: Request,
@@ -84,12 +87,19 @@ export async function POST(
   }
 
   const respondSuccess = result.handled || !result.retryable;
+  // litepay（Go 网关）只按 **HTTP 状态码** 判定是否重试：非 2xx 才重试，
+  // 报文里的 "fail" 会被忽略。因此该渠道必须用 500 表达「可重试失败」，
+  // 否则补货后网关不会重投，订单永远停在待支付。
+  // 其余渠道（bepusdt）沿用 200 + 文本 success/fail 的既有约定。
+  if (provider === "litepay") {
+    return plain(respondSuccess ? "success" : "fail", respondSuccess ? 200 : 500);
+  }
   return plain(respondSuccess ? "success" : "fail");
 }
 
-function plain(body: "success" | "fail"): Response {
+function plain(body: "success" | "fail", status = 200): Response {
   return new Response(body, {
-    status: 200,
+    status,
     headers: { "content-type": "text/plain; charset=utf-8" },
   });
 }

@@ -1,7 +1,7 @@
 import { getPaymentConfig, listPaymentConfigs } from "@/server/settings";
+import { litepayProvider } from "./litepay";
 import { bepusdtProvider } from "./bepusdt";
 import { mockProvider } from "./mock";
-import { findEnabledExchange } from "@/server/exchange/channel";
 
 /**
  * PaymentProvider 接口（PLAN §9 Engineering Constraints）：
@@ -52,7 +52,7 @@ export interface PaymentProvider {
   readonly name: string;
   createPayment(input: CreatePaymentInput): Promise<CreatedPayment>;
   /** 验签 + 字段归一化；验签失败 ok=false（调用方应答 success 以终止重试并记录日志） */
-  verifyNotify(rawBody: string): NotifyVerification;
+  verifyNotify(rawBody: string, headers?: Headers): NotifyVerification;
 }
 
 export class PaymentError extends Error {
@@ -86,7 +86,7 @@ export class PaymentCreationError extends Error {
   }
 }
 
-const KNOWN_PROVIDERS = ["mock", "bepusdt"] as const;
+const KNOWN_PROVIDERS = ["mock", "bepusdt", "litepay"] as const;
 
 /**
  * 是否为当前部署「真正启用」的渠道。
@@ -114,13 +114,15 @@ export function getProvider(name: string): PaymentProvider {
       return mockProvider();
     case "bepusdt":
       return bepusdtProvider(getPaymentConfig("bepusdt")?.configJson ?? {});
+    case "litepay":
+      return litepayProvider(getPaymentConfig("litepay")?.configJson ?? {});
     default:
       throw new PaymentError("UNKNOWN_PROVIDER", `未知支付渠道: ${name}`);
   }
 }
 
 /** 前台可选的支付方式标识（对外契约，前端按此提交） */
-export type CheckoutMethod = "bepusdt" | "exchange";
+export type CheckoutMethod = "bepusdt" | "litepay";
 
 /**
  * 列出**前台可选**的支付方式。
@@ -135,13 +137,10 @@ export type CheckoutMethod = "bepusdt" | "exchange";
 export function listCheckoutMethods(): CheckoutMethod[] {
   const out: CheckoutMethod[] = [];
   if (isProviderEnabled("bepusdt")) out.push("bepusdt");
-  if (isExchangeCheckoutAvailable()) out.push("exchange");
+  if (listPaymentConfigs().some((c) => c.provider === "litepay" && c.enabled)) {
+    out.push("litepay");
+  }
   return out;
-}
-
-/** 交易所收款是否已配置完整可供买家选择 */
-function isExchangeCheckoutAvailable(): boolean {
-  return findEnabledExchange() !== null;
 }
 
 /**
@@ -152,8 +151,11 @@ function isExchangeCheckoutAvailable(): boolean {
  *   （交易所收款由 createExchangeOrder 单独处理，不经过本函数）
  */
 export function resolvePaymentProvider(requested?: string): PaymentProvider {
-  if (requested && requested !== "bepusdt" && requested !== "exchange") {
+  if (requested && requested !== "bepusdt" && requested !== "litepay") {
     throw new PaymentError("UNKNOWN_PAYMENT_METHOD", `未知的支付方式: ${requested}`);
+  }
+  if (requested === "litepay") {
+    return litepayProvider(getPaymentConfig("litepay")?.configJson ?? {});
   }
   return resolvePaymentProviderDefault();
 }
@@ -178,7 +180,7 @@ export function resolvePaymentProviderDefault(): PaymentProvider {
     listPaymentConfigs().filter((c) => c.enabled).map((c) => c.provider)
   );
   // 固定优先级：bepusdt → 其余网关渠道（按名称排序保证可复现）
-  const gatewayCandidates = ["bepusdt", ...[...enabled].filter((p) => p !== "bepusdt").sort()];
+  const gatewayCandidates = ["bepusdt", "litepay", ...[...enabled].filter((p) => p !== "bepusdt" && p !== "litepay").sort()];
   const chosen = gatewayCandidates.find((p) => enabled.has(p) && isProviderEnabled(p));
   if (!chosen) {
     if (process.env.NODE_ENV !== "production") return mockProvider();

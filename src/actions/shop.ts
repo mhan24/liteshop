@@ -17,7 +17,6 @@ import {
 import type { CreateOrderResult } from "@/server/order/create-order";
 import { lookupOrder, type PublicOrderView } from "@/server/order/query-order";
 import { cancelPendingOrder } from "@/server/order/fulfill-order";
-import { createExchangeOrder } from "@/server/exchange/create-order";
 import { getTurnstileSecretKey, isTurnstileFallbackEnabled, isTurnstileEnforced } from "@/server/settings";
 import { verifyTurnstileToken } from "@/lib/turnstile";
 import { checkRepurchaseLimit } from "@/server/security/rate-limit";
@@ -50,10 +49,13 @@ export async function createOrderAction(
 
   try {
     // 交易所收款走独立入口：需要分配唯一应付金额（memo 不可用）
-    const result: CreateOrderResult =
-      paymentMethod === "exchange"
-        ? await createExchangeOrder({ slug, email, quantity, note })
-        : await createOrder({ slug, email, quantity, note, paymentMethod: paymentMethod === "bepusdt" ? "bepusdt" : undefined });
+    const result: CreateOrderResult = await createOrder({
+      slug,
+      email,
+      quantity,
+      note,
+      paymentMethod: paymentMethod === "bepusdt" || paymentMethod === "litepay" ? paymentMethod : undefined,
+    });
     await grantOrderAccess(result.orderNo);
     // 服务端 redirect 到「待支付页」：
     // - React 接管时由 Next 处理跳转
