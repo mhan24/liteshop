@@ -145,9 +145,10 @@ pending ────┤
 
 **pay.9527.tr 收银台网关（2026-10 接入，实测核实）**：BEpusdt 协议兼容（同 create-order / 同签名 / 同通知字段），差异点：
 
+- LitePay 的原生商户 API（`POST /api/v1/orders`，HMAC 头部签名）已下线；**litepay 渠道重构为复用 bepusdt 的协议实现**（`litepayProvider` 包装 `bepusdtProvider`，仅覆盖渠道标识与配置键），回调路由 `/api/pay/notify/litepay` 与支付尝试归属不变
 - 收银台模式：买家先选 Binance / OKX，再选 USDT / USDC（1:1 结算，fiat 固定 USD），按页面精确金额发起交易所站内转账；网关以只读 API 按 UID + 币种 + 精确金额确认到账
 - 新增可选请求参数：`currencies`（币种限制，如 `"USDT,USDC"`）、`reselect`（允许重选平台/币种，示例 true）；响应 `data.amount` 为字符串、`network[]` 列出各平台/币种的 `actual_amount`；`expiration_time` 仍为剩余秒（未传 timeout 时默认 600s，传了则按 [180,3600] 生效）
-- 支付成功通知要求 HTTP 2xx 且正文精确为 `success`/`ok`（不区分大小写）；过期通知（status=3）同样要求 2xx，明确 `fail` 正文会被判为投递失败
+- 支付成功通知要求 HTTP 2xx 且正文精确为 `success`/`ok`（不区分大小写）；过期通知（status=3）同样要求 2xx，明确 `fail` 正文会被判为投递失败——回调路由对所有渠道统一 200 + 正文 success/fail（旧版 litepay「只认状态码」的 500 特判已移除）
 - 商户主动取消：`POST {api_base}/api/v1/order/cancel-transaction`，报文 `{trade_id, signature}`；受理后网关停止确认到账、不再发送过期通知。本站在管理员关单/买家取消 pending 订单后 best-effort 调用（`fireGatewayCancel`），失败仅记日志
 
 ## 6. 风险对策

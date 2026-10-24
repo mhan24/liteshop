@@ -19,11 +19,12 @@ beforeEach(() => {
 });
 
 function enableLitepay(): void {
+  // 2026-10 起 litepay 渠道走 pay.9527.tr 的 BEpusdt 兼容接口，配置键与 bepusdt 一致
   db.insert(paymentConfigs)
     .values({
       provider: "litepay",
       enabled: true,
-      configJson: { api_base: "https://pay.9527.tr", merchant_id: "m", secret: "s" },
+      configJson: { api_base: "https://pay.9527.tr", token: "t" },
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({

@@ -24,7 +24,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "系统设置" };
@@ -234,36 +233,19 @@ export default async function AdminSettingsPage({
 
       <Card className="border-border bg-card">
         <CardHeader>
-          <CardTitle className="text-base">支付渠道 · litepay（交易所转账）</CardTitle>
+          <CardTitle className="text-base">支付渠道 · litepay（LitePay 收银台）</CardTitle>
           <CardDescription>
-            独立交易所收款网关（pay.9527.tr）：下单后由本站展示币安/欧易的收款地址与金额，
-            买家转账到账后网关自动回调整本站发货。商户凭据在 litepay 管理台「商户」页生成。
+            对接 LitePay 网关（pay.9527.tr）的 BEpusdt 兼容接口：下单跳转 LitePay 收银台，
+            买家先选 Binance / OKX、再选 USDT / USDC，按页面精确金额发起站内转账。
+            令牌在 LitePay 管理台「轮换 API Token」页生成。
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form action={saveLitepayConfigAction} className="grid max-w-xl gap-4 sm:grid-cols-2">
             <input type="hidden" name="csrf" value={csrf} />
             <input type="hidden" name="provider" value="litepay" />
-            <div className="space-y-1.5">
-              <Label htmlFor="lp-provider">LitePay 收款账户</Label>
-              <Select
-                name="upstreamProvider"
-                defaultValue={String(litepayConfig["provider"] ?? "binance")}
-              >
-                <SelectTrigger id="lp-provider" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="binance">Binance</SelectItem>
-                  <SelectItem value="okx">OKX</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                必须与 LitePay 后台已启用的交易所账户一致
-              </p>
-            </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="lp-api">litepay 地址</Label>
+              <Label htmlFor="lp-api">网关地址（仅域名，不带接口路径）</Label>
               <Input
                 id="lp-api"
                 name="apiBase"
@@ -271,55 +253,52 @@ export default async function AdminSettingsPage({
                 placeholder="https://pay.9527.tr"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lp-mid">Access Key</Label>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="lp-token">对接令牌（API Token）</Label>
               <Input
-                id="lp-mid"
-                name="merchantId"
-                defaultValue={String(litepayConfig["merchant_id"] ?? "")}
-                className="font-mono text-xs"
-                autoComplete="off"
-                placeholder="ak_..."
-              />
-              <p className="text-xs text-muted-foreground">
-                litepay 管理台「商户」页的 Access Key（原 Merchant ID）
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lp-secret">Secret</Label>
-              <Input
-                id="lp-secret"
-                name="secret"
+                id="lp-token"
+                name="token"
                 type="password"
-                defaultValue={String(litepayConfig["secret"] ?? "")}
+                placeholder={litepayConfig["token"] ? "已设置（留空则不修改）" : "未设置"}
                 autoComplete="off"
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="lp-timeout">订单超时（秒，180–3600）</Label>
+              <Input
+                id="lp-timeout"
+                name="timeout"
+                type="number"
+                min={180}
+                max={3600}
+                step={1}
+                defaultValue={String(litepayConfig["timeout_seconds"] ?? 600)}
+              />
               <p className="text-xs text-muted-foreground">
-                必须填**完整**密钥，勿填管理台展示的掩码值
+                与网关收银台有效期保持一致（默认 600 即 10 分钟）；越界值会被网关忽略。
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="lp-coin">结算币种</Label>
+              <Label htmlFor="lp-currencies">币种限制（可选）</Label>
               <Input
-                id="lp-coin"
-                name="coin"
-                defaultValue={String(litepayConfig["coin"] ?? "USDT")}
-                placeholder="USDT"
-                className="font-mono text-xs"
+                id="lp-currencies"
+                name="currencies"
+                defaultValue={String(litepayConfig["currencies"] ?? "")}
+                placeholder="USDT,USDC"
               />
-              <p className="text-xs text-muted-foreground">商品以 USD 计价，按 1:1 折算</p>
+              <p className="text-xs text-muted-foreground">
+                收银台可选币种，逗号分隔；留空表示不限制。
+              </p>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lp-network">结算网络（可选）</Label>
-              <Input
-                id="lp-network"
-                name="network"
-                defaultValue={String(litepayConfig["network"] ?? "")}
-                placeholder="TRC20"
-                className="font-mono text-xs"
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                name="reselect"
+                defaultChecked={litepayConfig["reselect"] !== false}
+                className="size-4"
               />
-              <p className="text-xs text-muted-foreground">留空则由网关按币种默认网络选择</p>
-            </div>
+              允许买家在收银台重选收款平台与币种（reselect）
+            </label>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input
                 type="checkbox"
@@ -327,7 +306,7 @@ export default async function AdminSettingsPage({
                 defaultChecked={litepayEnabled}
                 className="size-4"
               />
-              启用 litepay 渠道（前台支付方式出现「交易所转账」）
+              启用 litepay 渠道（前台支付方式出现「LitePay 收银台」）
             </label>
             <div className="flex items-end sm:col-span-2">
               <Button type="submit">保存 litepay 配置</Button>

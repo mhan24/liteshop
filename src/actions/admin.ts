@@ -533,45 +533,49 @@ export async function sendTestEmailAction(formData: FormData) {
 
 /* ===== litepay 渠道 ===== */
 
+/**
+ * 保存 LitePay 渠道配置（pay.9527.tr 的 BEpusdt 兼容接口）。
+ * 协议与 bepusdt 渠道共享实现，配置键保持一致：
+ * api_base / token / currencies / reselect / timeout_seconds。
+ * 旧版原生 API 的 merchant_id / secret 等键随保存被替换。
+ */
 export async function saveLitepayConfigAction(formData: FormData) {
   const session = await requireSession();
   await assertCsrf(formData.get("csrf"));
   const enabled = String(formData.get("enabled") ?? "") === "on";
-  const apiBase = String(formData.get("apiBase") ?? "").trim().replace(/\/+$/, "");
-  // 表单字段仍叫 merchantId（沿用既有设置存储键 merchant_id），语义是 litepay 的 Access Key
-  const merchantId = String(formData.get("merchantId") ?? "").trim();
-  const upstreamProviderInput = String(formData.get("upstreamProvider") ?? "").trim().toLowerCase();
-  const upstreamProvider = upstreamProviderInput === "okx" ? "okx" : "binance";
-  const secret = String(formData.get("secret") ?? "").trim();
-  const coin = (String(formData.get("coin") ?? "").trim() || "USDT").toUpperCase();
-  const network = String(formData.get("network") ?? "").trim();
+  const apiBase = String(formData.get("apiBase") ?? "").trim();
+  const safeApiBase = normalizeBepusdtApiBase(apiBase);
+  if (apiBase && !safeApiBase) {
+    await back("/admin/settings", "支付 API 地址不合法或不在服务器允许范围内", false, "pay");
+  }
+  // 表单不回显令牌 → 留空表示保持原值；__CLEAR__ 表示清除
+  const submittedToken = String(formData.get("token") ?? "").trim();
+  const existingToken =
+    String((getPaymentConfig("litepay")?.configJson?.["token"] as string | undefined) ?? "").trim();
+  const token =
+    submittedToken === "__CLEAR__" ? "" : submittedToken === "" ? existingToken : submittedToken;
 
+  // 启用却缺少必填项会导致该渠道下单全部失败（createPayment 抛错 → 买家看到
+  // 「支付渠道创建失败」），在保存时拦下。
   if (enabled) {
-    if (upstreamProviderInput !== "binance" && upstreamProviderInput !== "okx") {
-      await back("/admin/settings", "请选择 LitePay 后台已启用的 Binance 或 OKX 账户", false, "pay");
-    }
-    if (!apiBase.startsWith("http")) await back("/admin/settings", "litepay 地址需为 http 或 https 地址", false, "pay");
-    if (!merchantId || !secret) await back("/admin/settings", "启用前请填写 Access Key 与 Secret", false, "pay");
-    // 防历史事故重演：管理台展示的商户密钥是掩码（形如 3a785e…b34c，13 字符），
-    // 若被当作真实密钥保存，会导致该渠道全部请求 401 且难以定位。
-    if (secret.includes("…") || secret.length < 32) {
-      await back(
-        "/admin/settings",
-        "Secret 看起来是掩码或残缺值，请复制管理台的**完整**密钥（64 位十六进制）",
-        false,
-        "pay"
-      );
-    }
-    if (!/^[A-Z0-9]{2,16}$/.test(coin)) {
-      await back("/admin/settings", "结算币种格式不正确（示例：USDT）", false, "pay");
+    if (apiBase === "") await back("/admin/settings", "启用支付渠道前请填写网关地址", false, "pay");
+    if (token === "") await back("/admin/settings", "启用支付渠道前请填写对接令牌", false, "pay");
+    if (!/^https?:\/\/.+/i.test(apiBase)) {
+      await back("/admin/settings", "网关地址需以 http:// 或 https:// 开头", false, "pay");
     }
   }
 
   upsertPaymentConfig("litepay", {
     enabled,
-    configJson: { api_base: apiBase, merchant_id: merchantId, secret, provider: upstreamProvider, coin, network },
+    configJson: {
+      api_base: safeApiBase ?? "",
+      token,
+      timeout_seconds: clampBepusdtTimeout(Number(formData.get("timeout") ?? 600)),
+      currencies: normalizeBepusdtCurrencies(String(formData.get("currencies") ?? "")) ?? "",
+      reselect: String(formData.get("reselect") ?? "") === "on",
+    },
   });
-  logAdmin("settings.litepay", "litepay", `enabled=${enabled} provider=${upstreamProvider} coin=${coin}`, await clientIp(), session.u);
+  logAdmin("settings.litepay", "litepay", `enabled=${enabled}`, await clientIp(), session.u);
   revalidatePath("/admin/settings");
   await back("/admin/settings", "litepay 配置已保存", true, "pay");
 }

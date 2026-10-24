@@ -39,8 +39,8 @@ export default async function ProductDetailPage({
     m === "litepay"
       ? {
           value: m,
-          label: "交易所转账（USDT / USDC）",
-          hint: "按页面给出的收款地址与精确金额转账，到账后自动发货",
+          label: "LitePay 收银台（USDT / USDC）",
+          hint: "跳转收银台，选 Binance / OKX 按精确金额站内转账，到账后自动发货",
         }
       : { value: m, label: "在线支付", hint: "跳转收银台完成支付" }
   );
