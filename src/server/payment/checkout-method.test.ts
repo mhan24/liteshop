@@ -111,4 +111,16 @@ describe("前台可选支付方式", () => {
     enableBepusdt();
     expect(listCheckoutMethods()).toEqual(["bepusdt"]);
   });
+
+  it("bepusdt 后台停用时不暴露（回归：停用渠道仍对买家可见，会被带到旧网关）", () => {
+    db.update(paymentConfigs).set({ enabled: false }).where(eq(paymentConfigs.provider, "bepusdt")).run();
+    enableLitepay();
+    expect(listCheckoutMethods()).toEqual(["litepay"]);
+  });
+
+  it("PAYMENT_DRIVER=bepusdt 强制时无视后台开关仍暴露 bepusdt", () => {
+    process.env.PAYMENT_DRIVER = "bepusdt";
+    db.update(paymentConfigs).set({ enabled: false }).run();
+    expect(listCheckoutMethods()).toEqual(["bepusdt"]);
+  });
 });

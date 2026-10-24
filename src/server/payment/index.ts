@@ -133,19 +133,27 @@ export type CheckoutMethod = "bepusdt" | "litepay";
 /**
  * 列出**前台可选**的支付方式。
  *
- * 历史问题：`auto` 直接取 payment_configs 返回顺序的第一个启用渠道，
+ * 历史问题一：`auto` 直接取 payment_configs 返回顺序的第一个启用渠道，
  * 而该顺序无保证。启用交易所渠道后，可能出现「买家被分配到交易所转账，
  * 但前台没有转账指引 → 订单无法付款」的悬空订单。
- *
  * 现在 auto 只从**网关型**渠道中选（交易所需在下单时显式指定）。
  * 交易所渠道单独走 createExchangeOrder()，其可用性以配置是否完整为准。
+ *
+ * 历史问题二：bepusdt 无条件出现在前台选项里（不检查后台启用状态），
+ * 导致「后台停用的渠道仍对买家可见」。重构 LitePay 渠道后 bepusdt 已停用，
+ * 买家却仍能选中它并被带到旧网关。两个网关渠道现在用**同一判据**：
+ * payment_configs 中 enabled=true 才暴露（与 resolvePaymentProviderDefault 一致）。
  */
 export function listCheckoutMethods(): CheckoutMethod[] {
+  const enabled = new Set(
+    listPaymentConfigs().filter((c) => c.enabled).map((c) => c.provider)
+  );
   const out: CheckoutMethod[] = [];
-  if (isProviderEnabled("bepusdt")) out.push("bepusdt");
-  if (listPaymentConfigs().some((c) => c.provider === "litepay" && c.enabled)) {
-    out.push("litepay");
+  // PAYMENT_DRIVER 显式强制 bepusdt 时无视后台开关（与 resolvePaymentProviderDefault 一致）
+  if (enabled.has("bepusdt") || (process.env.PAYMENT_DRIVER ?? "auto") === "bepusdt") {
+    out.push("bepusdt");
   }
+  if (enabled.has("litepay")) out.push("litepay");
   return out;
 }
 
