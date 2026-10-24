@@ -2,14 +2,13 @@ import { csrfToken } from "@/lib/session";
 import { getSessionVersion } from "@/server/auth";
 import {
   changeAdminCredentialsAction,
-  saveLitepayConfigAction,
-  savePaymentConfigAction,
   saveSiteSettingsAction,
   saveCopySettingsAction,
   saveSmtpSettingsAction,
   saveTurnstileSettingsAction,
   sendTestEmailAction,
 } from "@/actions/admin";
+import { PaymentChannelForms } from "@/components/admin/payment-channel-forms";
 import { getAdminCredentials } from "@/server/auth";
 import { DEFAULT_REPO_URL, DEFAULT_SUPPORT_URL } from "@/server/settings";
 import { getAdminPath } from "@/lib/admin-path";
@@ -146,229 +145,13 @@ export default async function AdminSettingsPage({
       </Card>
         </TabsContent>
         <TabsContent value="pay" className="mt-5 space-y-6">
-
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="text-base">支付渠道 · bepusdt（收银台）</CardTitle>
-          <CardDescription>
-            对接 pay.9527.tr 等 BEpusdt 协议网关：下单跳转网关收银台，买家先选 Binance / OKX、
-            再选 USDT / USDC，按页面精确金额发起站内转账，到账后网关回调本站自动发货。
-            对接令牌在网关后台「API Token」页生成/轮换。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form action={savePaymentConfigAction} className="grid max-w-xl gap-4 sm:grid-cols-2">
-            <input type="hidden" name="csrf" value={csrf} />
-            <input type="hidden" name="provider" value="bepusdt" />
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="b-api">网关地址（仅域名，不带接口路径）</Label>
-              <Input
-                id="b-api"
-                name="apiBase"
-                defaultValue={String(config["api_base"] ?? "")}
-                placeholder="https://pay.9527.tr"
-              />
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="b-token">对接令牌（API Token）</Label>
-              <Input
-                id="b-token"
-                name="token"
-                type="password"
-                placeholder={config["token"] ? "已设置（留空则不修改）" : "未设置"}
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="b-timeout">订单超时（秒，180–3600）</Label>
-              <Input
-                id="b-timeout"
-                name="timeout"
-                type="number"
-                min={180}
-                max={3600}
-                step={1}
-                defaultValue={String(config["timeout_seconds"] ?? 600)}
-              />
-              <p className="text-xs text-muted-foreground">
-                与网关收银台有效期保持一致（pay.9527.tr 默认 600 即 10 分钟）；越界值会被网关忽略。
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="b-currencies">币种限制（可选）</Label>
-              <Input
-                id="b-currencies"
-                name="currencies"
-                defaultValue={String(config["currencies"] ?? "")}
-                placeholder="USDT,USDC"
-              />
-              <p className="text-xs text-muted-foreground">
-                收银台可选币种，逗号分隔；留空表示不限制。
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="b-name">前台显示名称（可选）</Label>
-              <Input
-                id="b-name"
-                name="displayName"
-                defaultValue={String(config["display_name"] ?? "")}
-                placeholder="加密货币收银台"
-              />
-              <p className="text-xs text-muted-foreground">
-                买家下单时看到的支付方式名称；留空用默认文案。
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="b-sort">显示优先级（0–999）</Label>
-              <Input
-                id="b-sort"
-                name="sortOrder"
-                type="number"
-                min={0}
-                max={999}
-                step={1}
-                defaultValue={String(config["sort_order"] ?? 0)}
-              />
-              <p className="text-xs text-muted-foreground">
-                数字越小越靠前；买家不选时默认走排最前的启用渠道。
-              </p>
-            </div>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <input
-                type="checkbox"
-                name="reselect"
-                defaultChecked={config["reselect"] !== false}
-                className="size-4"
-              />
-              允许买家在收银台重选收款平台与币种（reselect）
-            </label>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <input
-                type="checkbox"
-                name="enabled"
-                defaultChecked={cfg?.enabled ?? false}
-                className="size-4"
-              />
-              启用 bepusdt 渠道（启用后前台下单走该渠道）
-            </label>
-            <div className="flex items-end sm:col-span-2">
-              <Button type="submit">保存渠道配置</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="text-base">支付渠道 · litepay（LitePay 收银台）</CardTitle>
-          <CardDescription>
-            对接 LitePay 网关（pay.9527.tr）的 BEpusdt 兼容接口：下单跳转 LitePay 收银台，
-            买家先选 Binance / OKX、再选 USDT / USDC，按页面精确金额发起站内转账。
-            令牌在 LitePay 管理台「轮换 API Token」页生成。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form action={saveLitepayConfigAction} className="grid max-w-xl gap-4 sm:grid-cols-2">
-            <input type="hidden" name="csrf" value={csrf} />
-            <input type="hidden" name="provider" value="litepay" />
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="lp-api">网关地址（仅域名，不带接口路径）</Label>
-              <Input
-                id="lp-api"
-                name="apiBase"
-                defaultValue={String(litepayConfig["api_base"] ?? "")}
-                placeholder="https://pay.9527.tr"
-              />
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="lp-token">对接令牌（API Token）</Label>
-              <Input
-                id="lp-token"
-                name="token"
-                type="password"
-                placeholder={litepayConfig["token"] ? "已设置（留空则不修改）" : "未设置"}
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lp-timeout">订单超时（秒，180–3600）</Label>
-              <Input
-                id="lp-timeout"
-                name="timeout"
-                type="number"
-                min={180}
-                max={3600}
-                step={1}
-                defaultValue={String(litepayConfig["timeout_seconds"] ?? 600)}
-              />
-              <p className="text-xs text-muted-foreground">
-                与网关收银台有效期保持一致（默认 600 即 10 分钟）；越界值会被网关忽略。
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lp-currencies">币种限制（可选）</Label>
-              <Input
-                id="lp-currencies"
-                name="currencies"
-                defaultValue={String(litepayConfig["currencies"] ?? "")}
-                placeholder="USDT,USDC"
-              />
-              <p className="text-xs text-muted-foreground">
-                收银台可选币种，逗号分隔；留空表示不限制。
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lp-name">前台显示名称（可选）</Label>
-              <Input
-                id="lp-name"
-                name="displayName"
-                defaultValue={String(litepayConfig["display_name"] ?? "")}
-                placeholder="LitePay 收银台（USDT / USDC）"
-              />
-              <p className="text-xs text-muted-foreground">
-                买家下单时看到的支付方式名称；留空用默认文案。
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lp-sort">显示优先级（0–999）</Label>
-              <Input
-                id="lp-sort"
-                name="sortOrder"
-                type="number"
-                min={0}
-                max={999}
-                step={1}
-                defaultValue={String(litepayConfig["sort_order"] ?? 0)}
-              />
-              <p className="text-xs text-muted-foreground">
-                数字越小越靠前；买家不选时默认走排最前的启用渠道。
-              </p>
-            </div>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <input
-                type="checkbox"
-                name="reselect"
-                defaultChecked={litepayConfig["reselect"] !== false}
-                className="size-4"
-              />
-              允许买家在收银台重选收款平台与币种（reselect）
-            </label>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <input
-                type="checkbox"
-                name="enabled"
-                defaultChecked={litepayEnabled}
-                className="size-4"
-              />
-              启用 litepay 渠道（前台支付方式出现「LitePay 收银台」）
-            </label>
-            <div className="flex items-end sm:col-span-2">
-              <Button type="submit">保存 litepay 配置</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
+          <PaymentChannelForms
+            csrf={csrf}
+            bep={config}
+            bepEnabled={cfg?.enabled ?? false}
+            lp={litepayConfig}
+            lpEnabled={litepayEnabled}
+          />
         </TabsContent>
         <TabsContent value="security" className="mt-5 space-y-6">
       <Card className="border-border bg-card">

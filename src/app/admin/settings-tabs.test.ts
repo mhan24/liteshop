@@ -12,6 +12,8 @@ import { describe, expect, it } from "vitest";
 
 const PAGE = "src/app/admin/(panel)/settings/page.tsx";
 const ADMIN_ACTIONS = "src/actions/admin.ts";
+// 支付渠道卡片在统一表单客户端组件里（设置页只挂载 <PaymentChannelForms />）
+const PAYMENT_FORMS = "src/components/admin/payment-channel-forms.tsx";
 
 const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8");
 
@@ -26,16 +28,47 @@ describe("设置页选项卡结构", () => {
   });
 
   it("原有六张设置卡片一张都没丢", () => {
-    for (const title of [
-      "站点",
-      "支付渠道 · bepusdt",
-      "人机验证（Cloudflare Turnstile）",
-      "邮件通知（SMTP）",
-      "前台文案",
-      "管理员与后台入口",
-    ]) {
-      expect(src, `设置卡片丢失: ${title}`).toContain(title);
+    const paymentForms = read(PAYMENT_FORMS);
+    for (const [title, container] of [
+      ["站点", src],
+      ["支付渠道 · bepusdt", paymentForms],
+      ["支付渠道 · litepay", paymentForms],
+      ["人机验证（Cloudflare Turnstile）", src],
+      ["邮件通知（SMTP）", src],
+      ["前台文案", src],
+      ["管理员与后台入口", src],
+    ] as const) {
+      expect(container, `设置卡片丢失: ${title}`).toContain(title);
     }
+  });
+
+  it("支付渠道为统一保存：单个表单、单一提交按钮、useActionState 内联结果", () => {
+    const paymentForms = read(PAYMENT_FORMS);
+    // 一个表单承载两个渠道
+    expect(paymentForms.match(/<form /g)?.length).toBe(1);
+    expect(paymentForms).toContain("savePaymentChannelsAction");
+    expect(paymentForms).toContain("useActionState");
+    // 结果内联渲染（POST 响应内），不经过 ?flash= GET 重定向
+    expect(paymentForms).toContain("<Flash");
+    // 每个渠道字段带渠道前缀，统一 action 可区分
+    for (const field of ["bepusdt.apiBase", "litepay.apiBase", "bepusdt.enabled", "litepay.enabled"]) {
+      expect(paymentForms, `缺少字段: ${field}`).toContain(`name="${field}"`);
+    }
+    // 设置页不再保留各渠道独立表单
+    expect(src).not.toContain("savePaymentConfigAction");
+    expect(src).not.toContain("saveLitepayConfigAction");
+  });
+
+  it("统一保存 action 结果直接返回状态（不再 redirect 回传）", () => {
+    const actions = read(ADMIN_ACTIONS);
+    expect(actions).toContain("savePaymentChannelsAction");
+    // 该 action 内不允许出现 back("/admin/settings"（结果走 useActionState 返回）
+    const actionBody = actions.slice(actions.indexOf("savePaymentChannelsAction"));
+    const smtpStart = actionBody.indexOf("saveSmtpSettingsAction");
+    expect(
+      actionBody.slice(0, smtpStart),
+      "统一保存 action 不应使用 back() 重定向"
+    ).not.toContain('back("/admin/settings"');
   });
 
   it("默认选项卡由 ?tab= 决定（保存后能回到原页签）", () => {
@@ -43,9 +76,10 @@ describe("设置页选项卡结构", () => {
     expect(src).toContain("TAB_KEYS");
   });
 
-  it("每个 save action 都带回所属选项卡", () => {
+  it("其余每个 save action 都带回所属选项卡", () => {
     const actions = read(ADMIN_ACTIONS);
     // 设置页的保存动作都应显式传 tab，避免保存后跳回第一个页签
+    // （支付渠道统一保存不走 back/redirect，见上方用例）
     const settingsBacks = actions.match(/back\("\/admin\/settings"[^)]*\)/g) ?? [];
     expect(settingsBacks.length).toBeGreaterThan(10);
     const withoutTab = settingsBacks.filter(

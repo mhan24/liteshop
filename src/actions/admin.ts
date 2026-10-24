@@ -423,62 +423,81 @@ export async function saveSiteSettingsAction(formData: FormData) {
   await back("/admin/settings", "站点设置已保存", true, "site");
 }
 
+/** 支付渠道统一保存的结果状态（useActionState 内联展示，不走 GET 重定向） */
+export interface PaymentChannelsSaveState {
+  ok: boolean;
+  message: string;
+}
+
 /**
- * 保存交易所收款渠道配置（凭据加密存储，前端不回显密钥）。
+ * 统一保存支付渠道配置：bepusdt + litepay 一个表单、一次提交。
+ *
+ * 结果通过 useActionState 在当前 POST 响应内直接返回并渲染，
+ * 不再 redirect?flash=…（旧模式经 GET 导航回传状态，刷新还会带上旧参数）。
+ * 表单不回显令牌：留空 = 保持原值；__CLEAR__ = 清除。
  */
-
-/** 校验交易所凭据是否可用（不落库，仅测试连通性与只读权限） */
-
-export async function savePaymentConfigAction(formData: FormData) {
+export async function savePaymentChannelsAction(
+  _prev: PaymentChannelsSaveState | null,
+  formData: FormData
+): Promise<PaymentChannelsSaveState> {
   const session = await requireSession();
   await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const provider = String(formData.get("provider") ?? "");
-  if (provider !== "bepusdt") await back("/admin/settings", "未知支付渠道", false, "pay");
 
-  const enabled = String(formData.get("enabled") ?? "") === "on";
-  const apiBase = String(formData.get("apiBase") ?? "").trim();
-  const safeApiBase = normalizeBepusdtApiBase(apiBase);
-  if (apiBase && !safeApiBase) {
-    await back("/admin/settings", "支付 API 地址不合法或不在服务器允许范围内", false, "pay");
+  // 两个字段组先全部校验通过才落库，避免「bepusdt 保存成功、litepay 校验失败」的半提交状态
+  const updates: Array<{
+    provider: "bepusdt" | "litepay";
+    enabled: boolean;
+    configJson: Record<string, unknown>;
+  }> = [];
+  for (const provider of ["bepusdt", "litepay"] as const) {
+    const enabled = String(formData.get(`${provider}.enabled`) ?? "") === "on";
+    const apiBase = String(formData.get(`${provider}.apiBase`) ?? "").trim();
+    const safeApiBase = normalizeBepusdtApiBase(apiBase);
+    if (apiBase && !safeApiBase) {
+      return { ok: false, message: `${provider} 网关地址不合法或不在服务器允许范围内` };
+    }
+    const submittedToken = String(formData.get(`${provider}.token`) ?? "").trim();
+    const existingToken =
+      String((getPaymentConfig(provider)?.configJson?.["token"] as string | undefined) ?? "").trim();
+    const token =
+      submittedToken === "__CLEAR__" ? "" : submittedToken === "" ? existingToken : submittedToken;
+
+    // 启用却缺少必填项会让该渠道下单全部失败（createPayment 抛错 → 买家看到
+    // 「支付渠道创建失败」），在保存时拦下。
+    if (enabled) {
+      if (apiBase === "") return { ok: false, message: `启用 ${provider} 前请填写网关地址` };
+      if (token === "") return { ok: false, message: `启用 ${provider} 前请填写对接令牌` };
+      if (!/^https?:\/\/.+/i.test(apiBase)) {
+        return { ok: false, message: `${provider} 网关地址需以 http:// 或 https:// 开头` };
+      }
+    }
+
+    updates.push({
+      provider,
+      enabled,
+      configJson: {
+        api_base: safeApiBase ?? "",
+        token,
+        // 与网关收银台有效期对齐（pay.9527.tr 默认 600s；越界网关会静默回落）
+        timeout_seconds: clampBepusdtTimeout(Number(formData.get(`${provider}.timeout`) ?? 600)),
+        // 收银台币种限制（如 "USDT,USDC"）；空 = 不限制
+        currencies: normalizeBepusdtCurrencies(String(formData.get(`${provider}.currencies`) ?? "")) ?? "",
+        // 允许买家在收银台重选平台/币种（网关文档示例 true）
+        reselect: String(formData.get(`${provider}.reselect`) ?? "") === "on",
+        // 前台收银台选项的显示名称与优先级（留空用默认文案；数字越小越靠前）
+        display_name: checkoutDisplayName(formData, provider),
+        sort_order: checkoutSortOrder(formData, provider),
+      },
+    });
   }
-  const submittedToken = String(formData.get("token") ?? "").trim();
-  // 表单不回显令牌 → 留空表示保持原值；__CLEAR__ 表示清除
-  const existingToken =
-    String((getPaymentConfig("bepusdt")?.configJson?.["token"] as string | undefined) ?? "").trim();
-  const token =
-    submittedToken === "__CLEAR__" ? "" : submittedToken === "" ? existingToken : submittedToken;
 
-  // 启用却缺少必填项会导致全站无法下单（createPayment 抛错 → 每单都被补偿关单），
-  // 因此在保存时就拦下，避免把站点置于「支付中断」状态。
-  if (enabled) {
-    if (apiBase === "") {
-      await back("/admin/settings", "启用支付渠道前请填写 API 地址", false, "pay");
-    }
-    if (token === "") {
-      await back("/admin/settings", "启用支付渠道前请填写对接令牌", false, "pay");
-    }
-    if (!/^https?:\/\/.+/i.test(apiBase)) {
-      await back("/admin/settings", "API 地址需以 http:// 或 https:// 开头", false, "pay");
-    }
+  for (const u of updates) {
+    upsertPaymentConfig(u.provider, { enabled: u.enabled, configJson: u.configJson });
+    logAdmin("settings.payment", u.provider, `enabled=${u.enabled}`, await clientIp(), session.u);
   }
-
-  const configJson: Record<string, unknown> = {
-    api_base: safeApiBase ?? "",
-    token,
-    // 与网关收银台有效期对齐（pay.9527.tr 默认 600s；越界网关会静默回落）
-    timeout_seconds: clampBepusdtTimeout(Number(formData.get("timeout") ?? 600)),
-    // 收银台币种限制（如 "USDT,USDC"）；空 = 不限制
-    currencies: normalizeBepusdtCurrencies(String(formData.get("currencies") ?? "")) ?? "",
-    // 允许买家在收银台重选平台/币种（网关文档示例 true）
-    reselect: String(formData.get("reselect") ?? "") === "on",
-    // 前台收银台选项的显示名称与优先级（留空用默认文案；数字越小越靠前）
-    display_name: checkoutDisplayName(formData),
-    sort_order: checkoutSortOrder(formData),
-  };
-  upsertPaymentConfig(provider, { enabled, configJson });
-  logAdmin("settings.payment", provider, `enabled=${enabled}`, await clientIp(), session.u);
   revalidatePath("/admin/settings");
-  await back("/admin/settings", "支付渠道配置已保存", true, "pay");
+  const detail = updates.map((u) => `${u.provider}=${u.enabled ? "启用" : "停用"}`).join("，");
+  return { ok: true, message: `支付渠道配置已保存（${detail}）` };
 }
 
 /* ===== SMTP 邮件 ===== */
@@ -534,66 +553,14 @@ export async function sendTestEmailAction(formData: FormData) {
   await back("/admin/settings", result.ok ? `测试邮件已发送至 ${to}` : `发送失败：${result.error ?? "未知错误"}`, result.ok, "notify");
 }
 
-/* ===== litepay 渠道 ===== */
-
-/**
- * 保存 LitePay 渠道配置（pay.9527.tr 的 BEpusdt 兼容接口）。
- * 协议与 bepusdt 渠道共享实现，配置键保持一致：
- * api_base / token / currencies / reselect / timeout_seconds。
- * 旧版原生 API 的 merchant_id / secret 等键随保存被替换。
- */
-export async function saveLitepayConfigAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"));
-  const enabled = String(formData.get("enabled") ?? "") === "on";
-  const apiBase = String(formData.get("apiBase") ?? "").trim();
-  const safeApiBase = normalizeBepusdtApiBase(apiBase);
-  if (apiBase && !safeApiBase) {
-    await back("/admin/settings", "支付 API 地址不合法或不在服务器允许范围内", false, "pay");
-  }
-  // 表单不回显令牌 → 留空表示保持原值；__CLEAR__ 表示清除
-  const submittedToken = String(formData.get("token") ?? "").trim();
-  const existingToken =
-    String((getPaymentConfig("litepay")?.configJson?.["token"] as string | undefined) ?? "").trim();
-  const token =
-    submittedToken === "__CLEAR__" ? "" : submittedToken === "" ? existingToken : submittedToken;
-
-  // 启用却缺少必填项会导致该渠道下单全部失败（createPayment 抛错 → 买家看到
-  // 「支付渠道创建失败」），在保存时拦下。
-  if (enabled) {
-    if (apiBase === "") await back("/admin/settings", "启用支付渠道前请填写网关地址", false, "pay");
-    if (token === "") await back("/admin/settings", "启用支付渠道前请填写对接令牌", false, "pay");
-    if (!/^https?:\/\/.+/i.test(apiBase)) {
-      await back("/admin/settings", "网关地址需以 http:// 或 https:// 开头", false, "pay");
-    }
-  }
-
-  upsertPaymentConfig("litepay", {
-    enabled,
-    configJson: {
-      api_base: safeApiBase ?? "",
-      token,
-      timeout_seconds: clampBepusdtTimeout(Number(formData.get("timeout") ?? 600)),
-      currencies: normalizeBepusdtCurrencies(String(formData.get("currencies") ?? "")) ?? "",
-      reselect: String(formData.get("reselect") ?? "") === "on",
-      // 前台收银台选项的显示名称与优先级（留空用默认文案；数字越小越靠前）
-      display_name: checkoutDisplayName(formData),
-      sort_order: checkoutSortOrder(formData),
-    },
-  });
-  logAdmin("settings.litepay", "litepay", `enabled=${enabled}`, await clientIp(), session.u);
-  revalidatePath("/admin/settings");
-  await back("/admin/settings", "litepay 配置已保存", true, "pay");
-}
-
 /** 前台收银台选项的自定义显示名称（可空；限长防止撑爆选项样式） */
-function checkoutDisplayName(formData: FormData): string {
-  return String(formData.get("displayName") ?? "").trim().slice(0, 30);
+function checkoutDisplayName(formData: FormData, provider: string): string {
+  return String(formData.get(`${provider}.displayName`) ?? "").trim().slice(0, 30);
 }
 
 /** 前台收银台选项的优先级（0–999，越小越靠前；非法值回落 0） */
-function checkoutSortOrder(formData: FormData): number {
-  const n = Number(formData.get("sortOrder") ?? 0);
+function checkoutSortOrder(formData: FormData, provider: string): number {
+  const n = Number(formData.get(`${provider}.sortOrder`) ?? 0);
   return Number.isFinite(n) && n >= 0 ? Math.trunc(Math.min(n, 999)) : 0;
 }
 
