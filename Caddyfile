@@ -1,13 +1,30 @@
-{$DOMAIN} {
-	encode zstd gzip
+{
+	# 双站点边缘代理：shop.9527.tr → liteshop 应用；pay.9527.tr → LitePay 网关
+	# pay 站点依赖 litepay 容器所在的 liteshop_default 网络（部署时 docker network connect）
+}
 
-	# 应用反代（app 仅在 internal 网络，由 Caddy 做唯一边缘出口）
+shop.9527.tr {
 	reverse_proxy app:3000
 
 	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Frame-Options "DENY"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
+
+	encode zstd gzip
+}
+
+pay.9527.tr {
+	reverse_proxy litepay:3000
+
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	encode zstd gzip
 }

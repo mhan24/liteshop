@@ -5,7 +5,7 @@ import { getSiteCurrency } from "@/server/settings";
 import { listStoreProducts } from "@/server/catalog";
 import { Badge } from "@/components/ui/input";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "挑选商品",

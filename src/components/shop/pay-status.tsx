@@ -69,6 +69,7 @@ export function PayStatusActions({
           </div>
         </form>
         <form action={cancelAction} className="mt-3 space-y-3">
+          <input type="hidden" name="orderNo" value={orderNo} />
           <div className="space-y-1.5">
             <Label htmlFor="cancel-email">下单邮箱</Label>
             <Input id="cancel-email" name="email" type="email" required placeholder="you@example.com" />

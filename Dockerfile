@@ -20,6 +20,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+ENV TZ=Asia/Shanghai
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends postgresql-client \
@@ -32,6 +33,9 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/scripts ./scripts
+# standalone 的 node_modules 由依赖追踪生成（drizzle-orm 被 Turbopack 打包进 chunk，
+# 但启动迁移脚本 scripts/db/migrate.mjs 需要完整包，从 builder 补拷）
+COPY --from=builder /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 
 RUN mkdir -p /app/backups && chown -R liteshop:liteshop /app
 USER liteshop

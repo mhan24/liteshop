@@ -3,11 +3,19 @@ import { getSiteCurrency, getSiteName, getSupportUrl } from "@/server/settings";
 import Link from "next/link";
 
 export default async function ShopLayout({ children }: { children: React.ReactNode }) {
-  const [siteName, supportUrl, currency] = await Promise.all([
-    getSiteName(),
-    getSupportUrl(),
-    getSiteCurrency(),
-  ]);
+  // 构建期预渲染静态页（/cart 等）时数据库不可用 → 回落默认值
+  let siteName = "liteshop";
+  let supportUrl: string | null = null;
+  let currency = "USD";
+  try {
+    [siteName, supportUrl, currency] = await Promise.all([
+      getSiteName(),
+      getSupportUrl(),
+      getSiteCurrency(),
+    ]);
+  } catch {
+    /* build-time fallback */
+  }
   return (
     <CartProvider currency={currency}>
       <div className="flex min-h-screen flex-col">
