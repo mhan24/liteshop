@@ -29,6 +29,7 @@ import {
 import { sendTestEmail } from "@/server/mail";
 import {
   bumpAdminSessionVersion,
+  getSetting,
   SETTING_KEYS,
   setSetting,
 } from "@/server/settings";
@@ -534,6 +535,39 @@ export async function saveSiteSettingsAction(
     await audit("settings.site", `currency=${currency}`, session.username);
     revalidateStorefront();
     return { ok: true, message: "站点设置已保存" };
+  });
+}
+
+/* ===== Turnstile 人机验证 ===== */
+
+export async function saveTurnstileAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const enabled = String(formData.get("tsEnabled") ?? "") === "on";
+    const siteKey = String(formData.get("tsSiteKey") ?? "").trim();
+    const submitted = String(formData.get("tsSecretKey") ?? "").trim();
+
+    // Secret Key 不回显：留空 = 保持原值，输入 __CLEAR__ 表示清除
+    // （历史缺陷：回显会让密钥出现在页面源码中）
+    const existing = (await getSetting(SETTING_KEYS.turnstileSecretKey))?.trim() ?? "";
+    const secretKey = submitted === "__CLEAR__" ? "" : submitted === "" ? existing : submitted;
+
+    // 强制校验要求两把 Key 齐备；缺一会 widget 渲染不出来、下单被全量拒绝
+    if (enabled && (siteKey === "" || secretKey === "")) {
+      return { ok: false, message: "启用人机验证需填写 Site Key 与 Secret Key" };
+    }
+    const fallback = String(formData.get("tsFallback") ?? "") === "on";
+    await setSetting(SETTING_KEYS.turnstileEnabled, enabled ? "1" : "0");
+    await setSetting(SETTING_KEYS.turnstileSiteKey, siteKey);
+    await setSetting(SETTING_KEYS.turnstileSecretKey, secretKey);
+    await setSetting(SETTING_KEYS.turnstileFallbackEnabled, fallback ? "1" : "0");
+    await audit("settings.turnstile", `enabled=${enabled} fallback=${fallback}`, session.username);
+    revalidateStorefront();
+    return { ok: true, message: "人机验证设置已保存" };
   });
 }
 

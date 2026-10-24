@@ -1,14 +1,28 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { queryOrderAction, type QuerySuccess } from "@/actions/shop";
+import { TurnstileWidget } from "./turnstile-widget";
 import { Button } from "@/components/ui/button";
 import { Badge, Input, Label } from "@/components/ui/input";
 import { formatMoney } from "@/lib/money";
+import type { TurnstileClientConfig } from "@/server/settings";
 
 /** 订单查询表单 + 结果（邮箱 + 订单号 + 查单密码三因子） */
-export function OrderQueryClient() {
+export function OrderQueryClient({ human }: { human: TurnstileClientConfig }) {
   const [state, formAction, pending] = useActionState(queryOrderAction, null);
+  const [cfToken, setCfToken] = useState("");
+  const [verifyKey, setVerifyKey] = useState(0);
+
+  // 查询失败后 token 已被消费：清空并重挂 widget（渲染期调整模式）
+  const [lastState, setLastState] = useState(state);
+  if (state !== lastState) {
+    setLastState(state);
+    if (state && !state.ok) {
+      setCfToken("");
+      setVerifyKey((k) => k + 1);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -36,6 +50,16 @@ export function OrderQueryClient() {
           <p role="alert" className="rounded-lg border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg">
             {state.message}
           </p>
+        ) : null}
+        {human.enabled ? (
+          <div className="space-y-1.5">
+            <Label>人机验证</Label>
+            <TurnstileWidget key={verifyKey} siteKey={human.siteKey} onToken={setCfToken} />
+            <input type="hidden" name="cfToken" value={cfToken} />
+            {human.fallback ? (
+              <p className="text-xs text-muted">验证加载失败时仍可查询，系统会以其他方式防护。</p>
+            ) : null}
+          </div>
         ) : null}
         <Button type="submit" disabled={pending} className="w-full">
           {pending ? "查询中…" : "查询订单"}

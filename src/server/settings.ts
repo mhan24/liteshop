@@ -19,6 +19,10 @@ export const SETTING_KEYS = {
   smtpUser: "smtp_user",
   smtpPass: "smtp_pass",
   smtpFrom: "smtp_from",
+  turnstileEnabled: "turnstile_enabled",
+  turnstileSiteKey: "turnstile_site_key",
+  turnstileSecretKey: "turnstile_secret_key",
+  turnstileFallbackEnabled: "turnstile_fallback_enabled",
 } as const;
 
 export const SUPPORTED_CURRENCIES = ["USD", "CNY", "EUR", "GBP", "JPY"] as const;
@@ -121,6 +125,53 @@ export async function getSmtpConfig(): Promise<SmtpConfig> {
 /** 管理员会话全局版本（登出所有会话/改密时递增） */
 export async function getAdminSessionVersion(): Promise<number> {
   return getSettingNumber(SETTING_KEYS.adminSessionVersion, 1);
+}
+
+/* ===== Turnstile 人机验证（Cloudflare；下单与查单两个公开入口共用） ===== */
+
+async function turnstileKeysReady(): Promise<boolean> {
+  const [siteKey, secretKey] = await Promise.all([
+    getSetting(SETTING_KEYS.turnstileSiteKey),
+    getSetting(SETTING_KEYS.turnstileSecretKey),
+  ]);
+  return (siteKey?.trim() ?? "") !== "" && (secretKey?.trim() ?? "") !== "";
+}
+
+/** 是否强制人机验证：总开关开启且两把 Key 都已配置（缺一不生效，避免半配置态拦死所有人） */
+export async function isTurnstileEnforced(): Promise<boolean> {
+  if ((await getSetting(SETTING_KEYS.turnstileEnabled)) !== "1") return false;
+  return turnstileKeysReady();
+}
+
+export interface TurnstileClientConfig {
+  enabled: boolean;
+  siteKey: string;
+  /** 验证服务不可用时允许提交（降级开关，见 isTurnstileFallbackEnabled） */
+  fallback: boolean;
+}
+
+/** 前台配置（仅站点 Key；Secret 只在服务端使用，绝不下发） */
+export async function getTurnstileClientConfig(): Promise<TurnstileClientConfig> {
+  const [enforced, siteKey, fallback] = await Promise.all([
+    isTurnstileEnforced(),
+    getSetting(SETTING_KEYS.turnstileSiteKey),
+    isTurnstileFallbackEnabled(),
+  ]);
+  return { enabled: enforced, siteKey: enforced ? (siteKey?.trim() ?? "") : "", fallback };
+}
+
+export async function getTurnstileSecretKey(): Promise<string> {
+  return (await getSetting(SETTING_KEYS.turnstileSecretKey))?.trim() ?? "";
+}
+
+/**
+ * 验证服务不可用时的降级开关：
+ * 开启后，前端拿不到 Turnstile token（加载失败）仍可提交，
+ * 服务端跳过 siteverify，由既有的下单/查单频率限制兜底。
+ * 适用于买家网络到 challenges.cloudflare.com 不稳定（如中国大陆）的场景。
+ */
+export async function isTurnstileFallbackEnabled(): Promise<boolean> {
+  return (await getSetting(SETTING_KEYS.turnstileFallbackEnabled)) === "1";
 }
 
 export async function bumpAdminSessionVersion(): Promise<void> {

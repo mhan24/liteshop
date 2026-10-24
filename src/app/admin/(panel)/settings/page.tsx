@@ -7,6 +7,7 @@ import {
   changeCredentialsAction,
   saveSiteSettingsAction,
   saveSmtpAction,
+  saveTurnstileAction,
   sendTestEmailAction,
 } from "@/actions/admin";
 import { SUPPORTED_CURRENCIES } from "@/server/settings";
@@ -97,6 +98,43 @@ export default async function AdminSettingsPage() {
               <Label htmlFor="test-to">测试收件邮箱</Label>
               <Input id="test-to" name="testTo" type="email" required />
             </div>
+          </AdminForm>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>人机验证（Cloudflare Turnstile）</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AdminForm action={saveTurnstileAction} csrf={csrf} submitLabel="保存人机验证设置" className="grid max-w-xl gap-3">
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" name="tsEnabled" defaultChecked={s[SETTING_KEYS.turnstileEnabled] === "1"} className="size-4" />
+              启用人机验证（下单与订单查询需先完成验证）
+            </label>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="ts-site">Site Key（公开，随页面下发）</Label>
+              <Input id="ts-site" name="tsSiteKey" defaultValue={s[SETTING_KEYS.turnstileSiteKey] ?? ""} autoComplete="off" placeholder="0x…" />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="ts-secret">
+                Secret Key {s[SETTING_KEYS.turnstileSecretKey] ? "（已配置：留空保持不变）" : ""}
+              </Label>
+              <Input
+                id="ts-secret"
+                name="tsSecretKey"
+                type="password"
+                autoComplete="off"
+                placeholder={s[SETTING_KEYS.turnstileSecretKey] ? "留空保持不变，输入 __CLEAR__ 清除" : ""}
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" name="tsFallback" defaultChecked={s[SETTING_KEYS.turnstileFallbackEnabled] === "1"} className="size-4" />
+              降级开关：验证组件加载失败时仍允许提交（由频率限制兜底）
+            </label>
+            <p className="text-xs leading-5 text-muted sm:col-span-2">
+              在 Cloudflare 控制台创建 Turnstile Widget 后把两把 Key 填到这里；域名需加入该 Site Key 的允许列表。
+            </p>
           </AdminForm>
         </CardContent>
       </Card>

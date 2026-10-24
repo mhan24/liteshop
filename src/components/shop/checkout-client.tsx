@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { checkoutAction, type CheckoutSuccess } from "@/actions/shop";
 import { useCart } from "./cart";
+import { TurnstileWidget } from "./turnstile-widget";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { formatMoney } from "@/lib/money";
+import type { TurnstileClientConfig } from "@/server/settings";
 
 export interface ChannelOption {
   key: string;
@@ -17,12 +19,27 @@ export interface ChannelOption {
 export function CheckoutClient({
   channels,
   currency,
+  human,
 }: {
   channels: ChannelOption[];
   currency: string;
+  human: TurnstileClientConfig;
 }) {
   const { items, setQuantity, remove } = useCart();
   const [state, formAction, pending] = useActionState(checkoutAction, null);
+  const [cfToken, setCfToken] = useState("");
+  const [verifyKey, setVerifyKey] = useState(0);
+
+  // 提交失败后 token 已被 siteverify 消费：清空并重挂 widget 让买家重新验证
+  // （渲染期调整模式：不在 effect 里同步 setState）
+  const [lastState, setLastState] = useState(state);
+  if (state !== lastState) {
+    setLastState(state);
+    if (state && !state.ok) {
+      setCfToken("");
+      setVerifyKey((k) => k + 1);
+    }
+  }
 
   if (state?.ok && state.data) {
     const d: CheckoutSuccess = state.data;
@@ -135,6 +152,16 @@ export function CheckoutClient({
             <p role="alert" className="rounded-lg border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg">
               {state.message}
             </p>
+          ) : null}
+          {human.enabled ? (
+            <div className="space-y-1.5">
+              <Label>人机验证</Label>
+              <TurnstileWidget key={verifyKey} siteKey={human.siteKey} onToken={setCfToken} />
+              <input type="hidden" name="cfToken" value={cfToken} />
+              {human.fallback ? (
+                <p className="text-xs text-muted">验证加载失败时仍可提交，系统会以其他方式防护。</p>
+              ) : null}
+            </div>
           ) : null}
           <Button type="submit" disabled={pending} className="w-full">
             {pending ? "正在创建订单…" : "提交订单并支付"}

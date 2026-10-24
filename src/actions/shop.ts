@@ -16,6 +16,7 @@ import {
   OrderError,
 } from "@/server/orders";
 import { queryOrder, type OrderQueryView } from "@/server/order-query";
+import { humanVerificationError } from "@/server/human-verify";
 import { buildMockNotifyBody } from "@/server/payments/mock";
 
 /**
@@ -72,6 +73,10 @@ export async function checkoutAction(
     return { ok: false, message: "请检查填写内容（邮箱格式 / 商品数量）" };
   }
 
+  // 人机验证（后台开启后生效；token 一次性，只在此校验一次）
+  const humanError = await humanVerificationError(formData);
+  if (humanError) return { ok: false, message: humanError };
+
   try {
     const result = await createOrder({
       email: parsed.email,
@@ -118,6 +123,11 @@ export async function queryOrderAction(
   if (!orderNo.trim() || !password.trim()) {
     return { ok: false, message: "请填写订单号、邮箱与查单密码" };
   }
+
+  // 人机验证（后台开启后生效）：查询入口可被撞库枚举，与下单同样设防
+  const humanError = await humanVerificationError(formData);
+  if (humanError) return { ok: false, message: humanError };
+
   const view = await queryOrder(email, orderNo, password);
   if (!view) return { ok: false, message: "订单不存在，或邮箱 / 查单密码不正确" };
   return {
