@@ -1,50 +1,32 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
-import { ThemeProvider } from "@/components/theme-provider";
-import "./globals.css";
+import { getSiteName } from "@/server/settings";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const instrumentSerif = Instrument_Serif({
-  variable: "--font-instrument-serif",
-  subsets: ["latin"],
-  weight: "400",
-  style: ["normal", "italic"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-export const metadata: Metadata = {
-  title: {
-    default: "liteshop",
-    template: "%s · liteshop",
-  },
-  description: "数字商品自动售卖",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  let siteName = "liteshop";
+  try {
+    siteName = await getSiteName();
+  } catch {
+    // 数据库尚未初始化（如首次构建）时回落默认值
+  }
+  return {
+    title: {
+      default: `${siteName} · 数字商品自动发货`,
+      template: `%s · ${siteName}`,
+    },
+    description: "数字卡密商城：下单支付后自动发货，卡密秒到。",
+    metadataBase: new URL(process.env.SITE_URL ?? "http://localhost:3000"),
+    openGraph: {
+      type: "website",
+      siteName,
+    },
+    robots: { index: true, follow: true },
+  };
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html
-      lang="zh-CN"
-      suppressHydrationWarning
-      className={
-        "h-full antialiased " +
-        geistSans.variable +
-        " " +
-        geistMono.variable +
-        " " +
-        instrumentSerif.variable
-      }
-    >
-      <body className="min-h-full flex flex-col">
-        <ThemeProvider>{children}</ThemeProvider>
-      </body>
+    <html lang="zh-CN">
+      <body>{children}</body>
     </html>
   );
 }

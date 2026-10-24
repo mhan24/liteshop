@@ -1,365 +1,284 @@
-import { sql } from "drizzle-orm";
 import {
+  bigint,
+  boolean,
   index,
   integer,
-  sqliteTable,
+  jsonb,
+  pgTable,
+  serial,
   text,
+  timestamp,
   uniqueIndex,
-} from "drizzle-orm/sqlite-core";
-
-/** 状态统一使用 string union（PLAN §8 Implementation Notes） */
-export const DeliveryType = {
-  auto: "auto",
-  manual: "manual",
-} as const;
-export type DeliveryType = (typeof DeliveryType)[keyof typeof DeliveryType];
-
-export const OrderStatus = {
-  pending: "pending",
-  /**
-   * 支付创建结果未知（超时/5xx）：网关可能已建单，也可能没有。
-   * 此状态**不会**被超时清扫自动释放库存——必须经人工或查询网关确认
-   * 交易确实不存在后才能关单，否则会出现「网关有支付地址、商店已释放卡密」。
-   */
-  reconciling: "reconciling",
-  paid: "paid",
-  delivering: "delivering",
-  completed: "completed",
-  expired: "expired",
-  closed: "closed",
-} as const;
-export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus];
-
-export const CardStatus = {
-  available: "available",
-  reserved: "reserved",
-  sold: "sold",
-} as const;
-export type CardStatus = (typeof CardStatus)[keyof typeof CardStatus];
-
-export const OrderStatusList: readonly OrderStatus[] = Object.values(OrderStatus);
-
-/** settings 便捷类型：各表行结构（$inferSelect） */
-export type Product = typeof products.$inferSelect;
-export type NewProduct = typeof products.$inferInsert;
-export type Card = typeof cards.$inferSelect;
-export type Order = typeof orders.$inferSelect;
-export type NewOrder = typeof orders.$inferInsert;
-export type Setting = typeof settings.$inferSelect;
-export type PaymentConfig = typeof paymentConfigs.$inferSelect;
-export type AdminLog = typeof adminLogs.$inferSelect;
-export type NotifyLog = typeof notifyLogs.$inferSelect;
-
-const ts = () => integer("created_at", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`);
-const tsUpdated = () => integer("updated_at", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`);
-
-export const products = sqliteTable(
-  "products",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    name: text("name").notNull(),
-    slug: text("slug").notNull(),
-    description: text("description").notNull().default(""),
-    imageUrl: text("image_url"),
-    /** 售价，整数分（禁止浮点运算，边界经 lib/money.toCents 转换） */
-    priceCents: integer("price_cents").notNull(),
-    currency: text("currency").notNull().default("CNY"),
-    /** JSON 自由扩展位（多档价格、SEO 位等） */
-    extra: text("extra", { mode: "json" }),
-    deliveryType: text("delivery_type").notNull().default(DeliveryType.auto),
-    /**
-     * manual 型库存上限。
-     * -1 = 不限库存（哨兵值）；>= 0 = 剩余可售数量（0 表示已售罄）。
-     * 注意：历史数据用 0 兼表「不限」，语义与「售罄」冲突，
-     * 会导致扣减到 0 后失去库存约束而超卖，故改用 -1（见 lib/stock.ts）。
-     */
-    stockLimit: integer("stock_limit").notNull().default(-1),
-    /** "on" | "off" */
-    status: text("status").notNull().default("on"),
-    sort: integer("sort").notNull().default(0),
-    createdAt: ts(),
-    updatedAt: tsUpdated(),
-  },
-  (t) => [uniqueIndex("products_slug_uq").on(t.slug)]
-);
-
-export const cards = sqliteTable(
-  "cards",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    productId: integer("product_id")
-      .notNull()
-      .references(() => products.id),
-    content: text("content").notNull(),
-    status: text("status").notNull().default(CardStatus.available),
-    orderId: text("order_id"),
-    soldAt: integer("sold_at", { mode: "timestamp_ms" }),
-    createdAt: ts(),
-  },
-  (t) => [
-    // 允许同一内容导入多张（重复销售/测试场景）；并发安全由发货事务的条件 UPDATE 保证
-    index("cards_product_status_idx").on(t.productId, t.status),
-    index("cards_order_idx").on(t.orderId),
-  ]
-);
-
-export const orders = sqliteTable(
-  "orders",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    /** LS + YYYYMMDD + 8 位随机 + 2 位校验和，非自增、不暴露销量 */
-    orderNo: text("order_no").notNull(),
-    productId: integer("product_id").references(() => products.id),
-    /** 下单时刻商品快照 */
-    productName: text("product_name").notNull(),
-    unitPriceCents: integer("unit_price_cents").notNull(),
-    currency: text("currency").notNull().default("CNY"),
-    quantity: integer("quantity").notNull().default(1),
-    totalCents: integer("total_cents").notNull(),
-    email: text("email").notNull(),
-    note: text("note"),
-    status: text("status").notNull().default(OrderStatus.pending),
-    /** manual 型下单时是否执行过库存扣减（关闭/过期时回补的依据） */
-    stockCharged: integer("stock_charged", { mode: "boolean" }).notNull().default(false),
-    /**
-     * 下单时刻的发货方式快照（auto | manual）。
-     *
-     * 履约与库存释放必须以此为准，而非商品当前的 deliveryType：
-     * 后台允许修改商品的发货方式，若订单在创建后被"商品改成另一种类型"影响，
-     * 会出现「人工单按自动逻辑处理（不回补库存）」或
-     * 「自动单按人工逻辑处理（预留的卡密不释放）」等账实不一致。
-     * 历史数据可能为 NULL，读取时回落商品当前值（见 getOrderDeliveryType）。
-     */
-    deliveryType: text("delivery_type"),
-    /** 交付内容：自动发卡的卡密或人工录入内容，仅在支付后对买家可见 */
-    deliveryContent: text("delivery_content"),
-    /** bepusdt 创建交易响应快照（对账依据） */
-    tradeId: text("trade_id"),
-    expectedActualAmount: text("expected_actual_amount"),
-    expirationTime: integer("expiration_time", { mode: "timestamp_ms" }),
-    blockTxnId: text("block_txn_id"),
-    /** 收银台地址：待支付期间复用（继续支付），过期后由 resume 重新创建 */
-    paymentUrl: text("payment_url"),
-    paidAt: integer("paid_at", { mode: "timestamp_ms" }),
-    createdAt: ts(),
-    updatedAt: tsUpdated(),
-  },
-  (t) => [
-    uniqueIndex("orders_order_no_uq").on(t.orderNo),
-    // 注意：不再对 trade_id 建唯一索引——同一订单可多次发起支付（每次一个新 trade_id），
-    // 唯一性改由 payment_attempts.trade_id 保证。
-    index("orders_trade_id_idx").on(t.tradeId),
-    index("orders_status_idx").on(t.status),
-    index("orders_email_idx").on(t.email),
-  ]
-);
-
-/** 支付尝试状态机 */
-export const PaymentAttemptStatus = {
-  /** 已创建，等待买家支付 */
-  pending: "pending",
-  /** 已确认到账（该尝试成功） */
-  paid: "paid",
-  /** 超时/被替换，不再有效 */
-  expired: "expired",
-  /** 结果未知（创建超时等），需对账确认 */
-  unknown: "unknown",
-} as const;
-export type PaymentAttemptStatusType =
-  (typeof PaymentAttemptStatus)[keyof typeof PaymentAttemptStatus];
+  uuid,
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
- * 支付尝试（每次「发起支付」一行）。
+ * 卡密商城数据模型（PostgreSQL，从零设计）。
  *
- * 解决的问题：订单原先把 trade_id/paymentUrl 直接存在 orders 上并被覆盖，
- * 导致旧交易的延迟回调无法识别、可能误关一张已有新交易的订单。
- * 现在每个 trade_id 独立成行，回调先按 trade_id 定位到具体尝试再决定影响。
+ * 金额一律 bigint「最小货币单位」（分），禁止浮点参与金额运算。
+ * 订单状态机：pending → paid → completed；pending → closed | reconciling；
+ *            reconciling → paid | closed。终态：completed / closed。
+ * 支付状态机：pending → confirmed | expired | failed；confirmed 之后若发现
+ *            归属异常（订单已关闭收到到账）记为 late（对账特例，不推进订单）。
+ * 卡密状态机：available → reserved（下单锁卡）→ sold（支付确认交付）；
+ *            reserved → available（关单/过期释放）。
  */
-export const paymentAttempts = sqliteTable(
-  "payment_attempts",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    orderNo: text("order_no").notNull(),
-    provider: text("provider").notNull(),
-    /** 渠道交易号；唯一，是回调归属的判据 */
-    tradeId: text("trade_id"),
-    amountCents: integer("amount_cents").notNull(),
-    currency: text("currency").notNull(),
-    paymentUrl: text("payment_url").notNull().default(""),
-    expectedActualAmount: text("expected_actual_amount"),
-    expirationTime: integer("expiration_time", { mode: "timestamp_ms" }),
-    status: text("status").notNull().default(PaymentAttemptStatus.pending),
-    /** 是否仍是订单的当前有效尝试（只有它能把订单推向 paid/completed） */
-    isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(true),
-    /** 渠道原始响应快照（对账） */
-    raw: text("raw"),
-    paidAt: integer("paid_at", { mode: "timestamp_ms" }),
-    createdAt: ts(),
-    updatedAt: tsUpdated(),
-  },
-  (t) => [
-    uniqueIndex("payment_attempts_trade_id_uq").on(t.tradeId),
-    index("payment_attempts_order_idx").on(t.orderNo),
-    index("payment_attempts_status_idx").on(t.status),
-  ]
-);
 
-export const settings = sqliteTable("settings", {
+/* ================= 站点配置（KV） ================= */
+
+export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
-  value: text("value").notNull().default(""),
-  updatedAt: tsUpdated(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-/**
- * 限流计数器（持久化）。
- *
- * 背景：限流与登录锁定原先只存于进程内存，导致
- *   1) 进程重启后计数归零 —— 攻击者若能触发重启即可绕过全部限制；
- *   2) 多副本部署时每个实例各算各的，额度随副本数放大。
- *
- * 改为落 SQLite（项目本就以 SQLite 为唯一状态源，且写事务已串行化），
- * 使限流在重启与多实例下保持一致。内存 Map 仍作为前置快速路径，
- * 避免每个请求都写库；只有命中/需要时才同步落库。
- *
- * 键的作用域前缀区分用途（order / lookup / notify / login / orderStatus），
- * 过期记录由 sweep 定期清理，并有容量上限兜底。
- */
-export const rateLimitCounters = sqliteTable(
-  "rate_limit_counters",
+/* ================= 管理员 ================= */
+
+
+export const admins = pgTable("admins", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  // scrypt（node:crypto）哈希：scrypt:N:r:p:salt:hash
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ================= 商品目录 ================= */
+
+
+export const categories = pgTable("categories", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+
+export const products = pgTable(
+  "products",
   {
-    /** 作用域名 + 标识（IP、邮箱、订单号等）拼接而成 */
-    bucketKey: text("bucket_key").primaryKey(),
-    /** 当前窗口内的计数 */
-    count: integer("count").notNull().default(0),
-    /** 窗口结束时间（毫秒时间戳） */
-    resetAt: integer("reset_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: tsUpdated(),
+    id: serial("id").primaryKey(),
+    categoryId: integer("category_id").references(() => categories.id, { onDelete: "set null" }),
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** 最小货币单位（分）；站点统一币种（settings.currency） */
+    priceCents: bigint("price_cents", { mode: "number" }).notNull(),
+    /** auto = 卡密自动发货；manual = 人工发货（email 通知 + 后台录入） */
+    deliveryType: text("delivery_type", { enum: ["auto", "manual"] }).notNull(),
+    /** manual 型库存上限；null = 不限库存 */
+    stockLimit: integer("stock_limit"),
+    /** 上架状态 */
+    status: text("status", { enum: ["on", "off"] }).notNull().default("on"),
+    imageUrl: text("image_url"),
+    /** SEO 描述（留空时由 description 截断） */
+    seoDescription: text("seo_description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("rate_limit_reset_idx").on(t.resetAt)]
+  (t) => [index("products_category_idx").on(t.categoryId), index("products_status_idx").on(t.status)]
 );
 
-/** 支付渠道配置：新增渠道加行不改表（PLAN §3） */
-export const paymentConfigs = sqliteTable(
-  "payment_configs",
+/* ================= 卡密库存 ================= */
+
+
+export const orders = pgTable(
+  "orders",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    provider: text("provider").notNull(),
-    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
-    configJson: text("config_json", { mode: "json" }).notNull().default("{}"),
-    createdAt: ts(),
-    updatedAt: tsUpdated(),
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    orderNo: text("order_no").notNull().unique(),
+    email: text("email").notNull(),
+    /** 每笔订单独立查单密码（Argon2id 哈希；明文只在下单响应出现一次） */
+    queryPasswordHash: text("query_password_hash").notNull(),
+    status: text("status", {
+      enum: ["pending", "paid", "completed", "closed", "reconciling"],
+    }).notNull()
+      .default("pending"),
+    currency: text("currency").notNull(),
+    subtotalCents: bigint("subtotal_cents", { mode: "number" }).notNull(),
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    note: text("note"),
+    /** 支付窗口截止；过期由惰性清扫 + cron 关单并释放卡密 */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("payment_configs_provider_uq").on(t.provider)]
+  (t) => [
+    index("orders_email_idx").on(t.email),
+    index("orders_status_expires_idx").on(t.status, t.expiresAt),
+    index("orders_created_idx").on(t.createdAt),
+  ]
 );
 
-export const adminLogs = sqliteTable(
-  "admin_logs",
+
+export const orderItems = pgTable(
+  "order_items",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    action: text("action").notNull(),
-    target: text("target").notNull().default(""),
-    detail: text("detail").notNull().default(""),
-    ip: text("ip").notNull().default(""),
-    createdAt: ts(),
+    id: serial("id").primaryKey(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** 快照：商品此后改名/改价不影响订单 */
+    productId: integer("product_id").references(() => products.id, { onDelete: "set null" }),
+    productName: text("product_name").notNull(),
+    unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
+    quantity: integer("quantity").notNull(),
+    lineTotalCents: bigint("line_total_cents", { mode: "number" }).notNull(),
   },
-  (t) => [index("admin_logs_created_idx").on(t.createdAt)]
+  (t) => [index("order_items_order_idx").on(t.orderId)]
 );
 
-export const notifyLogs = sqliteTable(
+/* ================= 支付渠道与支付记录 ================= */
+
+
+export const cards = pgTable(
+  "cards",
+  {
+    id: serial("id").primaryKey(),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    /** available → reserved（下单锁卡）→ sold（支付确认）；reserved 可释放回 available */
+    status: text("status", { enum: ["available", "reserved", "sold"] }).notNull().default("available"),
+    reservedOrderId: uuid("reserved_order_id").references(() => orders.id, { onDelete: "set null" }),
+    soldAt: timestamp("sold_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("cards_product_status_idx").on(t.productId, t.status),
+    index("cards_reserved_order_idx").on(t.reservedOrderId),
+    // 同一商品下卡密内容唯一，防止重复导入
+    uniqueIndex("cards_product_content_uq").on(t.productId, t.content),
+  ]
+);
+
+/* ================= 订单 ================= */
+
+
+export const paymentChannels = pgTable("payment_channels", {
+  id: serial("id").primaryKey(),
+  /** 回调路由标识（/api/webhooks/pay/[key]），创建后不变 */
+  key: text("key").notNull().unique(),
+  /** epusdt = BEpusdt 兼容收银台（覆盖 LitePay / 自建 BEpusdt）；mock = 本地模拟 */
+  type: text("type", { enum: ["epusdt", "mock"] }).notNull(),
+  displayName: text("display_name").notNull(),
+  apiBase: text("api_base"),
+  /** AES-256-GCM 加密存储（密钥派生自 AUTH_SECRET），前端永不回显 */
+  tokenEnc: text("token_enc"),
+  currencies: text("currencies"),
+  timeoutSeconds: integer("timeout_seconds").notNull().default(600),
+  reselect: boolean("reselect").notNull().default(true),
+  /** 前台展示排序：小在前；同序按 id */
+  sortOrder: integer("sort_order").notNull().default(0),
+  enabled: boolean("enabled").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+
+export const payments = pgTable(
+  "payments",
+  {
+    id: serial("id").primaryKey(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    channelId: integer("channel_id")
+      .notNull()
+      .references(() => paymentChannels.id),
+    /** 网关交易号（trade_id）；创建响应丢失时为 null */
+    providerRef: text("provider_ref"),
+    status: text("status", {
+      enum: ["pending", "confirmed", "expired", "failed", "late"],
+    }).notNull()
+      .default("pending"),
+    /** 每单只有一条「当前支付尝试」；重新发起支付会作废旧尝试 */
+    isCurrent: boolean("is_current").notNull().default(true),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull(),
+    /** 网关返回的应付加密货币数量快照（字符串原样保存，用于到账核对） */
+    expectedAmount: text("expected_amount"),
+    paymentUrl: text("payment_url"),
+    /** 延迟到账/重复到账标记（对账特例，不推进订单） */
+    anomaly: text("anomaly", { enum: ["late", "duplicate"] }),
+    raw: jsonb("raw"),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // 幂等锚点：同一渠道的同一笔网关交易只能确认一次
+    uniqueIndex("payments_channel_ref_uq")
+      .on(t.channelId, t.providerRef)
+      .where(sql`provider_ref is not null`),
+    index("payments_order_idx").on(t.orderId),
+    index("payments_current_idx").on(t.orderId, t.isCurrent),
+  ]
+);
+
+/* ================= 卡密交付（幂等） ================= */
+
+
+export const deliveries = pgTable(
+  "deliveries",
+  {
+    id: serial("id").primaryKey(),
+    /** 每单最多一条交付记录：数据库级幂等锚点 */
+    orderId: uuid("order_id")
+      .notNull()
+      .unique()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    cardIds: jsonb("card_ids").notNull().$type<number[]>(),
+    /** 交付邮件重试 */
+    emailAttempts: integer("email_attempts").notNull().default(0),
+    emailSentAt: timestamp("email_sent_at", { withTimezone: true }),
+    emailError: text("email_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("deliveries_email_pending_idx").on(t.emailSentAt, t.emailAttempts)]
+);
+
+/* ================= 回调审计 ================= */
+
+
+export const notifyLogs = pgTable(
   "notify_logs",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    provider: text("provider").notNull(),
-    orderNo: text("order_no").notNull().default(""),
-    /** sha256(raw_body)，用于重复通知识别 / 重放排查 */
+    id: serial("id").primaryKey(),
+    channelKey: text("channel_key").notNull(),
+    orderNo: text("order_no"),
+    providerRef: text("provider_ref"),
     payloadHash: text("payload_hash").notNull(),
     payload: text("payload").notNull(),
-    status: integer("status"),
-    handled: integer("handled", { mode: "boolean" }).notNull().default(false),
-    createdAt: ts(),
+    handled: boolean("handled").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [
-    index("notify_logs_hash_idx").on(t.payloadHash),
-    index("notify_logs_order_idx").on(t.orderNo),
-  ]
+  (t) => [index("notify_logs_hash_idx").on(t.payloadHash), index("notify_logs_created_idx").on(t.createdAt)]
 );
 
-/**
- * 异常到账（超时订单收到成功支付）。
- *
- * 场景：买家在支付有效期内完成链上付款，但成功回调在本地清扫把订单置为
- * expired 之后才到达。此时卡密已释放，**不能直接恢复原订单**（可能已被
- * 他人买走，直接发卡会造成一卡多卖/超卖）。
- * 因此记录为独立的「异常到账」待人工处置：核对链上到账后补发或退款。
- *
- * 不复用 notify_logs 的原因：那是原始报文流水，本表是**需要跟进的业务事项**，
- * 有独立的处理状态与操作人。
- */
-export const AnomalyStatus = {
-  /** 待人工处置 */
-  open: "open",
-  /** 已补发商品 */
-  reissued: "reissued",
-  /** 已退款 */
-  refunded: "refunded",
-  /** 已核实为误报（如重复回调、金额不符） */
-  dismissed: "dismissed",
-} as const;
-export type AnomalyStatusType = (typeof AnomalyStatus)[keyof typeof AnomalyStatus];
+/* ================= 管理审计 ================= */
 
-export const paymentAnomalies = sqliteTable(
-  "payment_anomalies",
+
+export const auditLogs = pgTable(
+  "audit_logs",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    orderNo: text("order_no").notNull(),
-    provider: text("provider").notNull(),
-    /** 网关交易号：核对链上到账的依据 */
-    tradeId: text("trade_id"),
-    /** 回调声明的法币金额（原样） */
-    amount: text("amount").notNull().default(""),
-    currency: text("currency").notNull().default(""),
-    /** 订单在异常发生时的状态（一般为 expired / closed） */
-    orderStatusAtArrival: text("order_status_at_arrival").notNull(),
-    /** 异常类型：late_payment=迟到/历史到账；duplicate_payment=已确认收款后的另一笔到账 */
-    kind: text("kind").notNull().default("late_payment"),
-    status: text("status").notNull().default(AnomalyStatus.open),
-    /** 处理备注（管理员填写） */
-    resolution: text("resolution").notNull().default(""),
-    /** 原始回调报文（截断） */
-    payload: text("payload").notNull().default(""),
-    createdAt: ts(),
-    updatedAt: tsUpdated(),
+    id: serial("id").primaryKey(),
+    actor: text("actor").notNull(),
+    action: text("action").notNull(),
+    detail: text("detail"),
+    ip: text("ip"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [
-    index("payment_anomalies_order_idx").on(t.orderNo),
-    index("payment_anomalies_status_idx").on(t.status),
-  ]
+  (t) => [index("audit_logs_created_idx").on(t.createdAt)]
 );
 
-/** 邮件发送记录：unique(order_no, kind) 保证同类邮件只发一次（kind: delivered | processing） */
-export const mailLogs = sqliteTable(
-  "mail_logs",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    orderNo: text("order_no").notNull(),
-    kind: text("kind").notNull(),
-    email: text("email").notNull(),
-    /**
-     * sent   = 已成功送达
-     * failed = 尝试过但失败（可被定时重试）
-     * sending = 发送中（租约状态，防止并发重复发送）
-     */
-    status: text("status").notNull().default("sent"),
-    error: text("error").notNull().default(""),
-    /** 已尝试次数（含成功那次） */
-    attempts: integer("attempts").notNull().default(0),
-    /** 下次可重试时间；NULL = 无需重试 */
-    nextRetryAt: integer("next_retry_at", { mode: "timestamp_ms" }),
-    createdAt: ts(),
-    updatedAt: tsUpdated(),
-  },
-  (t) => [
-    uniqueIndex("mail_logs_order_kind_uq").on(t.orderNo, t.kind),
-    index("mail_logs_retry_idx").on(t.status, t.nextRetryAt),
-  ]
-);

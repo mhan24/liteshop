@@ -1,37 +1,46 @@
-# syntax=docker/dockerfile:1
-# 锁定具体小版本；基础镜像用 Debian（glibc）——Turbopack 在 Alpine/musl 上 ARM 会 SIGSEGV
-# Node 22：部分 ARM 主机（如 Oracle Neoverse-N1）上 Node 20 原生调用 SQLite 会 SIGSEGV，22/24 正常
-# 升级 Node 前先 `npm rebuild better-sqlite3`（见 README）
-FROM node:22.23-bookworm-slim AS deps
+# 多阶段构建：deps → builder → runner（standalone，非 root 运行）
+FROM node:22-bookworm-slim AS deps
 WORKDIR /app
-# better-sqlite3 源码编译回退所需的构建链（glibc 匹配 runner 阶段）
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
-RUN npm ci && npm rebuild better-sqlite3
+RUN npm ci
 
-FROM node:22.23-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ENV NEXT_TELEMETRY_DISABLED=1
+# 构建期注入站点地址（metadataBase 等），运行时可被 settings.site_url 覆盖
+ARG SITE_URL=http://localhost:3000
+ENV SITE_URL=$SITE_URL
+ENV AUTH_SECRET=build-placeholder-secret-0123456789abcdef
+ENV DATABASE_URL=postgres://build:build@localhost:5432/build
 RUN npm run build
 
-FROM node:22.23-bookworm-slim AS runner
+FROM node:22-bookworm-slim AS runner
 WORKDIR /app
-ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1 \
-    PORT=3000 \
-    HOSTNAME=0.0.0.0
-RUN groupadd --system liteshop && useradd --system --gid liteshop liteshop
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+ENV TZ=Asia/Shanghai
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends postgresql-client \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd -r liteshop \
+  && useradd -r -g liteshop liteshop
+
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
-# SQLite 迁移文件：启动时自动应用
 COPY --from=builder /app/drizzle ./drizzle
-RUN mkdir -p /app/data && chown -R liteshop:liteshop /app
+COPY --from=builder /app/scripts ./scripts
+# standalone 的 node_modules 由依赖追踪生成（drizzle-orm 被 Turbopack 打包进 chunk，
+# 但启动迁移脚本 scripts/db/migrate.mjs 需要完整包，从 builder 补拷）
+COPY --from=builder /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
+
+RUN mkdir -p /app/backups && chown -R liteshop:liteshop /app
 USER liteshop
+
 EXPOSE 3000
-VOLUME ["/app/data"]
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "server.js"]
+
+# 启动前执行版本化迁移（幂等），随后运行应用
+CMD ["sh", "-c", "node scripts/db/migrate.mjs && node server.js"]

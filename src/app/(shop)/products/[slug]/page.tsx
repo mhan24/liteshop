@@ -1,122 +1,108 @@
-import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { getShopProduct } from "@/server/shop";
-import { getCopy } from "@/server/copy";
-import { getTurnstileClientConfig } from "@/server/settings";
-import { BuyForm, type CheckoutOption } from "@/components/shop/buy-form";
-import { getCheckoutOptions } from "@/server/payment";
-import { Reveal } from "@/components/reveal";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { formatMoney } from "@/lib/money";
+import { getProductBySlug } from "@/server/catalog";
+import { getSiteCurrency } from "@/server/settings";
+import { getSiteUrl } from "@/server/settings";
+import { Badge } from "@/components/ui/input";
+import { AddToCart } from "@/components/shop/add-to-cart";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}): Promise<Metadata> {
-  const { slug } = await params;
-  const product = getShopProduct(slug);
-  return { title: product?.name ?? "商品" };
+export async function generateStaticParams() {
+  // 增量静态生成：首请求时渲染并缓存，商品变更由后台 revalidatePath 失效
+  return [];
 }
 
-export default async function ProductDetailPage({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}) {
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
-  const product = getShopProduct(slug);
+  const product = await getProductBySlug(slug);
+  if (!product) return { title: "商品不存在" };
+  const description =
+    product.description.slice(0, 150) || "数字卡密商品，支付后自动发货。";
+  return {
+    title: product.name,
+    description,
+    alternates: { canonical: `/products/${product.slug}` },
+    openGraph: {
+      title: product.name,
+      description,
+      type: "website",
+      images: product.imageUrl ? [product.imageUrl] : undefined,
+    },
+  };
+}
+
+export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const [product, currency, siteUrl] = await Promise.all([
+    getProductBySlug(slug),
+    getSiteCurrency(),
+    getSiteUrl(),
+  ]);
   if (!product) notFound();
 
-  const turnstile = getTurnstileClientConfig();
-  // 支付方式由服务端判定：只有后台启用的渠道才对买家可见（名称/优先级可在后台自定义），
-  // 避免"选了却付不了"。
-  const checkoutOptions: CheckoutOption[] = getCheckoutOptions().map((o) => ({
-    value: o.method,
-    label: o.label,
-    hint: o.hint,
-  }));
-  const copy = { payHint: getCopy("detail_pay_hint") };
-  const soldOut = !product.onSale;
-  const maxQuantity =
-    product.deliveryType === "auto" || (product.stock != null && product.stock > 0)
-      ? Math.min(product.stock ?? 10, 10)
-      : 1;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    description: product.description || undefined,
+    image: product.imageUrl || undefined,
+    sku: product.slug,
+    offers: {
+      "@type": "Offer",
+      url: `${siteUrl}/products/${product.slug}`,
+      priceCurrency: currency,
+      price: (product.priceCents / 100).toFixed(2),
+      availability: product.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+    },
+  };
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-16">
-      <Reveal className="grid gap-10 lg:grid-cols-[1.2fr_1fr]">
-        {/* 商品信息 */}
-        <section>
-          {product.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={product.imageUrl}
-              alt={product.name}
-              className="mb-8 aspect-[2/1] w-full rounded-xl border border-border object-cover"
-            />
+    <article className="grid gap-10 lg:grid-cols-[1.2fr_1fr]">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <section className="space-y-4">
+        <nav className="text-xs text-muted" aria-label="面包屑">
+          <Link href="/" className="hover:text-fg">
+            商品
+          </Link>
+          {product.categorySlug ? (
+            <>
+              {" / "}
+              <Link href={`/?category=${product.categorySlug}`} className="hover:text-fg">
+                {product.categoryName}
+              </Link>
+            </>
           ) : null}
-          <div className="flex items-center gap-3">
-            <h1 className="font-serif text-3xl tracking-tight sm:text-4xl">{product.name}</h1>
-            <Badge
-              className={
-                product.deliveryType === "auto"
-                  ? "bg-pastel-green-bg text-pastel-green-text"
-                  : "bg-pastel-blue-bg text-pastel-blue-text"
-              }
-            >
-              {product.deliveryType === "auto" ? "自动发卡" : "人工发货"}
-            </Badge>
-          </div>
-          <p className="mt-4 font-mono text-2xl">{product.priceFormatted}</p>
-          <Separator className="my-6" />
-          <div className="whitespace-pre-line text-[15px] leading-relaxed text-foreground/90">
-            {product.description || "暂无介绍"}
-          </div>
-        </section>
+          {" / "}
+          <span>{product.name}</span>
+        </nav>
+        <div className="flex items-center gap-3">
+          <h1 className="font-serif text-2xl font-semibold tracking-tight">{product.name}</h1>
+          <Badge>{product.deliveryType === "auto" ? "自动发卡" : "人工发货"}</Badge>
+        </div>
+        <p className="whitespace-pre-wrap text-sm leading-6 text-muted">{product.description}</p>
+      </section>
 
-        {/* 购买卡片 */}
-        <section className="lg:sticky lg:top-8 lg:self-start">
-          <Card className="border-border bg-card">
-            <CardContent className="p-6">
-              <div className="mb-5 flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">库存</span>
-                {soldOut ? (
-                  <span className="text-pastel-red-text">暂时售罄</span>
-                ) : product.stock != null ? (
-                  <span className="font-mono">{product.stock}</span>
-                ) : (
-                  <span className="text-pastel-green-text">现货</span>
-                )}
-              </div>
-              {soldOut ? (
-                <Button className="w-full" size="lg" disabled>
-                  暂时售罄
-                </Button>
-              ) : (
-                <BuyForm
-                  slug={product.slug}
-                  maxQuantity={maxQuantity}
-                  deliveryType={product.deliveryType}
-                  turnstile={turnstile}
-                  methods={checkoutOptions}
-                  productName={product.name}
-                  total={product.priceFormatted}
-                  buttonText={getCopy("buy_button")}
-                  notice={getCopy("buy_notice")}
-                />
-              )}
-            </CardContent>
-          </Card>
-          <p className="mt-4 px-1 text-xs leading-relaxed text-muted-foreground">
-            {copy.payHint}
+      <aside className="lg:sticky lg:top-8 lg:self-start">
+        <div className="space-y-4 rounded-xl border border-line bg-surface p-6">
+          <p className="font-serif text-2xl font-semibold">{formatMoney(product.priceCents, currency)}</p>
+          <p className={`text-xs ${product.inStock ? "text-muted" : "text-danger"}`}>
+            {product.stockDisplay === null ? "现货可购" : product.inStock ? `库存 ${product.stockDisplay}` : "缺货"}
           </p>
-        </section>
-      </Reveal>
-    </main>
+          <AddToCart slug={product.slug} name={product.name} priceCents={product.priceCents} inStock={product.inStock} />
+          <Link
+            href="/cart"
+            className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-line text-sm font-medium hover:bg-bg"
+          >
+            查看购物车 / 结算
+          </Link>
+          <p className="text-xs text-muted">
+            下单后跳转收银台完成支付；支付成功卡密自动发放，凭「订单号 + 邮箱 + 查单密码」随时查看。
+          </p>
+        </div>
+      </aside>
+    </article>
   );
 }

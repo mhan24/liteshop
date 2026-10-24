@@ -1,49 +1,13 @@
-# Docker 构建上下文排除清单
-#
-# 关键：.gitignore 不影响 Docker 构建上下文。本项目的生产目录里存在 .env
-# （含 bepusdt 支付令牌、AUTH_SECRET、SMTP 密码），而 Dockerfile 有 `COPY . .`，
-# 如果不排除就会把这些密钥打进 builder 阶段的文件系统与构建缓存。
-#
-# 排除后仍需保证构建可用：以下被排除项均不参与 `npm ci` / `next build`。
-
-# 版本控制与元数据
+node_modules
+.next
 .git
-.gitignore
-.github
-
-# 凭证与本地配置（严禁进入镜像）
 .env
 .env.*
 !.env.example
 .deploy.env
-.deploy.env.*
-!.deploy.env.example
-
-# 依赖与构建产物（镜像内会重新安装/构建）
-node_modules
-.next
-out
-build
-*.tsbuildinfo
-
-# 运行时数据（绝不能打进镜像）
 data
 backups
-
-# 测试与覆盖率
-coverage
-
-# 操作系统/编辑器垃圾
-.DS_Store
-**/._*
-*.swp
-
-# 文档与内部规划（镜像内不需要）
-PLAN.md
-README.md
-AGENTS.md
-.zcode
-.agents
-.claude
-.vscode
-.idea
+docs
+tests
+*.md
+!.github

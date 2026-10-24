@@ -1,5 +1,3 @@
-import path from "node:path";
-import os from "node:os";
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
@@ -11,18 +9,18 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    // 含 .tsx：组件级回归测试用 react-dom/server 渲染后断言 DOM
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    // SQLite 单文件 + 单写者：并行测试文件会互相抢锁（database is locked）。
-    // 业务代码本身依赖 IMMEDIATE 事务串行化，因此测试也必须串行执行。
+    // 单实例 Postgres：测试文件串行执行，避免锁竞争干扰断言
     fileParallelism: false,
+    globalSetup: "./tests/global-setup.ts",
+    testTimeout: 30_000,
     env: {
       NODE_ENV: "test",
+      DATABASE_URL: "postgres://postgres:liteshop-test@localhost:54330/liteshop_test",
+      AUTH_SECRET: "test-secret-0123456789abcdef0123456789abcdef",
+      SITE_URL: "http://localhost:3000",
+      ADMIN_PATH: "/admin",
       PAYMENT_DRIVER: "mock",
-      MOCK_PAYMENT_TOKEN: "vitest-only-mock-token",
-      // 每次运行全新数据目录，避免历史迁移残留（目录由系统临时目录回收）
-      DATA_DIR: path.join(os.tmpdir(), `liteshop-vitest-${process.pid}-${Date.now()}`),
-      AUTH_SECRET: "vitest-secret",
+      CRON_SECRET: "test-cron-secret",
     },
   },
 });

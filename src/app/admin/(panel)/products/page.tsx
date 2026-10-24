@@ -1,170 +1,210 @@
-import Link from "next/link";
-import { csrfToken } from "@/lib/session";
-import { getSessionVersion } from "@/server/auth";
-import { getAdminBase } from "@/lib/admin-path";
-import { takeFlash } from "@/lib/flash-store";
+import { asc } from "drizzle-orm";
+import { db } from "@/db";
+import { categories } from "@/db/schema";
+import { formatMoney } from "@/lib/money";
 import { getSiteCurrency } from "@/server/settings";
-import { deleteProductAction, toggleProductStatusAction } from "@/actions/admin";
-import { listProducts } from "@/server/admin/catalog";
-import { formatCents } from "@/lib/money";
-import { isUnlimitedStock } from "@/lib/stock";
-import { Flash } from "@/components/admin/flash";
-import { ProductDialog } from "@/components/admin/product-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { csrfToken } from "@/server/admin-auth";
+import { listAllProducts } from "@/server/catalog";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { AdminForm } from "@/components/admin/admin-form";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  createCategoryAction,
+  createProductAction,
+  deleteCategoryAction,
+  deleteProductAction,
+  updateProductAction,
+} from "@/actions/admin";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "商品管理" };
 
-export default async function AdminProductsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ flash?: string }>;
-}) {
-  const { flash: flashId } = await searchParams;
-  const flash = takeFlash(flashId);
-  const csrf = await csrfToken(getSessionVersion());
-  const base = await getAdminBase();
-  const siteCurrency = getSiteCurrency();
-  const products = listProducts();
+export default async function AdminProductsPage() {
+  const csrf = await csrfToken();
+  const [items, cats, currency] = await Promise.all([
+    listAllProducts(),
+    db.select().from(categories).orderBy(asc(categories.sortOrder)),
+    getSiteCurrency(),
+  ]);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-2xl tracking-tight">商品</h1>
-          <p className="mt-1 text-sm text-muted-foreground">共 {products.length} 个商品</p>
-        </div>
-        <ProductDialog csrf={csrf} siteCurrency={siteCurrency}>
-          <Button>新建商品</Button>
-        </ProductDialog>
-      </div>
+      <h1 className="font-serif text-xl font-semibold">商品与分类</h1>
 
-      <Flash ok={flash?.ok} err={flash?.err} />
+      <Card>
+        <CardHeader>
+          <CardTitle>新建分类</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AdminForm action={createCategoryAction} csrf={csrf} submitLabel="创建分类" className="grid gap-3 sm:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="cat-name">名称</Label>
+              <Input id="cat-name" name="name" required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cat-slug">Slug（可选）</Label>
+              <Input id="cat-slug" name="slug" placeholder="留空自动生成" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cat-sort">排序</Label>
+              <Input id="cat-sort" name="sortOrder" type="number" defaultValue={0} min={0} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cat-desc">描述</Label>
+              <Input id="cat-desc" name="description" />
+            </div>
+          </AdminForm>
+          {cats.length > 0 ? (
+            <ul className="mt-3 space-y-2">
+              {cats.map((c) => (
+                <li key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2 text-sm">
+                  <span>
+                    {c.name} <span className="font-mono text-xs text-muted">/{c.slug}</span>
+                  </span>
+                  <AdminForm action={deleteCategoryAction} csrf={csrf} submitLabel="删除">
+                    <input type="hidden" name="id" value={c.id} />
+                  </AdminForm>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </CardContent>
+      </Card>
 
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead>商品</TableHead>
-              <TableHead className="text-right">价格</TableHead>
-              <TableHead>发货</TableHead>
-              <TableHead className="text-right">卡密余/售</TableHead>
-              <TableHead className="text-right">订单</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {products.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
-                  还没有商品，点击右上角新建
-                </TableCell>
-              </TableRow>
-            ) : (
-              products.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell>
-                    <p className="font-medium">{p.name}</p>
-                    <p className="font-mono text-xs text-muted-foreground">/{p.slug}</p>
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    ¥ {formatCents(BigInt(p.priceCents))}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="border-border text-muted-foreground">
-                      {p.deliveryType === "auto" ? "自动发卡" : "人工发货"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {p.deliveryType === "auto"
-                      ? `${p.availableCards} / ${p.soldCards}`
-                      : isUnlimitedStock(p.stockLimit)
-                        ? "不限"
-                        : p.stockLimit === 0
-                          ? "已售罄"
-                          : `${p.stockLimit}（剩余）`}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">{p.orderCount}</TableCell>
-                  <TableCell>
-                    <span
-                      className={
-                        p.status === "on"
-                          ? "inline-flex items-center rounded-full bg-pastel-green-bg px-2 py-0.5 text-xs tracking-[0.05em] text-pastel-green-text uppercase"
-                          : "inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-xs tracking-[0.05em] text-muted-foreground uppercase"
-                      }
-                    >
-                      {p.status === "on" ? "上架" : "下架"}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <ProductDialog
-                        csrf={csrf}
-                        siteCurrency={siteCurrency}
-                        product={{
-                          id: p.id,
-                          name: p.name,
-                          slug: p.slug,
-                          description: p.description,
-                          imageUrl: p.imageUrl,
-                          price: p.priceCents,
-                          currency: p.currency,
-                          deliveryType: p.deliveryType,
-                          stockLimit: p.stockLimit,
-                          status: p.status,
-                          sort: p.sort,
-                        }}
-                      >
-                        <Button variant="ghost" size="sm">
-                          编辑
-                        </Button>
-                      </ProductDialog>
-                      {p.deliveryType === "auto" ? (
-                        <Button asChild variant="ghost" size="sm">
-                          <Link href={`${base}/cards?product=${p.id}`}>卡密</Link>
-                        </Button>
-                      ) : null}
-                      <form action={toggleProductStatusAction}>
-                        <input type="hidden" name="csrf" value={csrf} />
-                        <input type="hidden" name="id" value={p.id} />
-                        <input type="hidden" name="status" value={p.status === "on" ? "off" : "on"} />
-                        <Button type="submit" variant="ghost" size="sm">
-                          {p.status === "on" ? "下架" : "上架"}
-                        </Button>
-                      </form>
-                      <form action={deleteProductAction}>
-                        <input type="hidden" name="csrf" value={csrf} />
-                        <input type="hidden" name="id" value={p.id} />
-                        <Button
-                          type="submit"
-                          variant="ghost"
-                          size="sm"
-                          className="text-pastel-red-text hover:bg-pastel-red-bg hover:text-pastel-red-text"
-                        >
-                          删除
-                        </Button>
-                      </form>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        已产生订单或卡密售出记录的商品不可删除（审计约束），可下架。
-      </p>
+      <Card>
+        <CardHeader>
+          <CardTitle>新建商品</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ProductFields csrf={csrf} action={createProductAction} submitLabel="创建商品" categories={cats} currency={currency} />
+        </CardContent>
+      </Card>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">全部商品</h2>
+        {items.map((p) => (
+          <Card key={p.id}>
+            <CardHeader>
+              <CardTitle className="text-base">
+                {p.name}{" "}
+                <span className="font-mono text-xs text-muted">/{p.slug}</span>{" "}
+                <span className="text-xs text-muted">
+                  {formatMoney(p.priceCents, currency)} · {p.status === "on" ? "上架" : "下架"}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <ProductFields
+                csrf={csrf}
+                action={updateProductAction}
+                submitLabel="保存修改"
+                categories={cats}
+                currency={currency}
+                initial={{
+                  id: p.id,
+                  name: p.name,
+                  slug: p.slug,
+                  description: p.description,
+                  priceMinor: p.priceCents,
+                  deliveryType: p.deliveryType,
+                  stockLimit: p.stockDisplay,
+                  status: p.status,
+                  imageUrl: p.imageUrl ?? "",
+                  categoryId: p.categoryId,
+                }}
+              />
+              <AdminForm action={deleteProductAction} csrf={csrf} submitLabel="删除商品">
+                <input type="hidden" name="id" value={p.id} />
+              </AdminForm>
+            </CardContent>
+          </Card>
+        ))}
+      </section>
     </div>
+  );
+}
+
+function ProductFields<S extends { ok: boolean; message: string }>({
+  csrf,
+  action,
+  submitLabel,
+  categories: cats,
+  currency,
+  initial,
+}: {
+  csrf: string;
+  action: (prev: S | null, formData: FormData) => Promise<S>;
+  submitLabel: string;
+  categories: Array<typeof categories.$inferSelect>;
+  currency: string;
+  initial?: {
+    id: number;
+    name: string;
+    slug: string;
+    description: string;
+    priceMinor: number;
+    deliveryType: "auto" | "manual";
+    stockLimit: number | null;
+    status: "on" | "off";
+    imageUrl: string;
+    categoryId: number | null;
+  };
+}) {
+  return (
+    <AdminForm action={action} csrf={csrf} submitLabel={submitLabel} className="grid gap-3 sm:grid-cols-2">
+      {initial ? <input type="hidden" name="id" value={initial.id} /> : null}
+      <div className="space-y-1.5">
+        <Label>名称</Label>
+        <Input name="name" required defaultValue={initial?.name} />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Slug（URL）</Label>
+        <Input name="slug" required pattern="[a-z0-9][a-z0-9-]+" defaultValue={initial?.slug} />
+      </div>
+      <div className="space-y-1.5">
+        <Label>价格（{currency} 最小单位，分）</Label>
+        <Input name="priceMinor" type="number" min={0} required defaultValue={initial?.priceMinor ?? 0} />
+      </div>
+      <div className="space-y-1.5">
+        <Label>发货方式</Label>
+        <Select name="deliveryType" defaultValue={initial?.deliveryType ?? "auto"}>
+          <option value="auto">自动发卡</option>
+          <option value="manual">人工发货</option>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label>库存上限（manual 型；留空不限）</Label>
+        <Input name="stockLimit" type="number" min={0} defaultValue={initial?.stockLimit ?? ""} />
+      </div>
+      <div className="space-y-1.5">
+        <Label>状态</Label>
+        <Select name="status" defaultValue={initial?.status ?? "on"}>
+          <option value="on">上架</option>
+          <option value="off">下架</option>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label>分类</Label>
+        <Select name="categoryId" defaultValue={initial?.categoryId ?? ""}>
+          <option value="">（无分类）</option>
+          {cats.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label>图片 URL（可选）</Label>
+        <Input name="imageUrl" type="url" defaultValue={initial?.imageUrl} />
+      </div>
+      <div className="space-y-1.5 sm:col-span-2">
+        <Label>描述</Label>
+        <Textarea name="description" rows={3} defaultValue={initial?.description} />
+      </div>
+      <div className="space-y-1.5 sm:col-span-2">
+        <Label>SEO 描述（可选，≤300 字）</Label>
+        <Input name="seoDescription" maxLength={300} />
+      </div>
+    </AdminForm>
   );
 }
