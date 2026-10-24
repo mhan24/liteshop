@@ -143,6 +143,13 @@ pending ────┤
 - 处理：验签（timingSafeEqual）→ order_no 存在且 trade_id 与创建快照一致 → amount / actual_amount 转 BigInt 分比较 → status=2 才入账发货；status=1 仅记录；status=3 → expired
 - 应答：HTTP 200 + `success`（源码判定：响应体含 success/ok 不区分大小写）；失败靠其退避重试（2/4/8…分钟最多 10 次）
 
+**pay.9527.tr 收银台网关（2026-10 接入，实测核实）**：BEpusdt 协议兼容（同 create-order / 同签名 / 同通知字段），差异点：
+
+- 收银台模式：买家先选 Binance / OKX，再选 USDT / USDC（1:1 结算，fiat 固定 USD），按页面精确金额发起交易所站内转账；网关以只读 API 按 UID + 币种 + 精确金额确认到账
+- 新增可选请求参数：`currencies`（币种限制，如 `"USDT,USDC"`）、`reselect`（允许重选平台/币种，示例 true）；响应 `data.amount` 为字符串、`network[]` 列出各平台/币种的 `actual_amount`；`expiration_time` 仍为剩余秒（未传 timeout 时默认 600s，传了则按 [180,3600] 生效）
+- 支付成功通知要求 HTTP 2xx 且正文精确为 `success`/`ok`（不区分大小写）；过期通知（status=3）同样要求 2xx，明确 `fail` 正文会被判为投递失败
+- 商户主动取消：`POST {api_base}/api/v1/order/cancel-transaction`，报文 `{trade_id, signature}`；受理后网关停止确认到账、不再发送过期通知。本站在管理员关单/买家取消 pending 订单后 best-effort 调用（`fireGatewayCancel`），失败仅记日志
+
 ## 6. 风险对策
 
 1. **卡密库存并发安全**：领卡用条件原子 `UPDATE … WHERE status='available' … RETURNING`（受影响行数判库存，不超卖）；发货在 better-sqlite3 **IMMEDIATE 事务**内（状态机守卫 → 占卡 → 确认/释放 → 提交）；manual 库存条件扣减；SQLite 单写者 + Next standalone 单进程 + compose 单副本；并发单测：同一订单 10 次并发回调仅发 1 卡

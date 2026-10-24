@@ -150,10 +150,11 @@ export default async function AdminSettingsPage({
 
       <Card className="border-border bg-card">
         <CardHeader>
-          <CardTitle className="text-base">支付渠道 · bepusdt</CardTitle>
+          <CardTitle className="text-base">支付渠道 · bepusdt（收银台）</CardTitle>
           <CardDescription>
-            对接令牌获取：bepusdt 后台 → 系统管理 → 基本设置 → API 设置 → 对接令牌。
-            启用后下单将跳转 bepusdt 收银台，买家可在收银台自选币种与网络。
+            对接 pay.9527.tr 等 BEpusdt 协议网关：下单跳转网关收银台，买家先选 Binance / OKX、
+            再选 USDT / USDC，按页面精确金额发起站内转账，到账后网关回调本站自动发货。
+            对接令牌在网关后台「API Token」页生成/轮换。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -161,12 +162,12 @@ export default async function AdminSettingsPage({
             <input type="hidden" name="csrf" value={csrf} />
             <input type="hidden" name="provider" value="bepusdt" />
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="b-api">API 地址</Label>
+              <Label htmlFor="b-api">网关地址（仅域名，不带接口路径）</Label>
               <Input
                 id="b-api"
                 name="apiBase"
                 defaultValue={String(config["api_base"] ?? "")}
-                placeholder="http://127.0.0.1:8080 或 https://pay.example.com"
+                placeholder="https://pay.9527.tr"
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
@@ -188,13 +189,34 @@ export default async function AdminSettingsPage({
                 min={180}
                 max={3600}
                 step={1}
-                defaultValue={String(config["timeout_seconds"] ?? 900)}
+                defaultValue={String(config["timeout_seconds"] ?? 600)}
               />
               <p className="text-xs text-muted-foreground">
-                与 bepusdt 网关一致；超出 180–3600 网关会忽略并改用其默认值。
+                与网关收银台有效期保持一致（pay.9527.tr 默认 600 即 10 分钟）；越界值会被网关忽略。
               </p>
             </div>
-            <label className="flex items-center gap-2 self-end text-sm sm:col-span-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="b-currencies">币种限制（可选）</Label>
+              <Input
+                id="b-currencies"
+                name="currencies"
+                defaultValue={String(config["currencies"] ?? "")}
+                placeholder="USDT,USDC"
+              />
+              <p className="text-xs text-muted-foreground">
+                收银台可选币种，逗号分隔；留空表示不限制。
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                name="reselect"
+                defaultChecked={config["reselect"] !== false}
+                className="size-4"
+              />
+              允许买家在收银台重选收款平台与币种（reselect）
+            </label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input
                 type="checkbox"
                 name="enabled"

@@ -14,9 +14,16 @@ import type {
 /**
  * bepusdt 渠道（字段与算法均经网关源码核实，见 PLAN §5）：
  * - 创建订单走「收银台」接口 POST {api_base}/api/v1/order/create-order：
- *   不传 trade_type，由 bepusdt 收银台让买家自选币种/网络（网关文档 §3）
+ *   不传 trade_type，由收银台让买家自选收款平台与币种
+ *   （pay.9527.tr 收银台：先选 Binance / OKX，再选 USDT / USDC，
+ *   按页面显示的精确金额发起交易所站内转账）
+ * - 可选参数：currencies（收银台币种限制，如 "USDT,USDC"）、
+ *   reselect（允许买家在收银台重选平台/币种，网关示例固定 true）
  * - 回调 POST JSON：amount=float64、actual_amount=string、status=int(1/2/3)
- * - 商户应答：HTTP 200 + 含 success/ok（本站固定应答 "success"）
+ * - 商户应答：HTTP 2xx + 正文精确为 success/ok（不区分大小写，
+ *   本站固定应答 "success"；对 status=3 过期通知同样回 2xx success）
+ * - 商户主动关单时调用 POST {api_base}/api/v1/order/cancel-transaction，
+ *   网关随即停止确认到账、不再发送过期通知
  */
 
 /**
@@ -47,6 +54,23 @@ export interface BepusdtConfig {
   apiBase?: string;
   token?: string;
   timeoutSeconds?: number;
+  /** 收银台币种限制（逗号分隔，如 "USDT,USDC"；空 = 不限制） */
+  currencies?: string;
+  /** 允许买家在收银台重选平台/币种（pay.9527.tr 文档示例固定 true，缺省 true） */
+  reselect?: boolean;
+}
+
+/**
+ * 归一化币种限制：按逗号/空白拆分 → 去空 → 大写 → 去重 → 逗号拼接。
+ * 无有效项时返回 undefined（表示不限制）。
+ */
+export function normalizeBepusdtCurrencies(raw: string | undefined): string | undefined {
+  const tokens = (raw ?? "")
+    .split(/[,\s，、]+/)
+    .map((t) => t.trim().toUpperCase())
+    .filter((t) => t !== "");
+  const unique = [...new Set(tokens)].slice(0, 16);
+  return unique.length > 0 ? unique.join(",") : undefined;
 }
 
 export function parseBepusdtConfig(config: Record<string, unknown>): BepusdtConfig {
@@ -56,6 +80,18 @@ export function parseBepusdtConfig(config: Record<string, unknown>): BepusdtConf
     return Number.isFinite(n) && n > 0 ? n : undefined;
   };
   const rawTimeout = num(config["timeout_seconds"]);
+  // 表单提交 "on"、字符串 "true"/"false" 与布尔值统一归一化；缺省 true（与网关示例一致）
+  const rawReselect = config["reselect"];
+  const reselect =
+    rawReselect == null
+      ? undefined
+      : rawReselect === false ||
+          rawReselect === 0 ||
+          rawReselect === "false" ||
+          rawReselect === "0" ||
+          rawReselect === "off"
+        ? false
+        : true;
   return {
     // 仅接受 http/https：该值最终会拼进 fetch()，放任其它协议（file:、data: 等）
     // 会形成 SSRF/本地文件读取面。后台保存时已校验，这里再做一道纵深防御。
@@ -63,6 +99,8 @@ export function parseBepusdtConfig(config: Record<string, unknown>): BepusdtConf
     token: str(config["token"]),
     // 越界/缺失一律钳制，避免与网关实际过期时间脱节
     timeoutSeconds: rawTimeout == null ? undefined : clampBepusdtTimeout(rawTimeout),
+    currencies: normalizeBepusdtCurrencies(str(config["currencies"])),
+    reselect,
   };
 }
 
@@ -122,6 +160,10 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
         fiat: input.currency,
         name: input.subject,
         timeout,
+        // 收银台模式：允许买家重选平台/币种（pay.9527.tr 文档示例值 true）
+        reselect: config.reselect ?? true,
+        // 币种限制（如 "USDT,USDC"）；未配置则不下发，由收银台展示全部可用币种
+        ...(config.currencies ? { currencies: config.currencies } : {}),
       };
       const signed = { ...body, signature: epusdtSign(body, config.token) };
 
@@ -250,6 +292,45 @@ export function bepusdtProvider(rawConfig: Record<string, unknown>): PaymentProv
         blockTxnId: body["block_transaction_id"] != null ? String(body["block_transaction_id"]) : null,
       };
       return { ok: true, payload };
+    },
+
+    /**
+     * 商户侧主动关单 → 通知网关撤销未到账交易（best-effort）。
+     * 网关受理后停止确认到账、不再发送过期通知；对已结束的交易返回
+     * 业务层 status_code>=400（如「订单不存在」），同样视为未受理，
+     * 由调用方记日志即可——本地关单语义不受影响。
+     */
+    async cancelPayment(tradeId: string): Promise<{ ok: boolean; message: string }> {
+      if (!config.apiBase || !config.token) {
+        return { ok: false, message: "bepusdt 未配置，跳过网关取消" };
+      }
+      const id = tradeId.trim();
+      if (!id) return { ok: false, message: "缺少 trade_id，跳过网关取消" };
+      const body = { trade_id: id };
+      try {
+        const res = await fetch(`${config.apiBase}/api/v1/order/cancel-transaction`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...body, signature: epusdtSign(body, config.token) }),
+          signal: AbortSignal.timeout(15_000),
+          redirect: "error",
+        });
+        const json = (await res.json().catch(() => null)) as
+          | { status_code?: number; message?: string }
+          | null;
+        if (res.ok && typeof json?.status_code === "number" && json.status_code < 400) {
+          return { ok: true, message: "网关已受理取消交易" };
+        }
+        return {
+          ok: false,
+          message: `网关未受理取消：HTTP ${res.status} status_code=${json?.status_code ?? "?"} ${json?.message ?? ""}`.trim(),
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          message: `网关取消请求失败: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
     },
   };
 }

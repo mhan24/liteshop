@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { epusdtSign } from "@/lib/signature";
 import {
   bepusdtProvider,
+  normalizeBepusdtCurrencies,
   parseBepusdtConfig,
   clampBepusdtTimeout,
   BEPUSDT_TIMEOUT_MIN,
@@ -466,5 +467,180 @@ describe("复审 P2：上层 isUnknownResultError 的解析类兜底", () => {
     expect(isUnknownResultError(new PaymentCreationError("rejected", "参数错误"))).toBe(false);
     // 普通校验错误
     expect(isUnknownResultError(new Error("Invalid email address"))).toBe(false);
+  });
+});
+
+/** pay.9527.tr 收银台对接（2026-10）：currencies / reselect / cancel-transaction */
+
+describe("收银台参数（currencies / reselect）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const captureBody = async (providerCfg: Record<string, unknown>) => {
+    let sent: Record<string, unknown> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        // 模拟 pay.9527.tr 响应：amount 为字符串、expiration_time 为剩余秒
+        return new Response(
+          JSON.stringify({
+            status_code: 200,
+            message: "success",
+            data: {
+              amount: "10",
+              expiration_time: 599,
+              fiat: "USD",
+              order_id: sent["order_id"],
+              payment_url: "https://pay.example.com/pay/LPx",
+              reselect: sent["reselect"],
+              status: 1,
+              trade_id: "LPx",
+            },
+          }),
+          { status: 200 }
+        );
+      })
+    );
+    const provider = bepusdtProvider(providerCfg);
+    await provider.createPayment({
+      orderNo: "LS20261024CASHIER0001",
+      amountCents: 1000n,
+      currency: "USD",
+      subject: "T",
+      notifyUrl: "https://s.example.com/n",
+      redirectUrl: "https://s.example.com/r",
+    });
+    return sent;
+  };
+
+  it("下发币种限制与 reselect=true（网关文档示例参数），含布尔值的签名合法", async () => {
+    const sent = await captureBody({
+      api_base: "https://pay.example.com",
+      token: "tok",
+      currencies: " usdt, USDC ，usdt",
+    });
+    expect(sent["currencies"]).toBe("USDT,USDC");
+    expect(sent["reselect"]).toBe(true);
+    expect(epusdtSign(sent, "tok")).toBe(sent["signature"]);
+  });
+
+  it("未配置 currencies 时不发送该参数；reselect 缺省 true", async () => {
+    const sent = await captureBody({ api_base: "https://pay.example.com", token: "tok" });
+    expect(sent["currencies"]).toBeUndefined();
+    expect(sent["reselect"]).toBe(true);
+  });
+
+  it("reselect=false 显式下发 false", async () => {
+    const sent = await captureBody({ api_base: "https://pay.example.com", token: "tok", reselect: false });
+    expect(sent["reselect"]).toBe(false);
+  });
+
+  it("parseBepusdtConfig 接受字符串/表单形式的 reselect", () => {
+    expect(parseBepusdtConfig({ reselect: "false" }).reselect).toBe(false);
+    expect(parseBepusdtConfig({ reselect: "on" }).reselect).toBe(true);
+    expect(parseBepusdtConfig({ reselect: 0 }).reselect).toBe(false);
+    expect(parseBepusdtConfig({}).reselect).toBeUndefined();
+  });
+
+  it("normalizeBepusdtCurrencies 归一化与去重", () => {
+    expect(normalizeBepusdtCurrencies("usdt, usdc")).toBe("USDT,USDC");
+    expect(normalizeBepusdtCurrencies("USDT，、USDC usdt")).toBe("USDT,USDC");
+    expect(normalizeBepusdtCurrencies(" , ")).toBeUndefined();
+    expect(normalizeBepusdtCurrencies(undefined)).toBeUndefined();
+  });
+});
+
+describe("cancelPayment（cancel-transaction，商户侧主动关单）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("POST {api_base}/api/v1/order/cancel-transaction，签名合法，2xx 受理", async () => {
+    let url = "";
+    let sent: Record<string, unknown> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (u: string | URL | Request, init?: RequestInit) => {
+        url = String(u);
+        sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify({ status_code: 200, message: "success", data: { trade_id: sent["trade_id"] } }),
+          { status: 200 }
+        );
+      })
+    );
+    const provider = bepusdtProvider({ api_base: "https://pay.example.com/", token: "tok" });
+    const r = await provider.cancelPayment!("LPabc123");
+    expect(r.ok).toBe(true);
+    expect(url).toBe("https://pay.example.com/api/v1/order/cancel-transaction");
+    expect(sent["trade_id"]).toBe("LPabc123");
+    expect(epusdtSign({ trade_id: "LPabc123" }, "tok")).toBe(sent["signature"]);
+  });
+
+  it("业务层拒绝（status_code>=400，如订单不存在）→ ok=false 且不抛错", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ status_code: 400, message: "订单不存在" }), { status: 200 }))
+    );
+    const provider = bepusdtProvider({ api_base: "https://pay.example.com", token: "tok" });
+    const r = await provider.cancelPayment!("LPgone");
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("订单不存在");
+  });
+
+  it("网络异常返回 ok=false（best-effort，绝不阻断本地关单）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("ECONNRESET");
+      })
+    );
+    const provider = bepusdtProvider({ api_base: "https://pay.example.com", token: "tok" });
+    const r = await provider.cancelPayment!("LPnet");
+    expect(r.ok).toBe(false);
+  });
+
+  it("未配置网关或空 trade_id 直接跳过，不发起请求", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const unconfigured = bepusdtProvider({ token: "tok" });
+    expect((await unconfigured.cancelPayment!("LPx")).ok).toBe(false);
+    const configured = bepusdtProvider({ api_base: "https://pay.example.com", token: "tok" });
+    expect((await configured.cancelPayment!("   ")).ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("pay.9527.tr 文档通知样例", () => {
+  it("数字 amount/actual_amount + token 字段的 status=2 回调通过验签", () => {
+    const provider = bepusdtProvider(CONFIG);
+    const body: Record<string, unknown> = {
+      trade_id: "LPa40153efac2207712b84ed21d34bb63e",
+      order_id: "LS20261024DOCEXAMPL",
+      amount: 128,
+      actual_amount: 17.54,
+      token: "收款地址",
+      status: 2,
+    };
+    const signed = { ...body, signature: epusdtSign(body, "tok") };
+    const v = provider.verifyNotify(JSON.stringify(signed));
+    expect(v.ok).toBe(true);
+    expect(v.payload?.status).toBe(2);
+    expect(v.payload?.amount).toBe(128);
+    expect(v.payload?.actualAmount).toBe("17.54");
+  });
+
+  it("status=3 过期通知同样通过验签（应答 success 终止重试）", () => {
+    const provider = bepusdtProvider(CONFIG);
+    const body: Record<string, unknown> = {
+      trade_id: "LPa40153efac2207712b84ed21d34bb63e",
+      order_id: "LS20261024DOCEXAMPL",
+      amount: 10,
+      actual_amount: 10,
+      token: "UID",
+      status: 3,
+    };
+    const signed = { ...body, signature: epusdtSign(body, "tok") };
+    const v = provider.verifyNotify(JSON.stringify(signed));
+    expect(v.ok).toBe(true);
+    expect(v.payload?.status).toBe(3);
   });
 });

@@ -53,6 +53,12 @@ export interface PaymentProvider {
   createPayment(input: CreatePaymentInput): Promise<CreatedPayment>;
   /** 验签 + 字段归一化；验签失败 ok=false（调用方应答 success 以终止重试并记录日志） */
   verifyNotify(rawBody: string, headers?: Headers): NotifyVerification;
+  /**
+   * 商户侧主动关单时通知网关撤销未到账交易（可选，网关型渠道实现）。
+   * best-effort：失败不得阻断本地关单——最坏情况是网关随后推送成功回调，
+   * 走既有的「异常到账」人工核对路径，不会重复发货。
+   */
+  cancelPayment?(tradeId: string): Promise<{ ok: boolean; message: string }>;
 }
 
 export class PaymentError extends Error {

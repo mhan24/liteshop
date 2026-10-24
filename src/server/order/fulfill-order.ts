@@ -633,7 +633,11 @@ export function manualDeliver(orderNo: string, content: string): AdminOpResult {
 
 /** 关闭订单：pending/paid/delivering/expired → closed，释放占卡/回补库存 */
 export function closeOrder(orderNo: string): AdminOpResult {
-  return db.transaction(
+  // 仅 pending 订单在网关侧还有未到账的有效交易，需要通知网关撤销；
+  // paid/delivering 已有真实到账，撤销只会让网关停止追踪已收的款。
+  // （用数组承载闭包内的捕获结果：TS 不会对跨闭包赋值的 let 变量收窄。）
+  const gatewayCancel: { provider: string; tradeId: string }[] = [];
+  const result = db.transaction(
     (tx) => {
       const order = tx.select().from(orders).where(eq(orders.orderNo, orderNo)).get() as Order | undefined;
       if (!order) return { ok: false, message: "订单不存在" };
@@ -650,7 +654,13 @@ export function closeOrder(orderNo: string): AdminOpResult {
           message: "该订单待对账（网关可能已建单），请先核对 bepusdt 后台再决定是否关闭",
         };
       }
-      // 统一释放入口：幂等（已释放过的订单不会二次回补）
+      if (order.status === "pending") {
+        const current = getCurrentAttempt(order.orderNo, tx);
+        if (current?.tradeId && current.status !== "paid") {
+          gatewayCancel.push({ provider: current.provider, tradeId: current.tradeId });
+        }
+      }
+      // 统一释放入口：幂等回补并清除占用标志
       releaseOrderStock(tx, order.orderNo);
       assertTransition(order.status as OrderStatus, "closed");
       tx.update(orders)
@@ -661,6 +671,36 @@ export function closeOrder(orderNo: string): AdminOpResult {
     },
     { behavior: "immediate" }
   );
+  const cancel = gatewayCancel[0];
+  if (result.ok && cancel) {
+    fireGatewayCancel(cancel.provider, cancel.tradeId);
+  }
+  return result;
+}
+
+/**
+ * 商户侧主动关单后，best-effort 通知网关撤销未到账的交易
+ * （BEpusdt 协议 cancel-transaction：网关随即停止确认到账、不再发过期通知）。
+ *
+ * 不 await、不抛错：本地关单语义不依赖网关受理。取消失败的最坏结果
+ * 是网关稍后推送成功回调，走既有的「异常到账」人工核对路径，不会重复发货。
+ * 事务外执行——网关往返绝不能拉长 IMMEDIATE 写事务持锁时间。
+ */
+export function fireGatewayCancel(providerName: string, tradeId: string): void {
+  void (async () => {
+    try {
+      const provider = getProvider(providerName);
+      if (!provider.cancelPayment) return;
+      const result = await provider.cancelPayment(tradeId);
+      console.log(
+        `[gateway-cancel] provider=${providerName} tradeId=${tradeId} ok=${result.ok} ${result.message}`
+      );
+    } catch (err) {
+      console.warn(
+        `[gateway-cancel] provider=${providerName} tradeId=${tradeId} failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  })();
 }
 
 /**
@@ -674,7 +714,8 @@ export function cancelPendingOrder(orderNo: string, email: string): AdminOpResul
   const mail = email.trim().toLowerCase();
   if (!no || !mail) return { ok: false, message: "请提供订单号与下单邮箱" };
 
-  return db.transaction(
+  const gatewayCancel: { provider: string; tradeId: string }[] = [];
+  const result = db.transaction(
     (tx) => {
       const order = tx.select().from(orders).where(eq(orders.orderNo, no)).get() as
         | Order
@@ -691,6 +732,10 @@ export function cancelPendingOrder(orderNo: string, email: string): AdminOpResul
               ? "订单已超时，无需取消"
               : "订单已支付或已关闭，无法取消；如需帮助请联系客服",
         };
+      }
+      const current = getCurrentAttempt(order.orderNo, tx);
+      if (current?.tradeId && current.status !== "paid") {
+        gatewayCancel.push({ provider: current.provider, tradeId: current.tradeId });
       }
 
       // 统一释放入口：幂等回补
@@ -709,6 +754,13 @@ export function cancelPendingOrder(orderNo: string, email: string): AdminOpResul
     },
     { behavior: "immediate" }
   );
+  // 买家取消同样要通知网关撤销交易，否则收银台在有效期内仍可付款，
+  // 到账后只能走「异常到账」人工核对（pay.9527.tr 文档的取消语义）
+  const cancel = gatewayCancel[0];
+  if (result.ok && cancel) {
+    fireGatewayCancel(cancel.provider, cancel.tradeId);
+  }
+  return result;
 }
 
 /* ================= 待对账订单处理（人工出口） ================= */

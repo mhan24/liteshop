@@ -49,7 +49,11 @@ import {
   acceptAnomalyForManualDelivery,
   resolveAnomalyAs,
 } from "@/server/admin/anomalies";
-import { clampBepusdtTimeout, normalizeBepusdtApiBase } from "@/server/payment/bepusdt";
+import {
+  clampBepusdtTimeout,
+  normalizeBepusdtApiBase,
+  normalizeBepusdtCurrencies,
+} from "@/server/payment/bepusdt";
 import { COPY_KEYS, setCopy } from "@/server/copy";
 import { SUPPORTED_CURRENCIES } from "@/lib/money";
 import { STOCK_UNLIMITED } from "@/lib/stock";
@@ -461,8 +465,12 @@ export async function savePaymentConfigAction(formData: FormData) {
   const configJson: Record<string, unknown> = {
     api_base: safeApiBase ?? "",
     token,
-    // 与网关 CalcTradeExpiredAt 的 [180, 3600] 边界对齐（越界网关会静默回落）
-    timeout_seconds: clampBepusdtTimeout(Number(formData.get("timeout") ?? 900)),
+    // 与网关收银台有效期对齐（pay.9527.tr 默认 600s；越界网关会静默回落）
+    timeout_seconds: clampBepusdtTimeout(Number(formData.get("timeout") ?? 600)),
+    // 收银台币种限制（如 "USDT,USDC"）；空 = 不限制
+    currencies: normalizeBepusdtCurrencies(String(formData.get("currencies") ?? "")) ?? "",
+    // 允许买家在收银台重选平台/币种（网关文档示例 true）
+    reselect: String(formData.get("reselect") ?? "") === "on",
   };
   upsertPaymentConfig(provider, { enabled, configJson });
   logAdmin("settings.payment", provider, `enabled=${enabled}`, await clientIp(), session.u);
