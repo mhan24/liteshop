@@ -61,15 +61,12 @@ run_remote "set -e
   docker compose up -d --no-build --remove-orphans
   docker image prune -f >/dev/null"
 
-echo "▶ 等待应用健康检查"
-for i in $(seq 1 30); do
-  if run_remote "curl -fsS http://localhost:3000/api/health >/dev/null 2>&1"; then
-    echo "  应用健康（第 ${i} 次探测）"
-    break
-  fi
-  [ "$i" = 30 ] && { echo "✗ 健康检查超时，回滚请执行：docker tag liteshop:previous liteshop:latest && cd $REMOTE_DIR && docker compose up -d --no-build"; exit 1; }
-  sleep 2
-done
+echo "▶ 等待应用容器 healthy（compose up 已按 HEALTHCHECK 等待）"
+if ! run_remote "cd $REMOTE_DIR && docker compose ps app | grep -F '(healthy)' >/dev/null"; then
+  echo "✗ 应用容器未达 healthy，回滚请执行：docker tag liteshop:previous liteshop:latest && cd $REMOTE_DIR && docker compose up -d --no-build"
+  exit 1
+fi
+echo "  app (healthy)"
 
 echo "▶ 复核 .env 指纹"
 ENV_AFTER="$(run_remote "sha256sum $REMOTE_DIR/.env" | awk '{print $1}')"
