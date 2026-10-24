@@ -206,6 +206,33 @@ export default async function AdminSettingsPage({
                 收银台可选币种，逗号分隔；留空表示不限制。
               </p>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="b-name">前台显示名称（可选）</Label>
+              <Input
+                id="b-name"
+                name="displayName"
+                defaultValue={String(config["display_name"] ?? "")}
+                placeholder="加密货币收银台"
+              />
+              <p className="text-xs text-muted-foreground">
+                买家下单时看到的支付方式名称；留空用默认文案。
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="b-sort">显示优先级（0–999）</Label>
+              <Input
+                id="b-sort"
+                name="sortOrder"
+                type="number"
+                min={0}
+                max={999}
+                step={1}
+                defaultValue={String(config["sort_order"] ?? 0)}
+              />
+              <p className="text-xs text-muted-foreground">
+                数字越小越靠前；买家不选时默认走排最前的启用渠道。
+              </p>
+            </div>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input
                 type="checkbox"
@@ -288,6 +315,33 @@ export default async function AdminSettingsPage({
               />
               <p className="text-xs text-muted-foreground">
                 收银台可选币种，逗号分隔；留空表示不限制。
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="lp-name">前台显示名称（可选）</Label>
+              <Input
+                id="lp-name"
+                name="displayName"
+                defaultValue={String(litepayConfig["display_name"] ?? "")}
+                placeholder="LitePay 收银台（USDT / USDC）"
+              />
+              <p className="text-xs text-muted-foreground">
+                买家下单时看到的支付方式名称；留空用默认文案。
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="lp-sort">显示优先级（0–999）</Label>
+              <Input
+                id="lp-sort"
+                name="sortOrder"
+                type="number"
+                min={0}
+                max={999}
+                step={1}
+                defaultValue={String(litepayConfig["sort_order"] ?? 0)}
+              />
+              <p className="text-xs text-muted-foreground">
+                数字越小越靠前；买家不选时默认走排最前的启用渠道。
               </p>
             </div>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">

@@ -1,4 +1,4 @@
-import { getPaymentConfig, listPaymentConfigs } from "@/server/settings";
+import { getPaymentConfig } from "@/server/settings";
 import { litepayProvider } from "./litepay";
 import { bepusdtProvider } from "./bepusdt";
 import { mockProvider } from "./mock";
@@ -130,8 +130,33 @@ export function getProvider(name: string): PaymentProvider {
 /** 前台可选的支付方式标识（对外契约，前端按此提交） */
 export type CheckoutMethod = "bepusdt" | "litepay";
 
+/** 网关型渠道（有收银台/回调，可被 auto 选中）；exchange:* 轮询渠道不在此列 */
+const GATEWAY_PROVIDERS: readonly CheckoutMethod[] = ["bepusdt", "litepay"];
+
+/** 渠道在收银台选项中的展示元数据（存 payment_configs.config_json，后台可改） */
+interface ChannelDisplayMeta {
+  /** 自定义显示名称；空 = 用渠道默认文案 */
+  displayName: string;
+  /** 展示优先级：数字越小越靠前；未配置按 0，同序时按渠道名排序保证可复现 */
+  sortOrder: number;
+}
+
+function channelDisplayMeta(provider: string, configJson: Record<string, unknown>): ChannelDisplayMeta {
+  const rawName = typeof configJson["display_name"] === "string" ? configJson["display_name"].trim() : "";
+  const rawOrder = Number(configJson["sort_order"]);
+  return {
+    displayName: rawName,
+    sortOrder: Number.isFinite(rawOrder) && rawOrder >= 0 ? Math.trunc(rawOrder) : 0,
+  };
+}
+
+function gatewayConfigEnabled(provider: string): boolean {
+  const row = getPaymentConfig(provider);
+  return row !== null && row.enabled;
+}
+
 /**
- * 列出**前台可选**的支付方式。
+ * 前台可选的支付方式，按渠道配置的优先级排序（sort_order 升序，同序按名称）。
  *
  * 历史问题一：`auto` 直接取 payment_configs 返回顺序的第一个启用渠道，
  * 而该顺序无保证。启用交易所渠道后，可能出现「买家被分配到交易所转账，
@@ -145,16 +170,49 @@ export type CheckoutMethod = "bepusdt" | "litepay";
  * payment_configs 中 enabled=true 才暴露（与 resolvePaymentProviderDefault 一致）。
  */
 export function listCheckoutMethods(): CheckoutMethod[] {
-  const enabled = new Set(
-    listPaymentConfigs().filter((c) => c.enabled).map((c) => c.provider)
+  const methods = GATEWAY_PROVIDERS.filter(
+    (p) => gatewayConfigEnabled(p) || (p === "bepusdt" && (process.env.PAYMENT_DRIVER ?? "auto") === "bepusdt")
   );
-  const out: CheckoutMethod[] = [];
-  // PAYMENT_DRIVER 显式强制 bepusdt 时无视后台开关（与 resolvePaymentProviderDefault 一致）
-  if (enabled.has("bepusdt") || (process.env.PAYMENT_DRIVER ?? "auto") === "bepusdt") {
-    out.push("bepusdt");
-  }
-  if (enabled.has("litepay")) out.push("litepay");
-  return out;
+  return sortGatewayMethods(methods);
+}
+
+/** 渠道排序：config_json.sort_order 升序，同序按渠道名（固定可复现） */
+function sortGatewayMethods(methods: CheckoutMethod[]): CheckoutMethod[] {
+  return [...methods].sort((a, b) => {
+    const ma = channelDisplayMeta(a, getPaymentConfig(a)?.configJson ?? {});
+    const mb = channelDisplayMeta(b, getPaymentConfig(b)?.configJson ?? {});
+    return ma.sortOrder - mb.sortOrder || a.localeCompare(b);
+  });
+}
+
+/** 各网关渠道的默认收银台文案（后台可用 display_name 覆盖名称） */
+const DEFAULT_CHECKOUT_COPY: Record<CheckoutMethod, { label: string; hint: string }> = {
+  bepusdt: {
+    label: "加密货币收银台",
+    hint: "跳转收银台，使用 USDT 等加密货币支付，到账后自动发货",
+  },
+  litepay: {
+    label: "LitePay 收银台（USDT / USDC）",
+    hint: "跳转收银台，选 Binance / OKX 按精确金额站内转账，到账后自动发货",
+  },
+};
+
+export interface CheckoutOptionInfo {
+  method: CheckoutMethod;
+  label: string;
+  hint: string;
+}
+
+/**
+ * 收银台选项（含文案），按渠道优先级排序。
+ * 名称可由后台「显示名称」自定义，留空回落到渠道默认文案。
+ */
+export function getCheckoutOptions(): CheckoutOptionInfo[] {
+  return listCheckoutMethods().map((method) => {
+    const meta = channelDisplayMeta(method, getPaymentConfig(method)?.configJson ?? {});
+    const fallback = DEFAULT_CHECKOUT_COPY[method];
+    return { method, label: meta.displayName || fallback.label, hint: fallback.hint };
+  });
 }
 
 /**
@@ -177,7 +235,8 @@ export function resolvePaymentProvider(requested?: string): PaymentProvider {
 /**
  * 当前下单使用的渠道：
  * - PAYMENT_DRIVER=mock|bepusdt：显式指定
- * - auto：仅取 payment_configs 中**已启用的网关型**渠道
+ * - auto：仅取 payment_configs 中**已启用的网关型**渠道，按渠道配置的优先级
+ *   （sort_order 升序，同序按名称）选择，与前台展示顺序一致
  */
 export function resolvePaymentProviderDefault(): PaymentProvider {
   const driver = process.env.PAYMENT_DRIVER ?? "auto";
@@ -185,17 +244,15 @@ export function resolvePaymentProviderDefault(): PaymentProvider {
   if (driver === "bepusdt") {
     return bepusdtProvider(getPaymentConfig("bepusdt")?.configJson ?? {});
   }
-  // auto：**只**从网关型渠道中选，且按固定优先级，保证结果确定。
+  // auto：**只**从网关型渠道中选，且按后台配置的优先级，保证结果确定。
   //
   // 历史缺陷：直接取 payment_configs 返回顺序的第一个启用渠道。启用交易所
   // 渠道后顺序无保证，可能选中交易所 → 买家被分配到一条前台没有指引、
   // 无从付款的通道（下单成功却付不了，属可用性事故）。
-  const enabled = new Set(
-    listPaymentConfigs().filter((c) => c.enabled).map((c) => c.provider)
+  const candidates = sortGatewayMethods(
+    GATEWAY_PROVIDERS.filter((p) => gatewayConfigEnabled(p))
   );
-  // 固定优先级：bepusdt → 其余网关渠道（按名称排序保证可复现）
-  const gatewayCandidates = ["bepusdt", "litepay", ...[...enabled].filter((p) => p !== "bepusdt" && p !== "litepay").sort()];
-  const chosen = gatewayCandidates.find((p) => enabled.has(p) && isProviderEnabled(p));
+  const chosen = candidates.find((p) => isProviderEnabled(p));
   if (!chosen) {
     if (process.env.NODE_ENV !== "production") return mockProvider();
     throw new PaymentError("NO_PAYMENT_CHANNEL", "未启用任何支付渠道，请到后台设置");

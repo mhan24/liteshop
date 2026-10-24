@@ -471,6 +471,9 @@ export async function savePaymentConfigAction(formData: FormData) {
     currencies: normalizeBepusdtCurrencies(String(formData.get("currencies") ?? "")) ?? "",
     // 允许买家在收银台重选平台/币种（网关文档示例 true）
     reselect: String(formData.get("reselect") ?? "") === "on",
+    // 前台收银台选项的显示名称与优先级（留空用默认文案；数字越小越靠前）
+    display_name: checkoutDisplayName(formData),
+    sort_order: checkoutSortOrder(formData),
   };
   upsertPaymentConfig(provider, { enabled, configJson });
   logAdmin("settings.payment", provider, `enabled=${enabled}`, await clientIp(), session.u);
@@ -573,11 +576,25 @@ export async function saveLitepayConfigAction(formData: FormData) {
       timeout_seconds: clampBepusdtTimeout(Number(formData.get("timeout") ?? 600)),
       currencies: normalizeBepusdtCurrencies(String(formData.get("currencies") ?? "")) ?? "",
       reselect: String(formData.get("reselect") ?? "") === "on",
+      // 前台收银台选项的显示名称与优先级（留空用默认文案；数字越小越靠前）
+      display_name: checkoutDisplayName(formData),
+      sort_order: checkoutSortOrder(formData),
     },
   });
   logAdmin("settings.litepay", "litepay", `enabled=${enabled}`, await clientIp(), session.u);
   revalidatePath("/admin/settings");
   await back("/admin/settings", "litepay 配置已保存", true, "pay");
+}
+
+/** 前台收银台选项的自定义显示名称（可空；限长防止撑爆选项样式） */
+function checkoutDisplayName(formData: FormData): string {
+  return String(formData.get("displayName") ?? "").trim().slice(0, 30);
+}
+
+/** 前台收银台选项的优先级（0–999，越小越靠前；非法值回落 0） */
+function checkoutSortOrder(formData: FormData): number {
+  const n = Number(formData.get("sortOrder") ?? 0);
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(Math.min(n, 999)) : 0;
 }
 
 /* ===== 人机验证（Cloudflare Turnstile）===== */

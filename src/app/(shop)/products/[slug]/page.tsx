@@ -4,7 +4,7 @@ import { getShopProduct } from "@/server/shop";
 import { getCopy } from "@/server/copy";
 import { getTurnstileClientConfig } from "@/server/settings";
 import { BuyForm, type CheckoutOption } from "@/components/shop/buy-form";
-import { listCheckoutMethods } from "@/server/payment";
+import { getCheckoutOptions } from "@/server/payment";
 import { Reveal } from "@/components/reveal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,17 +33,13 @@ export default async function ProductDetailPage({
   if (!product) notFound();
 
   const turnstile = getTurnstileClientConfig();
-  // 支付方式由服务端判定：只有配置完整的渠道才对买家可见，
+  // 支付方式由服务端判定：只有后台启用的渠道才对买家可见（名称/优先级可在后台自定义），
   // 避免"选了却付不了"。
-  const checkoutOptions: CheckoutOption[] = listCheckoutMethods().map((m) =>
-    m === "litepay"
-      ? {
-          value: m,
-          label: "LitePay 收银台（USDT / USDC）",
-          hint: "跳转收银台，选 Binance / OKX 按精确金额站内转账，到账后自动发货",
-        }
-      : { value: m, label: "在线支付", hint: "跳转收银台完成支付" }
-  );
+  const checkoutOptions: CheckoutOption[] = getCheckoutOptions().map((o) => ({
+    value: o.method,
+    label: o.label,
+    hint: o.hint,
+  }));
   const copy = { payHint: getCopy("detail_pay_hint") };
   const soldOut = !product.onSale;
   const maxQuantity =

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { paymentConfigs } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { listCheckoutMethods, resolvePaymentProviderDefault } from "./index";
+import { getCheckoutOptions, listCheckoutMethods, resolvePaymentProviderDefault } from "./index";
 
 /**
  * 支付方式选择（复审后新增）。
@@ -18,18 +18,19 @@ beforeEach(() => {
   db.delete(paymentConfigs).where(eq(paymentConfigs.provider, "litepay")).run();
 });
 
-function enableLitepay(): void {
-  // 2026-10 起 litepay 渠道走 pay.9527.tr 的 BEpusdt 兼容接口，配置键与 bepusdt 一致
+function enableLitepay(extra: Record<string, unknown> = {}): void {
+  // 2026-10 起 litepay 渠道走 pay.9527.tr 的 BEpusdt 兼容接口，配置键与 bepusdt 一致。
+  // 冲突时必须同步更新 configJson：共享测试库里可能残留旧行（无 sort_order 等）。
   db.insert(paymentConfigs)
     .values({
       provider: "litepay",
       enabled: true,
-      configJson: { api_base: "https://pay.9527.tr", token: "t" },
+      configJson: { api_base: "https://pay.9527.tr", token: "t", ...extra },
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: paymentConfigs.provider,
-      set: { enabled: true, updatedAt: new Date() },
+      set: { enabled: true, configJson: { api_base: "https://pay.9527.tr", token: "t", ...extra }, updatedAt: new Date() },
     })
     .run();
 }
@@ -38,24 +39,25 @@ afterEach(() => {
   process.env.PAYMENT_DRIVER = prevDriver;
 });
 
-function enableBepusdt(): void {
-  // 用 upsert：共享测试库里可能已存在 bepusdt 配置
+function enableBepusdt(extra: Record<string, unknown> = {}): void {
+  // 用 upsert：共享测试库里可能已存在 bepusdt 配置；冲突时同步更新 configJson
+  const configJson = { api_base: "https://pay.example.com", token: "t", ...extra };
   db.insert(paymentConfigs)
     .values({
       provider: "bepusdt",
       enabled: true,
-      configJson: { api_base: "https://pay.example.com", token: "t" },
+      configJson,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: paymentConfigs.provider,
-      set: { enabled: true, updatedAt: new Date() },
+      set: { enabled: true, configJson, updatedAt: new Date() },
     })
     .run();
 }
 
 describe("auto 只选网关渠道", () => {
-  it("litepay 渠道先于 bepusdt 启用时，auto 仍选 bepusdt（固定优先级）", () => {
+  it("litepay 渠道先于 bepusdt 启用时，auto 仍选 bepusdt（同序按名称，可复现）", () => {
     process.env.PAYMENT_DRIVER = "auto";
     enableLitepay();
     enableBepusdt();
@@ -122,5 +124,40 @@ describe("前台可选支付方式", () => {
     process.env.PAYMENT_DRIVER = "bepusdt";
     db.update(paymentConfigs).set({ enabled: false }).run();
     expect(listCheckoutMethods()).toEqual(["bepusdt"]);
+  });
+});
+
+describe("渠道优先级与显示名称（后台可配置）", () => {
+  it("sort_order 小的渠道排前：前台展示顺序与 auto 默认渠道一致", () => {
+    process.env.PAYMENT_DRIVER = "auto";
+    enableBepusdt({ sort_order: 10 });
+    enableLitepay({ sort_order: 0 });
+    expect(listCheckoutMethods()).toEqual(["litepay", "bepusdt"]);
+    expect(resolvePaymentProviderDefault().name).toBe("litepay");
+  });
+
+  it("未配置 sort_order 时同序按名称排序（bepusdt 在前，保持既有默认）", () => {
+    process.env.PAYMENT_DRIVER = "auto";
+    enableLitepay();
+    enableBepusdt();
+    expect(listCheckoutMethods()).toEqual(["bepusdt", "litepay"]);
+    expect(resolvePaymentProviderDefault().name).toBe("bepusdt");
+  });
+
+  it("自定义显示名称覆盖默认文案，留空回落默认", () => {
+    process.env.PAYMENT_DRIVER = "auto";
+    enableBepusdt({ display_name: "USDT 支付" });
+    enableLitepay();
+    const options = getCheckoutOptions();
+    expect(options.find((o) => o.method === "bepusdt")?.label).toBe("USDT 支付");
+    expect(options.find((o) => o.method === "litepay")?.label).toBe("LitePay 收银台（USDT / USDC）");
+  });
+
+  it("非法 sort_order 回落 0（负数/非数字不生效）", () => {
+    process.env.PAYMENT_DRIVER = "auto";
+    enableBepusdt({ sort_order: -5 });
+    enableLitepay({ sort_order: "abc" });
+    // 两者都回落 0 → 同序按名称：bepusdt 在前
+    expect(listCheckoutMethods()).toEqual(["bepusdt", "litepay"]);
   });
 });
