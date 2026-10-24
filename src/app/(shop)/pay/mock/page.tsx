@@ -17,10 +17,10 @@ export default async function MockPayPage({
   if (!orderNo || !ref) notFound();
 
   return (
-    <div className="mx-auto max-w-md space-y-4">
-      <h1 className="font-serif text-xl font-semibold">模拟收银台（开发环境）</h1>
-      <p className="text-sm text-muted">
-        订单 {orderNo} —— 点击下方按钮模拟支付成功回调，验证完整发卡链路。
+    <div className="mx-auto max-w-md space-y-5 rounded-xl border border-line bg-surface p-8">
+      <h1 className="font-serif text-xl font-semibold tracking-tight">模拟收银台（开发环境）</h1>
+      <p className="text-sm leading-6 text-muted">
+        订单 <span className="font-mono">{orderNo}</span> —— 点击下方按钮模拟支付成功回调，验证完整发卡链路。
       </p>
       <form action={mockPayAction}>
         <input type="hidden" name="orderNo" value={orderNo} />
@@ -28,7 +28,7 @@ export default async function MockPayPage({
         <input type="hidden" name="status" value="2" />
         <button
           type="submit"
-          className="h-10 w-full rounded-lg bg-accent text-sm font-medium text-accent-fg hover:opacity-90"
+          className="h-10 w-full rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
         >
           模拟支付成功
         </button>

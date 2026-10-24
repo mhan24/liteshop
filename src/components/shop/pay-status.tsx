@@ -36,7 +36,7 @@ export function PayStatusActions({
       {paymentUrl ? (
         <a
           href={paymentUrl}
-          className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-accent text-sm font-medium text-accent-fg hover:opacity-90"
+          className="inline-flex h-10 w-full items-center justify-center rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
         >
           前往收银台支付
         </a>
@@ -48,16 +48,21 @@ export function PayStatusActions({
       {resumeState?.ok ? (
         <a
           href={resumeState.data?.paymentUrl ?? "#"}
-          className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-accent text-sm font-medium text-accent-fg"
+          className="inline-flex h-10 w-full items-center justify-center rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
         >
-          打开新收银台
+          打开新的收银台
         </a>
       ) : null}
 
-      <details className="rounded-lg border border-line p-3">
-        <summary className="cursor-pointer text-sm text-muted">取消订单 / 重新发起支付（需下单邮箱）</summary>
-        <form action={resumeAction} className="mt-3 space-y-3">
+      <details className="group rounded-lg border border-line px-4 py-3">
+        <summary className="cursor-pointer list-none text-sm text-muted transition-colors group-open:text-fg">
+          更多操作 · 取消订单或重新支付
+        </summary>
+        <form action={resumeAction} className="mt-4 space-y-3 border-t border-line pt-4">
           <input type="hidden" name="orderNo" value={orderNo} />
+          <p className="text-xs leading-5 text-muted">
+            收银台已过期或未创建？验证下单邮箱后可重新发起支付，不会重复扣款。
+          </p>
           <div className="space-y-1.5">
             <Label htmlFor="pay-email">下单邮箱</Label>
             <Input id="pay-email" name="email" type="email" required placeholder="you@example.com" />
@@ -68,7 +73,7 @@ export function PayStatusActions({
             </Button>
           </div>
         </form>
-        <form action={cancelAction} className="mt-3 space-y-3">
+        <form action={cancelAction} className="mt-4 space-y-3 border-t border-line pt-4">
           <input type="hidden" name="orderNo" value={orderNo} />
           <div className="space-y-1.5">
             <Label htmlFor="cancel-email">下单邮箱</Label>
@@ -77,6 +82,7 @@ export function PayStatusActions({
           <Button type="submit" variant="danger" disabled={cancelPending} className="w-full">
             {cancelPending ? "处理中…" : "确认取消订单"}
           </Button>
+          <p className="text-xs leading-5 text-muted">取消后占用库存立即释放，该订单不可恢复。</p>
         </form>
         {cancelState ? (
           <div className="mt-3">

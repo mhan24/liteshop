@@ -12,7 +12,7 @@ export function AddToCart({ slug, name, priceCents, inStock }: { slug: string; n
   const [added, setAdded] = useState(false);
 
   if (!inStock) {
-    return <p className="text-sm text-muted">暂时缺货</p>;
+    return <p className="text-sm text-muted">暂时缺货，补货后即可购买。</p>;
   }
 
   return (
@@ -34,7 +34,7 @@ export function AddToCart({ slug, name, priceCents, inStock }: { slug: string; n
           setTimeout(() => setAdded(false), 2000);
         }}
       >
-        {added ? "已加入 ✓" : "加入购物车"}
+        {added ? "已加入购物车" : "加入购物车"}
       </Button>
     </div>
   );

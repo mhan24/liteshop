@@ -14,7 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
       default: `${siteName} · 数字商品自动发货`,
       template: `%s · ${siteName}`,
     },
-    description: "数字卡密商城：下单支付后自动发货，卡密秒到。",
+    description: "挑选数字商品，付款后卡密自动发放到邮箱；凭订单号与查单密码随时取回。",
     metadataBase: new URL(process.env.SITE_URL ?? "http://localhost:3000"),
     openGraph: {
       type: "website",
@@ -27,7 +27,13 @@ export async function generateMetadata(): Promise<Metadata> {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        {/* 无 JS 环境下不做入场隐藏，保证内容可见 */}
+        <noscript>
+          <style>{".reveal{opacity:1 !important;transform:none !important}"}</style>
+        </noscript>
+        {children}
+      </body>
     </html>
   );
 }

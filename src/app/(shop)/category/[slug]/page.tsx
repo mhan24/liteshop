@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { formatMoney } from "@/lib/money";
 import { getSiteCurrency } from "@/server/settings";
-import { listStoreProducts } from "@/server/catalog";
+import { listStoreProducts, getCategoryBySlug } from "@/server/catalog";
 import { notFound } from "next/navigation";
-import { getCategoryBySlug } from "@/server/catalog";
+import { ProductCard } from "@/components/shop/product-card";
 
 export const dynamic = "force-dynamic";
 
@@ -39,16 +38,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((p) => (
             <li key={p.slug}>
-              <a
-                href={`/products/${p.slug}`}
-                className="flex h-full flex-col justify-between rounded-xl border border-line bg-surface p-5 hover:shadow-md"
-              >
-                <div className="space-y-2">
-                  <h2 className="font-serif text-base font-semibold">{p.name}</h2>
-                  <p className="line-clamp-2 text-sm text-muted">{p.description}</p>
-                </div>
-                <span className="mt-4 font-semibold">{formatMoney(p.priceCents, currency)}</span>
-              </a>
+              <ProductCard product={p} currency={currency} />
             </li>
           ))}
         </ul>

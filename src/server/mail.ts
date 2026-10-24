@@ -46,23 +46,25 @@ export async function sendDeliveryEmail(orderNo: string, email: string, content:
   const cfg = await getSmtpConfig();
   const siteName = await getSiteName();
   const text = [
-    `您的订单已交付（${siteName}）`,
+    `你的订单已交付（${siteName}）`,
     "",
     `订单号：${orderNo}`,
-    "感谢您的支持！以下为您的交付内容，请妥善保存：",
+    "",
+    "以下为交付内容，请妥善保存：",
     "",
     content,
     "",
-    `如需再次查看，请到「订单查询」页使用订单号 + 查单密码。`,
+    "—",
+    "如需再次查看：打开商店「订单查询」页，凭订单号与查单密码即可。",
   ].join("\n");
-  return sendMail(cfg, email, `【${siteName}】订单已交付 ${orderNo}`, text);
+  return sendMail(cfg, email, `【${siteName}】订单已交付 · ${orderNo}`, text);
 }
 
 /** 发送测试邮件（后台 SMTP 设置） */
 export async function sendTestEmail(to: string): Promise<SendResult> {
   const cfg = await getSmtpConfig();
   const siteName = await getSiteName();
-  return sendMail(cfg, to, `【${siteName}】SMTP 测试邮件`, "这是一封测试邮件，收到即说明 SMTP 配置正确。");
+  return sendMail(cfg, to, `【${siteName}】SMTP 测试邮件`, "这是一封测试邮件。收到它说明 SMTP 配置正确，交付邮件将按同样方式发送。");
 }
 
 /** cron / 交付后调用：投递所有待发送邮件（幂等，attempts < 5） */
