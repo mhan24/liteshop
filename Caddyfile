@@ -1,32 +1,13 @@
-{
-	# 双站点边缘代理：shop.9527.tr → liteshop；pay.9527.tr → litepay
-}
+{$DOMAIN} {
+	encode zstd gzip
 
-shop.9527.tr {
-	reverse_proxy liteshop:3000
+	# 应用反代（app 仅在 internal 网络，由 Caddy 做唯一边缘出口）
+	reverse_proxy app:3000
 
 	header {
-		X-Frame-Options DENY
-		X-Content-Type-Options nosniff
-		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
-
-	@api path /api/*
-	header @api Cache-Control "no-store"
-
-	encode zstd gzip
-}
-
-pay.9527.tr {
-	reverse_proxy litepay:3000
-
-	header {
-		X-Frame-Options DENY
-		X-Content-Type-Options nosniff
-		Referrer-Policy strict-origin-when-cross-origin
-		-Server
-	}
-
-	encode zstd gzip
 }

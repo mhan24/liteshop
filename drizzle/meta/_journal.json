@@ -1,75 +1,12 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "6",
-      "when": 1791722701709,
-      "tag": "0000_simple_thing",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1791728897539,
-      "tag": "0001_mail-logs",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1791734631264,
-      "tag": "0002_card-resale-payment-url",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1791776000000,
-      "tag": "0003_manual-stock-unlimited-sentinel",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1791780000000,
-      "tag": "0004_payment-attempts",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1791781000000,
-      "tag": "0005_mail-retry",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1791782000000,
-      "tag": "0006_payment-anomalies",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1791783000000,
-      "tag": "0007_order-delivery-type-snapshot",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1791784000000,
-      "tag": "0008_order-delivery-type-reconcile",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "6",
-      "when": 1791785000000,
-      "tag": "0009_rate-limit-counters",
+      "version": "7",
+      "when": 1792834141329,
+      "tag": "0000_elite_thunderbird",
       "breakpoints": true
     }
   ]

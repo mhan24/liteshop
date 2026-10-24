@@ -1,70 +1,48 @@
-import Link from "next/link";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/server/admin-auth";
 import { redirect } from "next/navigation";
-import { currentSession } from "@/server/auth";
-import { getSiteName } from "@/server/settings";
+import { env } from "@/lib/env";
 import { logoutAction } from "@/actions/admin";
-import { ADMIN_COOKIE } from "@/lib/session";
-import { getAdminBase } from "@/lib/admin-path";
-import { AdminNav } from "@/components/admin/admin-nav";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { SignOutIcon } from "@phosphor-icons/react/ssr";
 
-export const dynamic = "force-dynamic";
-
+/** 后台布局守卫：未登录一律跳登录页（/admin/login，经 ADMIN_PATH 伪装） */
 export default async function AdminPanelLayout({ children }: { children: React.ReactNode }) {
-  const jar = await cookies();
-  const session = await currentSession(jar.get(ADMIN_COOKIE)?.value);
-  // 自定义入口时 /admin/login 会被中间件 404，必须用实际 base
-  if (!session) redirect(`${await getAdminBase()}/login`);
-  const siteName = getSiteName();
-  const base = await getAdminBase();
+  const session = await getAdminSession();
+  if (!session) redirect(`${env.ADMIN_PATH.replace(/\/+$/, "")}/login`);
+
+  async function logout() {
+    "use server";
+    await logoutAction();
+  }
+
+  const base = env.ADMIN_PATH.replace(/\/+$/, "");
+  const nav = [
+    [base, "概览"],
+    [`${base}/orders`, "订单"],
+    [`${base}/products`, "商品"],
+    [`${base}/cards`, "卡密"],
+    [`${base}/payments`, "支付渠道"],
+    [`${base}/settings`, "设置"],
+  ] as const;
 
   return (
-    <div className="min-h-[100dvh] bg-background">
-      <div className="mx-auto flex max-w-6xl flex-col md:flex-row">
-        {/* 侧边栏（桌面） */}
-        <aside className="hidden md:flex w-48 shrink-0 flex-col border-r border-border bg-sidebar px-3 py-6 md:min-h-[100dvh] md:sticky md:top-0">
-          <Link href={base} className="mb-8 px-2 font-serif text-xl tracking-tight">
-            {siteName}
-          </Link>
-          <AdminNav base={base} variant="sidebar" />
-          <div className="mt-auto flex items-center gap-1 pt-6">
-            <ThemeToggle />
-            <form action={logoutAction} className="flex-1">
-              <button
-                type="submit"
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <SignOutIcon className="size-4" weight="bold" />
-                退出登录
+    <div className="min-h-screen bg-bg">
+      <header className="border-b border-line bg-surface">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <span className="font-serif font-semibold">管理后台</span>
+          <nav className="flex flex-wrap items-center gap-3 text-sm text-muted">
+            {nav.map(([href, label]) => (
+              <a key={href} href={href} className="hover:text-fg">
+                {label}
+              </a>
+            ))}
+            <form action={logout}>
+              <button type="submit" className="text-sm text-muted hover:text-danger">
+                退出
               </button>
             </form>
-          </div>
-        </aside>
-
-        {/* 顶导航（移动） */}
-        <header className="border-b border-border bg-sidebar px-4 py-3 md:hidden">
-          <div className="flex items-center justify-between">
-            <Link href={base} className="font-serif text-lg tracking-tight">
-              {siteName}
-            </Link>
-            <div className="flex items-center gap-1">
-              <ThemeToggle />
-              <form action={logoutAction}>
-                <button type="submit" aria-label="退出登录">
-                  <SignOutIcon className="size-5 text-muted-foreground" weight="bold" />
-                </button>
-              </form>
-            </div>
-          </div>
-          <div className="mt-2">
-            <AdminNav base={base} variant="topbar" />
-          </div>
-        </header>
-
-        <main className="min-w-0 flex-1 px-4 py-8 md:px-8 md:py-10">{children}</main>
-      </div>
+          </nav>
+        </div>
+      </header>
+      <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
     </div>
   );
 }

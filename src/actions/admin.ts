@@ -1,645 +1,628 @@
 "use server";
 
-import { envConfig } from "@/lib/env";
-import { secureCookie } from "@/lib/cookie-policy";
-import { normalizeHttpUrl } from "@/lib/http-url";
-import { cookies, headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { ADMIN_COOKIE, assertCsrf, SESSION_TTL_SECONDS } from "@/lib/session";
-import { getAdminBase } from "@/lib/admin-path";
-import { putFlash } from "@/lib/flash-store";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
+import { db } from "@/db";
+import { admins, categories, cards, paymentChannels, products } from "@/db/schema";
+import { normalizeOrigin } from "@/lib/http-url";
+import { encryptSecret } from "@/lib/secret-box";
+import { normalizeChannelKey } from "@/lib/order-no";
 import {
-  changeAdminCredentials,
-  currentSession,
-  login as doLogin,
-  lockedForSeconds,
-  recordFailure,
-  getSessionVersion,
-} from "@/server/auth";
-import { logAdmin } from "@/server/admin-log";
-import { clientIpFromHeaders, parseClientIp } from "@/server/security/client-ip";
+  assertCsrf,
+  audit,
+  clearSessionCookie,
+  createSessionCookie,
+  hashPassword,
+  loginAdmin,
+  requireAdminSession,
+  revokeAllSessions,
+  verifyPassword,
+} from "@/server/admin-auth";
 import {
-  clearAvailableCards,
-  createProduct,
-  releaseReservedCard,
-  deleteAvailableCards,
-  deleteProduct,
-  importCards,
-  setProductStatus,
-  updateProduct,
-} from "@/server/admin/catalog";
-import {
-  closeOrder,
+  adminCloseOrder,
   manualDeliver,
-  retryAutoDelivery,
   resolveReconcilingAsNotCreated,
-} from "@/server/order/fulfill-order";
-import { sendOrderEmail, sendTestEmail } from "@/server/mail";
+  resolveReconcilingAsPaid,
+  retryDelivery,
+} from "@/server/orders";
+import { sendTestEmail } from "@/server/mail";
 import {
-  getPaymentConfig,
-  getSetting,
-  isSafeHttpUrl,
-  setSetting,
-  upsertPaymentConfig,
+  bumpAdminSessionVersion,
   SETTING_KEYS,
+  setSetting,
 } from "@/server/settings";
-import {
-  reissueAnomaly,
-  acceptAnomalyForManualDelivery,
-  resolveAnomalyAs,
-} from "@/server/admin/anomalies";
-import {
-  clampBepusdtTimeout,
-  normalizeBepusdtApiBase,
-  normalizeBepusdtCurrencies,
-} from "@/server/payment/bepusdt";
-import { COPY_KEYS, setCopy } from "@/server/copy";
-import { SUPPORTED_CURRENCIES } from "@/lib/money";
-import { STOCK_UNLIMITED } from "@/lib/stock";
+import { SUPPORTED_CURRENCIES } from "@/server/settings";
 
-/** 后台 Server Actions：全部经 session 鉴权 + CSRF 校验 + 审计日志 + service 层落库 */
+/** 管理后台 Server Actions（统一 useActionState 内联反馈，POST 直返，无 GET 重定向） */
 
-/**
- * 解析商品表单的库存输入。
- * 表单留空提交的是空字符串（不是 null），而 Number("") === 0
- * 会被当成「售罄」——必须先判空，留空/非法一律返回 -1（不限）。
- */
-function parseStockLimitInput(raw: FormDataEntryValue | null): number {
-  const s = String(raw ?? "").trim();
-  if (s === "") return STOCK_UNLIMITED;
-  const n = Number(s);
-  if (!Number.isFinite(n)) return STOCK_UNLIMITED;
-  return Math.trunc(n) < 0 ? STOCK_UNLIMITED : Math.trunc(n);
-}
-
-async function requireSession() {
-  const jar = await cookies();
-  const session = await currentSession(jar.get(ADMIN_COOKIE)?.value);
-  // 必须走实际入口（admin_path 可自定义，硬编码 /admin 在伪装后会被中间件 404）
-  if (!session) redirect(`${await getAdminBase()}/login`);
-  return session;
-}
-
-async function clientIp(): Promise<string> {
-  // 统一走 client-ip 解析：取 XFF 最后一段（受信代理写入），
-  // 而非客户端可控的第一段，避免伪造 IP 绕过限流
-  return clientIpFromHeaders();
-}
-
-/** 跳回来源页（/admin/... 内部路径自动换算为当前伪装入口）；提示走一次性 Flash（URL 仅含随机 ID） */
-async function back(path: string, msg: string, ok: boolean, tab?: string): Promise<never> {
-  const base = await getAdminBase();
-  const rest = path.startsWith("/admin") ? path.slice("/admin".length) : path;
-  const id = putFlash(ok ? { ok: msg } : { err: msg });
-  // tab 用于设置页：保存后回到原选项卡，避免跳回第一个页签
-  const qs = new URLSearchParams({ flash: id });
-  if (tab) qs.set("tab", tab);
-  redirect(`${base}${rest}?${qs.toString()}`);
-}
-
-/* ===== 登录/登出 ===== */
-
-export async function loginAction(_prev: { error?: string } | null, formData: FormData) {
-  const username = String(formData.get("username") ?? "");
-  const password = String(formData.get("password") ?? "");
-  const h = await headers();
-  const ip = parseClientIp(h.get("x-forwarded-for"), h.get("x-real-ip"));
-
-  const locked = lockedForSeconds(ip, username);
-  if (locked > 0) {
-    return { error: `失败次数过多，请 ${Math.ceil(locked / 60)} 分钟后再试` };
-  }
-
-  const result = await doLogin(ip, username, password);
-  if (!result.ok || !result.token) {
-    recordFailure(ip, username);
-    return { error: result.message };
-  }
-  const jar = await cookies();
-  const secure = secureCookie(envConfig.isProd, h.get("x-forwarded-proto"));
-  jar.set(ADMIN_COOKIE, result.token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure,
-    path: "/",
-    maxAge: result.maxAge ?? SESSION_TTL_SECONDS,
-  });
-  logAdmin("login", username.trim(), "管理员登录", ip);
-  const next = String(formData.get("next") ?? "");
-  if (isSafeInternalPath(next)) redirect(next);
-  redirect(await getAdminBase());
-}
-
-/**
- * 仅允许站内相对路径，防开放重定向。
- * 注意不能只用 startsWith("/")：`//evil.com` 也是以 / 开头，
- * 但它是协议相对 URL，浏览器会跳转到站外（钓鱼常用手法）。
- */
-function isSafeInternalPath(p: string): boolean {
-  if (!p.startsWith("/")) return false;
-  if (p.startsWith("//")) return false; // 协议相对 URL
-  if (p.includes("\\")) return false; // 反斜杠可能被浏览器规范化成 //
-  if (/[\u0000-\u001f]/.test(p)) return false; // 控制字符
-  return true;
-}
-
-export async function logoutAction() {
-  await requireSession();
-  const jar = await cookies();
-  jar.delete(ADMIN_COOKIE);
-  redirect(`${await getAdminBase()}/login`);
-}
-
-/* ===== 商品管理 ===== */
-
-export async function saveProductAction(formData: FormData) {
-  await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const ip = await clientIp();
-  const input = {
-    name: String(formData.get("name") ?? ""),
-    slug: String(formData.get("slug") ?? ""),
-    description: String(formData.get("description") ?? ""),
-    imageUrl: String(formData.get("imageUrl") ?? ""),
-    priceCentsText: String(formData.get("price") ?? ""),
-    // 币种必须从表单读取，否则弹窗里选的币种不会保存（新建恒为站点默认）
-    currency: String(formData.get("currency") ?? ""),
-    deliveryType: String(formData.get("deliveryType") ?? "auto"),
-    // 留空 = 不限（-1）。注意表单留空提交的是空字符串 ""（不是 null），
-    // 而 Number("") === 0 会被误解为「售罄」，因此必须先判空再转数字。
-    stockLimit: parseStockLimitInput(formData.get("stockLimit")),
-    status: String(formData.get("status") ?? "on"),
-    sort: Number(formData.get("sort") ?? 0),
-  };
-  const id = Number(formData.get("id") ?? 0);
-  const result = id > 0 ? updateProduct(id, input) : createProduct(input);
-  logAdmin(id > 0 ? "product.update" : "product.create", String(id || input.name), result.message, ip);
-  revalidatePath("/admin/products");
-  revalidatePath("/");
-  await back("/admin/products", result.message, result.ok);
-}
-
-export async function toggleProductStatusAction(formData: FormData) {
-  await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const id = Number(formData.get("id") ?? 0);
-  const status = String(formData.get("status") ?? "on") === "off" ? "off" : "on";
-  setProductStatus(id, status);
-  logAdmin("product.status", String(id), `上下架 → ${status}`, await clientIp());
-  revalidatePath("/admin/products");
-  revalidatePath("/");
-}
-
-export async function deleteProductAction(formData: FormData) {
-  await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const id = Number(formData.get("id") ?? 0);
-  const result = deleteProduct(id);
-  logAdmin("product.delete", String(id), result.message, await clientIp());
-  revalidatePath("/admin/products");
-  await back("/admin/products", result.message, result.ok);
-}
-
-/* ===== 卡密管理 ===== */
-
-export async function importCardsAction(formData: FormData) {
-  await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const productId = Number(formData.get("productId") ?? 0);
-  const raw = String(formData.get("content") ?? "");
-  const result = importCards(productId, raw);
-  logAdmin("cards.import", String(productId), result.message, await clientIp());
-  revalidatePath("/admin/cards");
-  await back(`/admin/cards?product=${productId}`, result.message, result.imported > 0);
-}
-
-export async function deleteCardsAction(formData: FormData) {
-  await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const productId = Number(formData.get("productId") ?? 0);
-  const ids = formData.getAll("ids").map(Number).filter(Number.isInteger);
-  const n = deleteAvailableCards(productId, ids);
-  logAdmin("cards.delete", String(productId), `删除未使用卡密 ${n} 张`, await clientIp());
-  revalidatePath("/admin/cards");
-  await back(`/admin/cards?product=${productId}`, `已删除 ${n} 张未使用卡密`, true);
-}
-
-/** 释放占用卡密回可用池（仅孤儿/已终态属主） */
-export async function releaseCardAction(formData: FormData) {
-  await requireSession();
-  await assertCsrf(formData.get("csrf"));
-  const cardId = Number(formData.get("cardId") ?? 0);
-  const productId = Number(formData.get("productId") ?? 0);
-  const result = releaseReservedCard(cardId);
-  logAdmin("cards.release", String(cardId), result.message, await clientIp());
-  revalidatePath("/admin/cards");
-  await back(`/admin/cards?product=${productId}`, result.message, result.ok);
-}
-
-export async function clearCardsAction(formData: FormData) {
-  await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const productId = Number(formData.get("productId") ?? 0);
-  const n = clearAvailableCards(productId);
-  logAdmin("cards.clear", String(productId), `清空未使用卡密 ${n} 张`, await clientIp());
-  revalidatePath("/admin/cards");
-  await back(`/admin/cards?product=${productId}`, `已清空 ${n} 张未使用卡密`, true);
-}
-
-/* ===== 订单管理 ===== */
-
-export async function manualDeliverAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const orderNo = String(formData.get("orderNo") ?? "");
-  const content = String(formData.get("content") ?? "");
-  const result = manualDeliver(orderNo, content);
-  logAdmin("order.manual_deliver", orderNo, result.message, await clientIp(), session.u);
-  revalidatePath("/admin/orders");
-  await back("/admin/orders", await withMailNote(orderNo, result), result.ok);
-}
-
-export async function retryDeliveryAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const orderNo = String(formData.get("orderNo") ?? "");
-  const result = retryAutoDelivery(orderNo);
-  logAdmin("order.retry", orderNo, result.message, await clientIp(), session.u);
-  revalidatePath("/admin/orders");
-  await back("/admin/orders", await withMailNote(orderNo, result), result.ok);
-}
-
-export async function closeOrderAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const orderNo = String(formData.get("orderNo") ?? "");
-  const result = closeOrder(orderNo);
-  logAdmin("order.close", orderNo, result.message, await clientIp(), session.u);
-  revalidatePath("/admin/orders");
-  await back("/admin/orders", result.message, result.ok);
-}
-
-/**
- * 待对账订单：确认网关**未建单** → 关闭并释放库存。
- * 这是 reconciling 状态释放库存的唯一安全途径（需人工核对网关后台）。
- */
-export async function resolveReconcilingAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const orderNo = String(formData.get("orderNo") ?? "");
-  const result = resolveReconcilingAsNotCreated(orderNo);
-  logAdmin("order.reconcile", orderNo, result.message, await clientIp(), session.u);
-  revalidatePath("/admin/orders");
-  await back("/admin/orders", result.message, result.ok);
-}
-
-/* ===== 异常到账（超时后到账）处置 ===== */
-
-/** 补发商品：从卡池重新取卡交付（不恢复已被释放的那张卡） */
-export async function reissueAnomalyAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const id = Number(formData.get("id") ?? 0);
-  const note = String(formData.get("note") ?? "");
-  const result = reissueAnomaly(id, note);
-  logAdmin("anomaly.reissue", String(id), result.message, await clientIp(), session.u);
-  // 补发成功需通知买家（复用交付邮件；失败不阻断）
-  const orderNo = String(formData.get("orderNo") ?? "");
-  let message = result.message;
-  if (result.ok && orderNo) {
-    try {
-      const mail = await sendOrderEmail(orderNo, "delivered", true);
-      if (mail.ok) message += "；已发送交付邮件";
-    } catch {
-      /* 邮件失败不影响补发结果 */
-    }
-  }
-  revalidatePath("/admin/orders");
-  await back("/admin/orders?anomaly=open", message, result.ok);
-}
-
-/** 人工发货商品：核实到账后转入待人工发货 */
-export async function acceptAnomalyManualAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const id = Number(formData.get("id") ?? 0);
-  const note = String(formData.get("note") ?? "");
-  const result = acceptAnomalyForManualDelivery(id, note);
-  logAdmin("anomaly.manual", String(id), result.message, await clientIp(), session.u);
-  revalidatePath("/admin/orders");
-  await back("/admin/orders?anomaly=open", result.message, result.ok);
-}
-
-/** 标记为已退款 / 误报（仅记录，不执行资金操作） */
-export async function resolveAnomalyAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const id = Number(formData.get("id") ?? 0);
-  const kind = String(formData.get("kind") ?? "") === "refunded" ? "refunded" : "dismissed";
-  const note = String(formData.get("note") ?? "");
-  // 系统不会自动退款：标记为「已退款」时必须留下链上凭证，避免误以为已完成
-  if (kind === "refunded" && note.trim().length < 8) {
-    await back(
-      "/admin/orders?anomaly=open",
-      "标记已退款需填写退款交易哈希或凭证（至少 8 字符）",
-      false
-    );
-  }
-  const result = resolveAnomalyAs(id, kind, note);
-  logAdmin(`anomaly.${kind}`, String(id), result.message, await clientIp(), session.u);
-  revalidatePath("/admin/orders");
-  await back("/admin/orders?anomaly=open", result.message, result.ok);
-}
-
-/** 交付类操作成功后尝试发送邮件，结果附在提示信息里 */
-async function withMailNote(
-  orderNo: string,
-  result: { ok: boolean; message: string; emailKind?: "delivered" | "processing" }
-): Promise<string> {
-  if (!result.ok || !result.emailKind) return result.message;
-  try {
-    const mail = await sendOrderEmail(orderNo, result.emailKind);
-    if (mail.ok) return `${result.message}；已发送通知邮件`;
-    if (mail.skipped) return `${result.message}；（邮件未发送：${mail.error}）`;
-    return `${result.message}；（邮件发送失败：${mail.error}）`;
-  } catch (err) {
-    return `${result.message}；（邮件发送异常：${err instanceof Error ? err.message : String(err)}）`;
-  }
-}
-
-/** 补发交付邮件（已完成订单，强制重发） */
-export async function resendDeliveryEmailAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const orderNo = String(formData.get("orderNo") ?? "");
-  const mail = await sendOrderEmail(orderNo, "delivered", true);
-  logAdmin(
-    "order.mail_resend",
-    orderNo,
-    mail.ok ? "已补发交付邮件" : `补发失败：${mail.error ?? ""}`,
-    await clientIp(),
-    session.u
-  );
-  revalidatePath("/admin/orders");
-  await back("/admin/orders", mail.ok ? "交付邮件已补发" : `补发失败：${mail.error ?? "未知错误"}`, mail.ok);
-}
-
-/* ===== 设置 ===== */
-
-export async function saveSiteSettingsAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const siteName = String(formData.get("siteName") ?? "").trim().slice(0, 60);
-  const siteUrl = String(formData.get("siteUrl") ?? "").trim().slice(0, 200);
-  if (siteUrl && !normalizeHttpUrl(siteUrl)) {
-    await back("/admin/settings", "站点地址需为不含凭据的有效 http/https 地址", false, "site");
-  }
-  const threshold = Math.max(0, Math.trunc(Number(formData.get("threshold") ?? 5)) || 0);
-  const currency = String(formData.get("currency") ?? "").trim().toUpperCase();
-  if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
-    await back("/admin/settings", `不支持的币种: ${currency}`, false, "site");
-  }
-  // 开源仓库地址：会输出为页脚 <a href>，必须校验协议，
-  // 否则 javascript:/data: 之类会造成点击即执行的 XSS。
-  const repoUrl = String(formData.get("repoUrl") ?? "").trim();
-  if (repoUrl !== "" && !isSafeHttpUrl(repoUrl)) {
-    await back("/admin/settings", "开源仓库地址需为 http/https 开头的完整地址", false, "site");
-  }
-  // 联系客服地址同样会输出为 <a href>，必须校验协议
-  const supportUrl = String(formData.get("supportUrl") ?? "").trim();
-  if (supportUrl !== "" && !isSafeHttpUrl(supportUrl)) {
-    await back("/admin/settings", "联系客服地址需为 http/https 开头的完整地址", false, "site");
-  }
-
-  setSetting(SETTING_KEYS.siteName, siteName);
-  setSetting(SETTING_KEYS.siteUrl, siteUrl.replace(/\/+$/, ""));
-  setSetting(SETTING_KEYS.repoUrl, repoUrl);
-  setSetting(SETTING_KEYS.supportUrl, supportUrl);
-  setSetting(SETTING_KEYS.cardLowStockThreshold, String(threshold));
-  setSetting(SETTING_KEYS.currency, currency);
-  logAdmin("settings.site", "-", JSON.stringify({ siteName, siteUrl, threshold, currency }), await clientIp(), session.u);
-  revalidatePath("/admin/settings");
-  await back("/admin/settings", "站点设置已保存", true, "site");
-}
-
-/** 支付渠道统一保存的结果状态（useActionState 内联展示，不走 GET 重定向） */
-export interface PaymentChannelsSaveState {
+export interface AdminActionResult {
   ok: boolean;
   message: string;
 }
 
+async function withAdmin(
+  fn: (session: { username: string }) => Promise<AdminActionResult>
+): Promise<AdminActionResult> {
+  try {
+    const session = await requireAdminSession();
+    return await fn(session);
+  } catch (err) {
+    if (err instanceof Error && err.message === "UNAUTHORIZED") {
+      return { ok: false, message: "请先登录" };
+    }
+    throw err;
+  }
+}
+
+async function checkCsrf(formData: FormData): Promise<AdminActionResult | null> {
+  try {
+    await assertCsrf(formData.get("csrf"));
+    return null;
+  } catch {
+    return { ok: false, message: "会话已过期，请刷新页面后重试" };
+  }
+}
+
+function revalidateStorefront(): void {
+  revalidatePath("/", "layout");
+}
+
+/* ===== 登录 / 登出 ===== */
+
+export async function loginAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  const username = String(formData.get("username") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  if (!username || !password) return { ok: false, message: "请输入用户名与密码" };
+  const session = await loginAdmin(username, password);
+  if (!session) return { ok: false, message: "用户名或密码错误（连续失败将锁定 15 分钟）" };
+  await createSessionCookie(session.username);
+  await audit("admin.login", username, username);
+  return { ok: true, message: "登录成功" };
+}
+
+export async function logoutAction(): Promise<void> {
+  await clearSessionCookie();
+}
+
+/* ===== 分类 ===== */
+
+const categorySchema = z.object({
+  name: z.string().trim().min(1).max(50),
+  slug: z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9][a-z0-9-]{1,63}$/)
+    .optional(),
+  description: z.string().max(500).default(""),
+  sortOrder: z.coerce.number().int().min(0).max(9999).default(0),
+});
+
+export async function createCategoryAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const parsed = categorySchema.safeParse({
+      name: formData.get("name"),
+      slug: String(formData.get("slug") ?? "").trim() || undefined,
+      description: String(formData.get("description") ?? ""),
+      sortOrder: formData.get("sortOrder") ?? 0,
+    });
+    if (!parsed.success) return { ok: false, message: "分类名称必填，slug 需为小写字母数字短横线" };
+    const slug =
+      parsed.data.slug ??
+      (parsed.data.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 63) || `cat-${Date.now().toString(36)}`);
+    try {
+      await db.insert(categories).values({
+        slug,
+        name: parsed.data.name,
+        description: parsed.data.description,
+        sortOrder: parsed.data.sortOrder,
+      });
+    } catch {
+      return { ok: false, message: "分类创建失败（slug 可能已存在）" };
+    }
+    await audit("category.create", slug, session.username);
+    revalidateStorefront();
+    return { ok: true, message: "分类已创建" };
+  });
+}
+
+export async function deleteCategoryAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const id = Number(formData.get("id"));
+    if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
+    await db.delete(categories).where(eq(categories.id, id));
+    await audit("category.delete", String(id), session.username);
+    revalidateStorefront();
+    return { ok: true, message: "分类已删除（商品保留，分类置空）" };
+  });
+}
+
+/* ===== 商品 ===== */
+
+const productSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  slug: z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9][a-z0-9-]{1,127}$/),
+  description: z.string().max(20_000).default(""),
+  priceMinor: z.coerce.number().int().min(0).max(10_000_000_000),
+  deliveryType: z.enum(["auto", "manual"]),
+  stockLimit: z.coerce.number().int().min(0).max(1_000_000).nullable(),
+  status: z.enum(["on", "off"]),
+  imageUrl: z.string().trim().max(2000).optional(),
+  seoDescription: z.string().trim().max(300).optional(),
+  categoryId: z.coerce.number().int().positive().nullable(),
+});
+
+function parseProductForm(formData: FormData): z.infer<typeof productSchema> | null {
+  const stockRaw = String(formData.get("stockLimit") ?? "").trim();
+  const catRaw = String(formData.get("categoryId") ?? "").trim();
+  const imageRaw = String(formData.get("imageUrl") ?? "").trim();
+  return productSchema.safeParse({
+    name: formData.get("name"),
+    slug: String(formData.get("slug") ?? "").trim(),
+    description: String(formData.get("description") ?? ""),
+    priceMinor: formData.get("priceMinor"),
+    deliveryType: formData.get("deliveryType") === "manual" ? "manual" : "auto",
+    stockLimit: stockRaw === "" ? null : Number(stockRaw),
+    status: formData.get("status") === "off" ? "off" : "on",
+    imageUrl: imageRaw || undefined,
+    seoDescription: String(formData.get("seoDescription") ?? "").trim() || undefined,
+    categoryId: catRaw === "" ? null : Number(catRaw),
+  }).data ?? null;
+}
+
+export async function createProductAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const input = parseProductForm(formData);
+    if (!input) return { ok: false, message: "商品字段不合法（名称 / slug / 价格必填）" };
+    try {
+      await db.insert(products).values({
+        name: input.name,
+        slug: input.slug,
+        description: input.description,
+        priceCents: input.priceMinor,
+        deliveryType: input.deliveryType,
+        stockLimit: input.stockLimit,
+        status: input.status,
+        imageUrl: input.imageUrl ?? null,
+        seoDescription: input.seoDescription ?? null,
+        categoryId: input.categoryId,
+      });
+    } catch {
+      return { ok: false, message: "商品创建失败（slug 可能已存在）" };
+    }
+    await audit("product.create", input.slug, session.username);
+    revalidateStorefront();
+    return { ok: true, message: "商品已创建" };
+  });
+}
+
+export async function updateProductAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const id = Number(formData.get("id"));
+    if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
+    const input = parseProductForm(formData);
+    if (!input) return { ok: false, message: "商品字段不合法" };
+    await db
+      .update(products)
+      .set({
+        name: input.name,
+        slug: input.slug,
+        description: input.description,
+        priceCents: input.priceMinor,
+        deliveryType: input.deliveryType,
+        stockLimit: input.stockLimit,
+        status: input.status,
+        imageUrl: input.imageUrl ?? null,
+        seoDescription: input.seoDescription ?? null,
+        categoryId: input.categoryId,
+        updatedAt: new Date(),
+      })
+      .where(eq(products.id, id));
+    await audit("product.update", input.slug, session.username);
+    revalidateStorefront();
+    return { ok: true, message: "商品已保存" };
+  });
+}
+
+export async function deleteProductAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const id = Number(formData.get("id"));
+    if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
+    await db.delete(products).where(eq(products.id, id));
+    await audit("product.delete", String(id), session.username);
+    revalidateStorefront();
+    return { ok: true, message: "商品及卡密已删除" };
+  });
+}
+
+/* ===== 卡密 ===== */
+
+export async function importCardsAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const productId = Number(formData.get("productId"));
+    const raw = String(formData.get("content") ?? "");
+    const lines = raw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l !== "");
+    if (!Number.isInteger(productId) || lines.length === 0) {
+      return { ok: false, message: "请选择商品并粘贴卡密（每行一条）" };
+    }
+    if (lines.length > 10_000) return { ok: false, message: "单次最多导入 10000 条" };
+    try {
+      await db
+        .insert(cards)
+        .values(lines.map((content) => ({ productId, content })))
+        .onConflictDoNothing();
+    } catch {
+      return { ok: false, message: "导入失败" };
+    }
+    await audit("cards.import", `${productId} x${lines.length}`, session.username);
+    revalidateStorefront();
+    return { ok: true, message: `已导入 ${lines.length} 条（重复内容自动跳过）` };
+  });
+}
+
+export async function deleteCardAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const id = Number(formData.get("id"));
+    if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
+    await db.delete(cards).where(eq(cards.id, id));
+    await audit("cards.delete", String(id), session.username);
+    revalidateStorefront();
+    return { ok: true, message: "卡密已删除" };
+  });
+}
+
+/* ===== 订单操作 ===== */
+
+export async function closeOrderAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    return adminCloseOrder(String(formData.get("orderNo") ?? ""), session.username);
+  });
+}
+
+export async function resolveReconcilingAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const orderNo = String(formData.get("orderNo") ?? "");
+    const asPaid = String(formData.get("asPaid") ?? "") === "1";
+    return asPaid
+      ? resolveReconcilingAsPaid(orderNo, session.username)
+      : resolveReconcilingAsNotCreated(orderNo, session.username);
+  });
+}
+
+export async function retryDeliveryAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    return retryDelivery(String(formData.get("orderNo") ?? ""), session.username);
+  });
+}
+
+export async function manualDeliverAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    return manualDeliver(
+      String(formData.get("orderNo") ?? ""),
+      String(formData.get("content") ?? ""),
+      session.username
+    );
+  });
+}
+
+/* ===== 支付渠道（统一保存） ===== */
+
+function channelFields(formData: FormData, prefix: string) {
+  return {
+    enabled: String(formData.get(`${prefix}.enabled`) ?? "") === "on",
+    apiBase: String(formData.get(`${prefix}.apiBase`) ?? "").trim(),
+    token: String(formData.get(`${prefix}.token`) ?? "").trim(),
+    timeoutSeconds: Number(formData.get(`${prefix}.timeout`) ?? 600),
+    currencies: String(formData.get(`${prefix}.currencies`) ?? "").trim(),
+    displayName: String(formData.get(`${prefix}.displayName`) ?? "").trim().slice(0, 30),
+    sortOrder: Number(formData.get(`${prefix}.sortOrder`) ?? 0),
+    reselect: String(formData.get(`${prefix}.reselect`) ?? "") === "on",
+  };
+}
+
+function normalizeTimeout(n: number): number {
+  if (!Number.isFinite(n)) return 600;
+  return Math.min(Math.max(Math.trunc(n), 180), 3600);
+}
+
+export interface ChannelSaveState extends AdminActionResult {
+  detail?: Array<{ key: string; enabled: boolean }>;
+}
+
 /**
- * 统一保存支付渠道配置：bepusdt + litepay 一个表单、一次提交。
- *
- * 结果通过 useActionState 在当前 POST 响应内直接返回并渲染，
- * 不再 redirect?flash=…（旧模式经 GET 导航回传状态，刷新还会带上旧参数）。
- * 表单不回显令牌：留空 = 保持原值；__CLEAR__ = 清除。
+ * 统一保存全部支付渠道：一次提交、全部校验后落库；
+ * 结果经 useActionState 内联渲染（POST 直返，无 GET 重定向）。
  */
 export async function savePaymentChannelsAction(
-  _prev: PaymentChannelsSaveState | null,
+  _prev: ChannelSaveState | null,
   formData: FormData
-): Promise<PaymentChannelsSaveState> {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
+): Promise<ChannelSaveState> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
 
-  // 两个字段组先全部校验通过才落库，避免「bepusdt 保存成功、litepay 校验失败」的半提交状态
-  const updates: Array<{
-    provider: "bepusdt" | "litepay";
-    enabled: boolean;
-    configJson: Record<string, unknown>;
-  }> = [];
-  for (const provider of ["bepusdt", "litepay"] as const) {
-    const enabled = String(formData.get(`${provider}.enabled`) ?? "") === "on";
-    const apiBase = String(formData.get(`${provider}.apiBase`) ?? "").trim();
-    const safeApiBase = normalizeBepusdtApiBase(apiBase);
-    if (apiBase && !safeApiBase) {
-      return { ok: false, message: `${provider} 网关地址不合法或不在服务器允许范围内` };
+    const rows = await db.select().from(paymentChannels);
+    const detail: Array<{ key: string; enabled: boolean }> = [];
+    for (const row of rows) {
+      if (row.type === "mock") continue;
+      const f = channelFields(formData, row.key);
+      const apiOrigin = f.apiBase ? normalizeOrigin(f.apiBase) : null;
+      if (f.apiBase && !apiOrigin) {
+        return { ok: false, message: `${row.key} 网关地址不合法（仅接受 http/https 域名）` };
+      }
+      if (f.enabled && (!apiOrigin || !f.token)) {
+        return {
+          ok: false,
+          message: `启用 ${row.key} 前请填写网关地址与对接令牌（令牌留空表示沿用已保存值）`,
+        };
+      }
+      const existingToken = row.tokenEnc ? "set" : "";
+      const tokenEnc =
+        f.token === "__CLEAR__" ? null : f.token !== "" ? encryptSecret(f.token) : row.tokenEnc;
+      if (f.enabled && !tokenEnc && existingToken !== "set") {
+        return { ok: false, message: `启用 ${row.key} 前请填写对接令牌` };
+      }
+      await db
+        .update(paymentChannels)
+        .set({
+          enabled: f.enabled,
+          apiBase: apiOrigin,
+          tokenEnc,
+          timeoutSeconds: normalizeTimeout(f.timeoutSeconds),
+          currencies: f.currencies || null,
+          displayName: f.displayName || row.displayName,
+          sortOrder: Number.isFinite(f.sortOrder) && f.sortOrder >= 0 ? Math.trunc(Math.min(f.sortOrder, 999)) : 0,
+          reselect: f.reselect,
+          updatedAt: new Date(),
+        })
+        .where(eq(paymentChannels.id, row.id));
+      detail.push({ key: row.key, enabled: f.enabled });
+      await audit("channel.save", `${row.key} enabled=${f.enabled}`, session.username);
     }
-    const submittedToken = String(formData.get(`${provider}.token`) ?? "").trim();
-    const existingToken =
-      String((getPaymentConfig(provider)?.configJson?.["token"] as string | undefined) ?? "").trim();
-    const token =
-      submittedToken === "__CLEAR__" ? "" : submittedToken === "" ? existingToken : submittedToken;
+    revalidateStorefront();
+    return {
+      ok: true,
+      message: `支付渠道配置已保存（${detail.map((d) => `${d.key}=${d.enabled ? "启用" : "停用"}`).join("，")}）`,
+      detail,
+    };
+  });
+}
 
-    // 启用却缺少必填项会让该渠道下单全部失败（createPayment 抛错 → 买家看到
-    // 「支付渠道创建失败」），在保存时拦下。
+export async function createChannelAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const key = normalizeChannelKey(String(formData.get("key") ?? ""));
+    const displayName = String(formData.get("displayName") ?? "").trim().slice(0, 30);
+    if (!key || !displayName) return { ok: false, message: "渠道标识（2-32 位小写字母数字短横线）与名称必填" };
+    try {
+      await db.insert(paymentChannels).values({
+        key,
+        type: "epusdt",
+        displayName,
+        timeoutSeconds: 600,
+      });
+    } catch {
+      return { ok: false, message: "渠道创建失败（标识可能已存在）" };
+    }
+    await audit("channel.create", key, session.username);
+    revalidatePath("/admin/payments");
+    return { ok: true, message: "渠道已创建，请在下方填写网关地址与令牌" };
+  });
+}
+
+export async function deleteChannelAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const id = Number(formData.get("id"));
+    if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
+    await db.delete(paymentChannels).where(eq(paymentChannels.id, id));
+    await audit("channel.delete", String(id), session.username);
+    revalidatePath("/admin/payments");
+    return { ok: true, message: "渠道已删除" };
+  });
+}
+
+/* ===== 站点设置 ===== */
+
+export async function saveSiteSettingsAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const siteName = String(formData.get("siteName") ?? "").trim().slice(0, 50);
+    const siteUrl = String(formData.get("siteUrl") ?? "").trim();
+    const currency = String(formData.get("currency") ?? "USD").toUpperCase();
+    const supportUrl = String(formData.get("supportUrl") ?? "").trim();
+    const threshold = Number(formData.get("threshold") ?? 5);
+
+    if (siteName) await setSetting(SETTING_KEYS.siteName, siteName);
+    if (siteUrl && !/^https?:\/\//.test(siteUrl)) {
+      return { ok: false, message: "站点地址需以 http:// 或 https:// 开头" };
+    }
+    if (siteUrl) await setSetting(SETTING_KEYS.siteUrl, siteUrl.replace(/\/+$/, ""));
+    if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
+      return { ok: false, message: "币种不支持" };
+    }
+    await setSetting(SETTING_KEYS.currency, currency);
+    if (supportUrl) {
+      if (!/^https?:\/\//.test(supportUrl)) return { ok: false, message: "客服地址需为 http/https 链接" };
+      await setSetting(SETTING_KEYS.supportUrl, supportUrl);
+    } else {
+      await setSetting(SETTING_KEYS.supportUrl, "");
+    }
+    if (Number.isFinite(threshold) && threshold >= 0) {
+      await setSetting(SETTING_KEYS.cardLowStockThreshold, String(Math.trunc(threshold)));
+    }
+    await audit("settings.site", `currency=${currency}`, session.username);
+    revalidateStorefront();
+    return { ok: true, message: "站点设置已保存" };
+  });
+}
+
+/* ===== SMTP ===== */
+
+export async function saveSmtpAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const enabled = String(formData.get("smtpEnabled") ?? "") === "on";
+    const host = String(formData.get("smtpHost") ?? "").trim();
+    const port = Number(formData.get("smtpPort") ?? 465);
+    const from = String(formData.get("smtpFrom") ?? "").trim();
+    const user = String(formData.get("smtpUser") ?? "").trim();
+    const pass = String(formData.get("smtpPass") ?? "").trim();
     if (enabled) {
-      if (apiBase === "") return { ok: false, message: `启用 ${provider} 前请填写网关地址` };
-      if (token === "") return { ok: false, message: `启用 ${provider} 前请填写对接令牌` };
-      if (!/^https?:\/\/.+/i.test(apiBase)) {
-        return { ok: false, message: `${provider} 网关地址需以 http:// 或 https:// 开头` };
+      if (!host) return { ok: false, message: "启用邮件通知需填写 SMTP 服务器地址" };
+      if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, message: "端口非法" };
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) && !/^[^@\s]+<[^@\s]+>$/.test(from)) {
+        return { ok: false, message: "发件人格式无效" };
       }
     }
-
-    updates.push({
-      provider,
-      enabled,
-      configJson: {
-        api_base: safeApiBase ?? "",
-        token,
-        // 与网关收银台有效期对齐（pay.9527.tr 默认 600s；越界网关会静默回落）
-        timeout_seconds: clampBepusdtTimeout(Number(formData.get(`${provider}.timeout`) ?? 600)),
-        // 收银台币种限制（如 "USDT,USDC"）；空 = 不限制
-        currencies: normalizeBepusdtCurrencies(String(formData.get(`${provider}.currencies`) ?? "")) ?? "",
-        // 允许买家在收银台重选平台/币种（网关文档示例 true）
-        reselect: String(formData.get(`${provider}.reselect`) ?? "") === "on",
-        // 前台收银台选项的显示名称与优先级（留空用默认文案；数字越小越靠前）
-        display_name: checkoutDisplayName(formData, provider),
-        sort_order: checkoutSortOrder(formData, provider),
-      },
-    });
-  }
-
-  for (const u of updates) {
-    upsertPaymentConfig(u.provider, { enabled: u.enabled, configJson: u.configJson });
-    logAdmin("settings.payment", u.provider, `enabled=${u.enabled}`, await clientIp(), session.u);
-  }
-  revalidatePath("/admin/settings");
-  const detail = updates.map((u) => `${u.provider}=${u.enabled ? "启用" : "停用"}`).join("，");
-  return { ok: true, message: `支付渠道配置已保存（${detail}）` };
-}
-
-/* ===== SMTP 邮件 ===== */
-
-export async function saveSmtpSettingsAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const enabled = String(formData.get("smtpEnabled") ?? "") === "on";
-  const host = String(formData.get("smtpHost") ?? "").trim();
-  const portRaw = String(formData.get("smtpPort") ?? "").trim();
-  const port = Number(portRaw);
-  const from = String(formData.get("smtpFrom") ?? "").trim();
-
-  if (enabled) {
-    if (host === "") await back("/admin/settings", "启用邮件通知需填写 SMTP 服务器地址", false, "notify");
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      await back("/admin/settings", "SMTP 端口需为 1-65535 的整数", false, "notify");
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) && !/^[^@\s]+<[^@\s]+>$/.test(from)) {
-      await back("/admin/settings", "发件人格式无效（如 noreply@example.com 或 Site <noreply@example.com>）", false, "notify");
-    }
-  }
-
-  setSetting("smtp_enabled", enabled ? "1" : "0");
-  setSetting("smtp_host", host);
-  setSetting("smtp_port", portRaw === "" ? "465" : String(port));
-  setSetting("smtp_secure", String(formData.get("smtpSecure") ?? "") === "on" ? "1" : "0");
-  setSetting("smtp_user", String(formData.get("smtpUser") ?? "").trim());
-  // 留空 = 保持原密码。
-  // 表单不再回填明文密码（避免页面源码泄露），因此留空是"不修改"而非"清空"；
-  // 需要清除密码时提交特殊标记 __CLEAR__。
-  const smtpPassInput = String(formData.get("smtpPass") ?? "");
-  if (smtpPassInput === "__CLEAR__") {
-    setSetting("smtp_pass", "");
-  } else if (smtpPassInput !== "") {
-    setSetting("smtp_pass", smtpPassInput);
-  }
-  setSetting("smtp_from", from);
-  logAdmin("settings.smtp", "-", `enabled=${enabled}`, await clientIp(), session.u);
-  revalidatePath("/admin/settings");
-  await back("/admin/settings", "邮件通知设置已保存", true, "notify");
-}
-
-export async function sendTestEmailAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const to = String(formData.get("testTo") ?? "").trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-    await back("/admin/settings", "请输入有效的测试收件邮箱", false, "notify");
-  }
-  const result = await sendTestEmail(to);
-  logAdmin("settings.smtp_test", to, result.ok ? "测试邮件已发送" : `失败：${result.error ?? ""}`, await clientIp(), session.u);
-  await back("/admin/settings", result.ok ? `测试邮件已发送至 ${to}` : `发送失败：${result.error ?? "未知错误"}`, result.ok, "notify");
-}
-
-/** 前台收银台选项的自定义显示名称（可空；限长防止撑爆选项样式） */
-function checkoutDisplayName(formData: FormData, provider: string): string {
-  return String(formData.get(`${provider}.displayName`) ?? "").trim().slice(0, 30);
-}
-
-/** 前台收银台选项的优先级（0–999，越小越靠前；非法值回落 0） */
-function checkoutSortOrder(formData: FormData, provider: string): number {
-  const n = Number(formData.get(`${provider}.sortOrder`) ?? 0);
-  return Number.isFinite(n) && n >= 0 ? Math.trunc(Math.min(n, 999)) : 0;
-}
-
-/* ===== 人机验证（Cloudflare Turnstile）===== */
-
-export async function saveTurnstileSettingsAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const enabled = String(formData.get("turnstileEnabled") ?? "") === "on";
-  const siteKey = String(formData.get("turnstileSiteKey") ?? "").trim();
-  const submitted = String(formData.get("turnstileSecretKey") ?? "").trim();
-
-  // 表单不再回显 Secret Key，因此「留空 = 保持原值」而非清空。
-  // 需要清除时提交 __CLEAR__。（历史缺陷：回显会让密钥出现在页面源码中）
-  const existing = getSetting("turnstile_secret_key")?.trim() ?? "";
-  const secretKey = submitted === "__CLEAR__" ? "" : submitted === "" ? existing : submitted;
-
-  if (enabled && (siteKey === "" || secretKey === "")) {
-    await back("/admin/settings", "启用 Turnstile 需填写 Site Key 与 Secret Key", false, "security");
-  }
-  const fallback = String(formData.get("turnstileFallback") ?? "") === "on";
-  setSetting("turnstile_enabled", enabled ? "1" : "0");
-  setSetting("turnstile_site_key", siteKey);
-  setSetting("turnstile_secret_key", secretKey);
-  setSetting("turnstile_fallback_enabled", fallback ? "1" : "0");
-  logAdmin("settings.turnstile", "-", `enabled=${enabled} fallback=${fallback}`, await clientIp(), session.u);
-  revalidatePath("/admin/settings");
-  revalidatePath("/");
-  await back("/admin/settings", "人机验证设置已保存", true, "security");
-}
-
-/* ===== 前台文案 ===== */
-
-export async function saveCopySettingsAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  let changed = 0;
-  for (const key of COPY_KEYS) {
-    const raw = formData.get(`copy_${key}`);
-    if (raw == null) continue;
-    const value = String(raw).slice(0, 2000);
-    setCopy(key, value);
-    changed += 1;
-  }
-  logAdmin("settings.copy", "-", `${changed} 条文案已更新`, await clientIp(), session.u);
-  revalidatePath("/admin/settings");
-  revalidatePath("/");
-  revalidatePath("/orders");
-  await back("/admin/settings", `前台文案已保存（${changed} 条）`, true, "copy");
-}
-
-/* ===== 管理员凭据 / 入口路径 ===== */
-
-export async function changeAdminCredentialsAction(formData: FormData) {
-  const session = await requireSession();
-  await assertCsrf(formData.get("csrf"), getSessionVersion(), await headers());
-  const currentPassword = String(formData.get("currentPassword") ?? "");
-  const newUsername = String(formData.get("newUsername") ?? "");
-  const newPassword = String(formData.get("newPassword") ?? "");
-  const confirmPassword = String(formData.get("confirmPassword") ?? "");
-  const newPath = String(formData.get("newPath") ?? "");
-
-  if (newPassword !== "" && newPassword !== confirmPassword) {
-    await back("/admin/settings", "两次输入的新密码不一致", false, "security");
-  }
-
-  const result = changeAdminCredentials({
-    currentPassword,
-    newUsername,
-    newPassword,
-    newPath,
+    await setSetting(SETTING_KEYS.smtpEnabled, enabled ? "1" : "0");
+    await setSetting(SETTING_KEYS.smtpHost, host);
+    await setSetting(SETTING_KEYS.smtpPort, String(port));
+    await setSetting(SETTING_KEYS.smtpSecure, String(formData.get("smtpSecure") ?? "") === "on" ? "1" : "0");
+    await setSetting(SETTING_KEYS.smtpUser, user);
+    // 留空 = 保持原密码；__CLEAR__ = 清除
+    if (pass === "__CLEAR__") await setSetting(SETTING_KEYS.smtpPass, "");
+    else if (pass !== "") await setSetting(SETTING_KEYS.smtpPass, pass);
+    await setSetting(SETTING_KEYS.smtpFrom, from);
+    await audit("settings.smtp", `enabled=${enabled}`, session.username);
+    return { ok: true, message: "邮件设置已保存" };
   });
-  logAdmin("admin.credentials", newUsername || "-", result.message, await clientIp(), session.u);
-  revalidatePath("/admin/settings");
-  if (result.ok) {
-    // 全部会话已失效 → 回登录页；若改了入口路径，必须用新路径（旧路径此刻已 404）
-    const base =
-      newPath.trim() !== "" ? `/${newPath.trim().toLowerCase()}` : await getAdminBase();
-    redirect(`${base}/login?flash=${putFlash({ ok: result.message })}`);
-  }
-  await back("/admin/settings", result.message, result.ok, "security");
+}
+
+export async function sendTestEmailAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const to = String(formData.get("testTo") ?? "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return { ok: false, message: "请输入有效的测试收件邮箱" };
+    const result = await sendTestEmail(to);
+    await audit("settings.smtp_test", to, session.username);
+    return result.ok
+      ? { ok: true, message: `测试邮件已发送至 ${to}` }
+      : { ok: false, message: `发送失败：${result.error ?? "未知错误"}` };
+  });
+}
+
+/* ===== 管理员凭据 ===== */
+
+export async function changeCredentialsAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const currentPassword = String(formData.get("currentPassword") ?? "");
+    const newUsername = String(formData.get("newUsername") ?? "").trim();
+    const newPassword = String(formData.get("newPassword") ?? "");
+    if (!currentPassword) return { ok: false, message: "请输入当前密码" };
+    if (!newPassword && !newUsername) return { ok: false, message: "没有需要修改的内容" };
+    if (newPassword && newPassword.length < 8) return { ok: false, message: "新密码至少 8 位" };
+
+    const rows = await db.select().from(admins).where(eq(admins.username, session.username)).limit(1);
+    const admin = rows[0];
+    if (!admin || !verifyPassword(currentPassword, admin.passwordHash)) {
+      return { ok: false, message: "当前密码不正确" };
+    }
+    await db
+      .update(admins)
+      .set({
+        username: newUsername || admin.username,
+        passwordHash: newPassword ? hashPassword(newPassword) : admin.passwordHash,
+        updatedAt: new Date(),
+      })
+      .where(eq(admins.id, admin.id));
+    await revokeAllSessions();
+    await bumpAdminSessionVersion();
+    await clearSessionCookie();
+    await audit("admin.credentials", newUsername || admin.username, admin.username);
+    return { ok: true, message: "凭据已更新，请重新登录" };
+  });
 }

@@ -1,110 +1,77 @@
 import Link from "next/link";
-import { listShopProducts } from "@/server/shop";
-import { getCopyAll } from "@/server/copy";
-import { Reveal } from "@/components/reveal";
-import { Badge } from "@/components/ui/badge";
-import { CaretRightIcon, TicketIcon } from "@phosphor-icons/react/ssr";
+import type { Metadata } from "next";
+import { formatMoney } from "@/lib/money";
+import { getSiteCurrency } from "@/server/settings";
+import { listStoreProducts } from "@/server/catalog";
+import { Badge } from "@/components/ui/input";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
-export default async function ShopHomePage() {
-  const products = listShopProducts();
-  const copy = getCopyAll();
+export const metadata: Metadata = {
+  title: "挑选商品",
+  description: "数字卡密商品列表：下单支付后自动发货，卡密秒到。",
+  alternates: { canonical: "/" },
+};
+
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; category?: string }>;
+}) {
+  const { q, category } = await searchParams;
+  const [items, currency] = await Promise.all([listStoreProducts({ q, categorySlug: category }), getSiteCurrency()]);
 
   return (
-    <main className="mx-auto max-w-5xl px-4">
-      {/* Hero：编辑式排版，背景用暖色低透明径向光斑增加层次（taste-skill §6） */}
-      <section
-        className="relative py-24 sm:py-32"
-        style={{
-          backgroundImage:
-            "radial-gradient(600px 240px at 20% 0%, rgba(180,160,120,0.05), transparent)",
-        }}
-      >
-        <Reveal>
-          <p className="mb-4 inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-xs tracking-[0.05em] text-muted-foreground uppercase">
-            {copy.hero_badge}
-          </p>
-          <h1 className="max-w-2xl font-serif text-4xl leading-[1.1] tracking-tight whitespace-pre-line sm:text-5xl">
-            {copy.hero_title}
-          </h1>
-          <p className="mt-4 max-w-xl whitespace-pre-line text-[15px] leading-relaxed text-muted-foreground">
-            {copy.hero_desc}
-          </p>
-        </Reveal>
+    <div className="space-y-8">
+      <section className="text-center">
+        <h1 className="font-serif text-3xl font-semibold tracking-tight">挑选商品，卡密秒到。</h1>
+        <p className="mt-2 text-sm text-muted">下单支付后自动发货；凭订单号 + 查单密码随时查看卡密。</p>
       </section>
 
-      {/* 商品网格 */}
-      <section className="pb-24">
-        {products.length === 0 ? (
-          <Reveal className="rounded-xl border border-border bg-card p-16 text-center">
-            <p className="font-serif text-xl">{copy.shop_empty_title}</p>
-            <p className="mt-2 text-sm text-muted-foreground">{copy.shop_empty_desc}</p>
-          </Reveal>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {products.map((p, i) => (
-              <Reveal key={p.id} delay={i}>
-                <Link
-                  href={`/products/${p.slug}`}
-                  className="card-hover group flex h-full flex-col rounded-xl border border-border bg-card p-6 transition-transform"
-                >
-                  {p.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={p.imageUrl}
-                      alt={p.name}
-                      className="mb-4 aspect-[2/1] w-full rounded-lg border border-border object-cover"
-                    />
-                  ) : null}
-                  <div className="flex items-start justify-between gap-3">
-                    <h2 className="font-medium leading-snug">{p.name}</h2>
-                    <Badge
-                      className={
-                        p.deliveryType === "auto"
-                          ? "bg-pastel-green-bg text-pastel-green-text"
-                          : "bg-pastel-blue-bg text-pastel-blue-text"
-                      }
-                    >
-                      {p.deliveryType === "auto" ? "自动发卡" : "人工发货"}
-                    </Badge>
+      <form action="/" className="flex gap-2">
+        <input
+          name="q"
+          defaultValue={q ?? ""}
+          placeholder="搜索商品…"
+          aria-label="搜索商品"
+          className="h-10 flex-1 rounded-lg border border-line bg-surface px-3 text-sm"
+        />
+        <button
+          type="submit"
+          className="h-10 rounded-lg bg-accent px-4 text-sm font-medium text-accent-fg hover:opacity-90"
+        >
+          搜索
+        </button>
+      </form>
+
+      {items.length === 0 ? (
+        <p className="py-16 text-center text-sm text-muted">没有匹配的商品</p>
+      ) : (
+        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((p) => (
+            <li key={p.slug}>
+              <Link
+                href={`/products/${p.slug}`}
+                className="group flex h-full flex-col justify-between rounded-xl border border-line bg-surface p-5 transition-shadow hover:shadow-md"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <h2 className="font-serif text-base font-semibold">{p.name}</h2>
+                    <Badge>{p.deliveryType === "auto" ? "自动发卡" : "人工发货"}</Badge>
                   </div>
-                  {p.description ? (
-                    <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
-                      {p.description}
-                    </p>
-                  ) : null}
-                  <div className="mt-auto flex items-center justify-between pt-6">
-                    <span className="font-mono text-lg">{p.priceFormatted}</span>
-                    <span
-                      className={`inline-flex items-center gap-1 text-sm transition-colors ${
-                        p.onSale
-                          ? "text-foreground group-hover:text-foreground"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      {p.onSale ? (
-                        p.stock != null && p.stock <= 5 ? (
-                          `余 ${p.stock}`
-                        ) : (
-                          "立即购买"
-                        )
-                      ) : (
-                        "暂时售罄"
-                      )}
-                      {p.onSale ? (
-                        <CaretRightIcon className="size-3.5 transition-transform group-hover:translate-x-0.5" weight="bold" />
-                      ) : (
-                        <TicketIcon className="size-3.5" weight="bold" />
-                      )}
-                    </span>
-                  </div>
-                </Link>
-              </Reveal>
-            ))}
-          </div>
-        )}
-      </section>
-    </main>
+                  <p className="line-clamp-2 text-sm text-muted">{p.description}</p>
+                </div>
+                <div className="mt-4 flex items-center justify-between">
+                  <span className="font-semibold">{formatMoney(p.priceCents, currency)}</span>
+                  <span className={`text-xs ${p.inStock ? "text-muted" : "text-danger"}`}>
+                    {p.stockDisplay === null ? "可购买" : p.inStock ? `余 ${p.stockDisplay}` : "缺货"}
+                  </span>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

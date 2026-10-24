@@ -1,49 +1,20 @@
-/**
- * 订单号生成（PLAN §3）：LS + YYYYMMDD + 8 位随机(base32) + 2 位校验和
- * 非自增、不暴露销量；唯一性由 orders.order_no 唯一索引兜底，服务层冲突重试。
- */
-
-import { randomInt } from "node:crypto";
-
-const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; // 去除易混淆字符的 base32
+import { randomBytes } from "node:crypto";
 
 /**
- * 生成随机段。
- *
- * 默认使用 CSPRNG（crypto.randomInt）而非 Math.random：
- * 订单号是「查单 + 取货」的凭据之一（配合邮箱双因子），
- * Math.random 的输出可被观测后预测，理论上允许枚举他人订单。
- * 仍保留 rand 注入点以便测试确定性。
+ * 订单号：LS + yyyymmddHHMMSS + 6 位随机（大写）。
+ * 冲突概率极低；数据库 order_no 唯一索引兜底，冲突由调用方重试。
  */
-function randomChars(n: number, rand?: () => number): string {
-  let out = "";
-  for (let i = 0; i < n; i++) {
-    out += ALPHABET[rand ? Math.floor(rand() * ALPHABET.length) : randomInt(ALPHABET.length)];
-  }
-  return out;
+export function generateOrderNo(now = new Date()): string {
+  const ts = now
+    .toISOString()
+    .replace(/[-:TZ.]/g, "")
+    .slice(0, 14);
+  const rand = randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
+  return `LS${ts}${rand}`;
 }
 
-/** 校验和：djb2 变体，映射到 2 个字母表字符 */
-function checksum(body: string): string {
-  let h = 5381;
-  for (let i = 0; i < body.length; i++) {
-    h = ((h << 5) + h + body.charCodeAt(i)) >>> 0;
-  }
-  const a = ALPHABET[h % ALPHABET.length];
-  const b = ALPHABET[Math.floor(h / ALPHABET.length) % ALPHABET.length];
-  return a + b;
-}
-
-export function generateOrderNo(now: Date = new Date(), rand?: () => number): string {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const body = `LS${y}${m}${d}${randomChars(8, rand)}`;
-  return body + checksum(body);
-}
-
-export function isValidOrderNo(orderNo: string): boolean {
-  if (!/^LS\d{8}[2-9A-HJKMNP-Z]{8}[2-9A-HJKMNP-Z]{2}$/.test(orderNo)) return false;
-  const body = orderNo.slice(0, -2);
-  return checksum(body) === orderNo.slice(-2);
+/** 渠道 key（webhook 路由用）：小写字母数字与短横线 */
+export function normalizeChannelKey(raw: string): string | null {
+  const k = raw.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9-]{1,31}$/.test(k) ? k : null;
 }

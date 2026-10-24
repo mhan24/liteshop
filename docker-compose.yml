@@ -1,29 +1,106 @@
 services:
-  liteshop:
-    build: .
+  app:
+    build:
+      context: .
+      args:
+        SITE_URL: ${SITE_URL:-http://localhost:3000}
+    image: liteshop:latest
     restart: unless-stopped
-    ports:
-      # 仅本机回环调试；对外统一走 Caddy（80/443），避免绕过 TLS
-      - "127.0.0.1:${PORT:-3000}:3000"
     env_file: .env
     environment:
-      DATA_DIR: /app/data
-    volumes:
-      - liteshop-data:/app/data
+      DATABASE_URL: postgres://liteshop:${POSTGRES_PASSWORD:-liteshop}@db:5432/liteshop
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
-      start_period: 15s
       retries: 3
-    # 注意：SQLite 单写者，禁止水平扩容（deploy.replicas / scale 必须为 1）
+      start_period: 20s
+    networks:
+      - internal
+      - edge
 
-networks:
-  edge:
-    name: liteshop_edge
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: liteshop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-liteshop}
+      POSTGRES_DB: liteshop
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # 仅内网：不映射端口，数据库无法从宿主机/公网直接访问
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U liteshop -d liteshop"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  backup:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-liteshop}
+    volumes:
+      - ./backups:/backups
+    entrypoint: >
+      sh -c 'while true; do
+        ts=$$(date +%Y%m%d-%H%M%S);
+        pg_dump -h db -U liteshop -d liteshop -F c -f /backups/liteshop-$$ts.dump && echo "[backup] $$ts ok";
+        ls -1t /backups/liteshop-*.dump 2>/dev/null | tail -n +15 | xargs -r rm -f;
+        sleep 86400;
+      done'
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  cron:
+    image: curlimages/curl:latest
+    restart: unless-stopped
+    env_file: .env
+    entrypoint: >
+      sh -c 'while true; do
+        curl -fsS -X POST "http://app:3000/api/cron/maintenance?key=$${CRON_SECRET}" || echo "[cron] maintenance failed";
+        sleep 60;
+      done'
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-shop.example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - edge
 
 volumes:
-  liteshop-data:
+  pgdata:
+  caddy_data:
+  caddy_config:
 
-# litepay（交易所收款网关）接入同一边缘网络：
-# 其自有 compose（/opt/litepay/docker-compose.yml）声明 external network "liteshop_edge"
+networks:
+  internal:
+    internal: true
+  edge:

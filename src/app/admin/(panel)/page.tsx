@@ -1,148 +1,60 @@
-import Link from "next/link";
-import { getDashboardStats } from "@/server/admin/catalog";
-import { getAdminBase } from "@/lib/admin-path";
-import { takeFlash } from "@/lib/flash-store";
-import { getSetting, SETTING_KEYS } from "@/server/settings";
+import { count, sql } from "drizzle-orm";
+import { db } from "@/db";
+import { orders } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
-import { Flash } from "@/components/admin/flash";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "仪表盘" };
 
-export default async function AdminDashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ flash?: string }>;
-}) {
-  const { flash: flashId } = await searchParams;
-  const flash = takeFlash(flashId);
-  const threshold = Number(getSetting(SETTING_KEYS.cardLowStockThreshold) ?? "5") || 5;
-  const stats = getDashboardStats(threshold);
-  const base = await getAdminBase();
+export default async function AdminDashboard() {
+  const [recent, statusCounts] = await Promise.all([
+    db.select().from(orders).orderBy(sql`created_at desc`).limit(15),
+    db.select({ status: orders.status, c: count() }).from(orders).groupBy(orders.status),
+  ]);
+  const counts = Object.fromEntries(statusCounts.map((r) => [r.status, Number(r.c)]));
+  const total = statusCounts.reduce((acc, r) => acc + Number(r.c), 0);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl tracking-tight">仪表盘</h1>
-        <p className="mt-1 text-sm text-muted-foreground">经营概览与预警</p>
+      <h1 className="font-serif text-xl font-semibold">概览</h1>
+      <div className="grid gap-4 sm:grid-cols-4">
+        <StatCard label="订单总数" value={String(total)} />
+        <StatCard label="待支付" value={String(counts["pending"] ?? 0)} />
+        <StatCard label="待交付" value={String(counts["paid"] ?? 0)} />
+        <StatCard label="待核实" value={String(counts["reconciling"] ?? 0)} />
       </div>
 
-      <Flash ok={flash?.ok} err={flash?.err} />
-
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard title="今日订单" value={String(stats.todayOrders)} />
-        <StatCard title="今日销售额" value={formatRevenue(stats.todayRevenue)} />
-        <StatCard title="累计订单" value={String(stats.totalOrders)} />
-        <StatCard title="累计销售额" value={formatRevenue(stats.totalRevenue)} />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-border bg-card">
-          <CardHeader>
-            <CardTitle className="text-base">待处理</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {stats.anomalies > 0 ? (
-              <Row
-                label="⚠ 异常到账待处理（超时后到账）"
-                value={stats.anomalies}
-                href={`${base}/orders?anomaly=open`}
-              />
-            ) : null}
-            {stats.reconciling > 0 ? (
-              <Row
-                label="⚠ 待对账（结果未知，需核对网关）"
-                value={stats.reconciling}
-                href={`${base}/orders?status=reconciling`}
-              />
-            ) : null}
-            <Row
-              label="待人工发货（已支付）"
-              value={stats.pendingManual}
-              href={`${base}/orders?status=paid`}
-            />
-            <Row
-              label="自动发货中（卡池不足）"
-              value={stats.delivering}
-              href={`${base}/orders?status=delivering`}
-            />
-            {stats.pendingManual + stats.delivering === 0 ? (
-              <p className="text-muted-foreground">暂无待处理订单</p>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        <Card className="border-border bg-card">
-          <CardHeader>
-            <CardTitle className="text-base">卡密余量预警</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {stats.lowStockProducts.length === 0 ? (
-              <p className="text-muted-foreground">各商品余量充足</p>
-            ) : (
-              stats.lowStockProducts.map((p) => (
-                <Link
-                  key={p.id}
-                  href={`${base}/cards?product=${p.id}`}
-                  className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-accent"
-                >
-                  <span className="truncate">{p.name}</span>
-                  <span
-                    className={
-                      p.availableCards === 0
-                        ? "font-mono text-pastel-red-text"
-                        : "font-mono text-pastel-yellow-text"
-                    }
-                  >
-                    余 {p.availableCards}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold">最近订单</h2>
+        <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
+          {recent.length === 0 ? (
+            <li className="p-4 text-sm text-muted">暂无订单</li>
+          ) : (
+            recent.map((o) => (
+              <li key={o.id} className="flex items-center justify-between gap-4 p-3 text-sm">
+                <div className="min-w-0">
+                  <p className="font-mono text-xs">{o.orderNo}</p>
+                  <p className="truncate text-xs text-muted">{o.email}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span>{formatMoney(o.totalCents, o.currency)}</span>
+                  <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">
+                    {o.status}
                   </span>
-                </Link>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                </div>
+              </li>
+            ))
+          )}
+        </ul>
+      </section>
     </div>
   );
 }
 
-function StatCard({ title, value }: { title: string; value: string }) {
+function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <Card className="border-border bg-card">
-      <CardContent className="p-5">
-        <p className="text-xs tracking-[0.05em] text-muted-foreground uppercase">{title}</p>
-        <p className="mt-2 font-mono text-xl">{value}</p>
-      </CardContent>
-    </Card>
+    <div className="rounded-xl border border-line bg-surface p-4">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="mt-1 font-serif text-2xl font-semibold">{value}</p>
+    </div>
   );
-}
-
-function Row({ label, value, href }: { label: string; value: number; href: string }) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-accent"
-    >
-      <span>{label}</span>
-      <span className={value > 0 ? "font-mono text-pastel-blue-text" : "font-mono text-muted-foreground"}>
-        {value}
-      </span>
-    </Link>
-  );
-}
-
-/**
- * 按币种展示营收：多币种时逐行列出，绝不跨币种相加。
- * 单币种时与原展示一致（不引入额外视觉噪音）。
- */
-function formatRevenue(rows: { currency: string; amount: number }[]): string {
-  const nonEmpty = rows.filter((r) => r.amount !== 0 || r.currency);
-  if (nonEmpty.length === 0) return "—";
-  if (nonEmpty.length === 1) {
-    return formatMoney(BigInt(nonEmpty[0].amount), nonEmpty[0].currency);
-  }
-  return nonEmpty
-    .map((r) => formatMoney(BigInt(r.amount), r.currency))
-    .join("  ");
 }

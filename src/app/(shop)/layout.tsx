@@ -1,66 +1,48 @@
+import { CartProvider } from "@/components/shop/cart";
+import { getSiteCurrency, getSiteName, getSupportUrl } from "@/server/settings";
 import Link from "next/link";
-import type { Metadata } from "next";
-import { getRepoUrl, getSiteName, getSupportUrl } from "@/server/settings";
-import { getCopy } from "@/server/copy";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { SupportLink } from "@/components/shop/support-link";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const siteName = await Promise.resolve(getSiteName());
-  return {
-    title: { default: siteName, template: `%s · ${siteName}` },
-    description: "数字商品在线购买，支付后自动发货",
-  };
-}
-
-export default function ShopLayout({ children }: { children: React.ReactNode }) {
-  const siteName = getSiteName();
-  const footerPowered = getCopy("footer_powered");
-  const repoUrl = getRepoUrl();
-  const supportUrl = getSupportUrl();
-  const supportLabel = getCopy("support_label");
+export default async function ShopLayout({ children }: { children: React.ReactNode }) {
+  const [siteName, supportUrl, currency] = await Promise.all([
+    getSiteName(),
+    getSupportUrl(),
+    getSiteCurrency(),
+  ]);
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-background">
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
-          <Link href="/" className="font-serif text-xl tracking-tight">
-            {siteName}
-          </Link>
-          <nav className="flex items-center gap-5 text-sm text-muted-foreground">
-            <Link href="/" className="transition-colors hover:text-foreground">
-              商品
+    <CartProvider currency={currency}>
+      <div className="flex min-h-screen flex-col">
+        <header className="border-b border-line bg-surface">
+          <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3">
+            <Link href="/" className="font-serif text-lg font-semibold tracking-tight">
+              {siteName}
             </Link>
-            <Link href="/orders" className="transition-colors hover:text-foreground">
-              订单查询
-            </Link>
-            <ThemeToggle />
-          </nav>
-        </div>
-      </header>
-
-      <div className="flex-1">{children}</div>
-
-      <footer className="border-t border-border">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 text-xs text-muted-foreground">
-          <span>{siteName}</span>
-          <span className="flex items-center gap-4">
-            <SupportLink url={supportUrl} label={supportLabel} />
-            {repoUrl ? (
-              // 新窗口打开仓库；rel="noreferrer" 防止把本站地址带给对方
-              <a
-                href={repoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-mono transition-colors hover:text-foreground hover:underline underline-offset-4"
-              >
-                {footerPowered}
+            <nav className="flex items-center gap-4 text-sm text-muted">
+              <Link href="/" className="hover:text-fg">
+                商品
+              </Link>
+              <Link href="/cart" className="hover:text-fg">
+                购物车
+              </Link>
+              <Link href="/orders/query" className="hover:text-fg">
+                订单查询
+              </Link>
+            </nav>
+          </div>
+        </header>
+        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">{children}</main>
+        <footer className="border-t border-line bg-surface">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs text-muted">
+            <span>
+              © {new Date().getFullYear()} {siteName} · 数字商品，支付后自动发货
+            </span>
+            {supportUrl ? (
+              <a href={supportUrl} target="_blank" rel="noopener noreferrer" className="hover:text-fg">
+                联系客服
               </a>
-            ) : (
-              <span className="font-mono">{footerPowered}</span>
-            )}
-          </span>
-        </div>
-      </footer>
-    </div>
+            ) : null}
+          </div>
+        </footer>
+      </div>
+    </CartProvider>
   );
 }

@@ -1,37 +1,14 @@
-import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
-import { currentSession } from "@/server/auth";
-import { getAdminBase } from "@/lib/admin-path";
-import { takeFlash } from "@/lib/flash-store";
+import type { Metadata } from "next";
+import { env } from "@/lib/env";
 import { LoginForm } from "@/components/admin/login-form";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-export const dynamic = "force-dynamic";
-export const metadata = { title: "管理员登录" };
+export const metadata: Metadata = { title: "管理登录", robots: { index: false, follow: false } };
 
-export default async function AdminLoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string; flash?: string }>;
-}) {
-  const jar = await cookies();
-  if (await currentSession(jar.get("liteshop_admin")?.value)) {
-    redirect(await getAdminBase());
-  }
-  const { next, flash: flashId } = await searchParams;
-  const msg = takeFlash(flashId)?.ok;
-
+export default function AdminLoginPage() {
   return (
-    <main className="min-h-[100dvh] flex items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-sm border-border bg-card">
-        <CardHeader className="text-center">
-          <CardTitle className="font-serif text-3xl tracking-tight">liteshop</CardTitle>
-          <p className="text-sm text-muted-foreground">管理后台登录</p>
-        </CardHeader>
-        <CardContent>
-          <LoginForm next={next} initialMsg={msg} />
-        </CardContent>
-      </Card>
-    </main>
+    <div className="mx-auto max-w-sm space-y-6 py-16">
+      <h1 className="text-center font-serif text-2xl font-semibold tracking-tight">管理登录</h1>
+      <LoginForm adminPath={env.ADMIN_PATH.replace(/\/+$/, "")} />
+    </div>
   );
 }
