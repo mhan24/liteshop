@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DEPLOY_ENV_FILE=".deploy.env"
-[ -f "$DEPLOY_ENV_FILE" ] || { echo "✗ 缺少 $DEPLOY_ENV_FILE（参照 .deploy.env.example）"; exit 1; }
+[ -f "$DEPLOY_ENV_FILE" ] || { echo "✗ 缺少 ${DEPLOY_ENV_FILE}（参照 .deploy.env.example）"; exit 1; }
 # shellcheck disable=SC1090
 source "$DEPLOY_ENV_FILE"
 
@@ -22,14 +22,14 @@ SSH_HOST="${SSH_HOST:?SSH_HOST 未配置}"
 SSH_PORT="${SSH_PORT:-22}"
 SSH_USER="${SSH_USER:-root}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/liteshop}"
-SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -p "$SSH_PORT")
+SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
 
-run_remote() { sshpass -f "$DEPLOY_ENV_FILE" ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" "$@"; }
-copy_remote() { sshpass -f "$DEPLOY_ENV_FILE" scp "${SSH_OPTS[@]}" "$1" "$SSH_USER@$SSH_HOST:$2"; }
+run_remote() { sshpass -f "$DEPLOY_ENV_FILE" ssh -p "$SSH_PORT" "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" "$@"; }
+copy_remote() { sshpass -f "$DEPLOY_ENV_FILE" scp -P "$SSH_PORT" "${SSH_OPTS[@]}" "$1" "$SSH_USER@$SSH_HOST:$2"; }
 
 SITE_URL="${SITE_URL:-https://shop.9527.tr}"
 IMAGE="liteshop:latest"
-echo "▶ 部署目标 $SSH_USER@$SSH_HOST:$REMOTE_DIR（SITE_URL=$SITE_URL）"
+echo "▶ 部署目标 ${SSH_USER}@${SSH_HOST}:${REMOTE_DIR}（SITE_URL=${SITE_URL}）"
 
 echo "▶ 校验本地环境（镜像构建在本地完成，服务器不执行 npm/docker build）"
 [ -f docker-compose.yml ] || { echo "✗ 缺少 docker-compose.yml"; exit 1; }
