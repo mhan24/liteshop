@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "./globals.css";
 import { getSiteName } from "@/server/settings";
 
 export async function generateMetadata(): Promise<Metadata> {
