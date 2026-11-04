@@ -33,7 +33,6 @@ export interface ActionResult<T = undefined> {
 const checkoutSchema = z.object({
   email: z.string().email().max(200),
   note: z.string().max(500).optional(),
-  channelKey: z.string().max(64).optional(),
   items: z
     .array(z.object({ slug: z.string().min(1).max(200), quantity: z.number().int().min(1).max(99) }))
     .min(1)
@@ -66,7 +65,6 @@ export async function checkoutAction(
     parsed = checkoutSchema.parse({
       email: formData.get("email"),
       note: formData.get("note") || undefined,
-      channelKey: formData.get("channelKey") || undefined,
       items: JSON.parse(String(formData.get("items") ?? "[]")),
     });
   } catch {
@@ -82,17 +80,16 @@ export async function checkoutAction(
       email: parsed.email,
       items: parsed.items,
       note: parsed.note,
-      channelKey: parsed.channelKey,
     });
     return {
       ok: true,
       message: result.reconciling
-        ? "支付渠道响应超时，订单已保留待对账，请稍后在订单查询页查看"
-        : "订单已创建，请完成支付",
+        ? "收银台响应超时，订单已保留待核实，请稍后在订单查询页查看"
+        : "订单已创建，请继续完成付款",
       data: {
         orderNo: result.orderNo,
         queryPassword: result.queryPassword,
-        totalDisplay: formatMoney(result.totalCents, result.currency),
+        totalDisplay: formatMoney(result.totalCents),
         paymentUrl: result.paymentUrl,
         reconciling: result.reconciling,
       },
@@ -133,7 +130,7 @@ export async function queryOrderAction(
   return {
     ok: true,
     message: "查询成功",
-    data: { order: view, totalDisplay: formatMoney(view.totalCents, view.currency) },
+    data: { order: view, totalDisplay: formatMoney(view.totalCents) },
   };
 }
 
@@ -167,10 +164,8 @@ export async function mockPayAction(formData: FormData): Promise<void> {
   const body = buildMockNotifyBody({
     orderNo,
     providerRef: ref,
-    amountMinor: order.totalCents,
-    currency: order.currency,
+    amountCents: order.totalCents,
     status,
-    fiatAmount: order.totalCents / 100,
   });
   await handlePaymentWebhook("mock", body);
 }

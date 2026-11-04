@@ -4,19 +4,19 @@ import { db } from "@/db";
 import { cards, deliveries, orders, payments } from "@/db/schema";
 import { createOrder, handlePaymentWebhook } from "@/server/orders";
 import { buildMockNotifyBody } from "@/server/payments/mock";
-import { resetDb, seedAutoProduct, seedManualProduct, seedCurrency } from "../helpers";
+import { lipayTestHelpers } from "./litepay-fixture";
+import { resetDb, seedAutoProduct } from "../helpers";
 
 /**
- * 支付回调全流程（mock 渠道，协议与真实 BEpusdt 渠道共用同一确认代码路径）：
- * 验签 → 金额核对 → 幂等 → 状态机 → 原子发卡。
+ * 支付回调全流程：验签 → 金额核对 → 幂等 → 状态机 → 原子发卡。
+ * mock 渠道用于覆盖确认代码路径；LitePay 渠道单独验真（签名、应答语义）。
  */
 describe("支付回调（webhook）", () => {
   beforeEach(async () => {
     await resetDb();
-    await seedCurrency("USD");
   });
 
-  async function createPaidPendingOrder(slug: string, quantity = 1, cardCount = 5) {
+  async function createPendingOrder(slug: string, quantity = 1, cardCount = 5) {
     await seedAutoProduct(slug, cardCount, 100);
     const r = await createOrder({ email: "buyer@test.dev", items: [{ slug, quantity }] });
     const orderRows = await db.select().from(orders).where(eq(orders.orderNo, r.orderNo));
@@ -24,25 +24,24 @@ describe("支付回调（webhook）", () => {
     return { r, order: orderRows[0]!, payment: payRows[0]! };
   }
 
-  it("完整购买流程：回调确认 → 卡密交付 → 订单完成", async () => {
-    const { r, order, payment } = await createPaidPendingOrder("flow1", 2, 5);
+  it("完整购买流程：回调确认 → 卡密发放 → 订单完成", async () => {
+    const { r, order, payment } = await createPendingOrder("flow1", 2, 5);
     expect(payment.providerRef).toBeTruthy();
 
-    const body = buildMockNotifyBody({
-      orderNo: r.orderNo,
-      providerRef: payment.providerRef!,
-      amountMinor: order.totalCents,
-      currency: order.currency,
-      status: 2,
-      fiatAmount: order.totalCents / 100,
-    });
-    const result = await handlePaymentWebhook("mock", body);
+    const result = await handlePaymentWebhook(
+      "mock",
+      buildMockNotifyBody({
+        orderNo: r.orderNo,
+        providerRef: payment.providerRef!,
+        amountCents: order.totalCents,
+        status: 2,
+      })
+    );
     expect(result.respond).toBe("success");
     expect(result.handled).toBe(true);
-    expect(result.message).toContain("自动发货完成");
+    expect(result.message).toContain("已确认支付并发放卡密");
 
-    const orderRows = await db.select().from(orders).where(eq(orders.id, order.id));
-    expect(orderRows[0]!.status).toBe("completed");
+    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("completed");
 
     const sold = await db.select().from(cards).where(eq(cards.reservedOrderId, order.id));
     expect(sold).toHaveLength(2);
@@ -54,160 +53,142 @@ describe("支付回调（webhook）", () => {
     for (const c of sold) expect(deliveryRows[0]!.content).toContain(c.content);
   });
 
-  it("重复回调幂等：不重复发货、不改变状态", async () => {
-    const { r, order, payment } = await createPaidPendingOrder("idem1");
+  it("重复回调幂等：不重复发卡、不改变状态", async () => {
+    const { r, order, payment } = await createPendingOrder("idem1");
     const body = buildMockNotifyBody({
       orderNo: r.orderNo,
       providerRef: payment.providerRef!,
-      amountMinor: order.totalCents,
-      currency: order.currency,
+      amountCents: order.totalCents,
       status: 2,
-      fiatAmount: order.totalCents / 100,
     });
-    const first = await handlePaymentWebhook("mock", body);
-    expect(first.handled).toBe(true);
+    expect((await handlePaymentWebhook("mock", body)).handled).toBe(true);
     const second = await handlePaymentWebhook("mock", body);
     expect(second.respond).toBe("success");
 
     const deliveryRows = await db.select().from(deliveries).where(eq(deliveries.orderId, order.id));
     expect(deliveryRows).toHaveLength(1);
-    const sold = await db.select().from(cards).where(eq(cards.reservedOrderId, order.id));
-    expect(sold).toHaveLength(1);
+    expect(await db.select().from(cards).where(eq(cards.reservedOrderId, order.id))).toHaveLength(1);
   });
 
   it("签名错误：拒绝处理并回 success（终止无意义重试）", async () => {
-    const { r, order, payment } = await createPaidPendingOrder("sig1");
+    const { r, order, payment } = await createPendingOrder("sig1");
     const body = buildMockNotifyBody({
       orderNo: r.orderNo,
       providerRef: payment.providerRef!,
-      amountMinor: order.totalCents,
-      currency: order.currency,
+      amountCents: order.totalCents,
       status: 2,
-      fiatAmount: order.totalCents / 100,
     });
     const tampered = JSON.stringify({ ...JSON.parse(body), amount: 9999 });
     const result = await handlePaymentWebhook("mock", tampered);
     expect(result.respond).toBe("success");
     expect(result.handled).toBe(false);
-    const orderRows = await db.select().from(orders).where(eq(orders.id, order.id));
-    expect(orderRows[0]!.status).toBe("pending");
+    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("pending");
   });
 
   it("金额不匹配：拒绝确认（金额必须等于订单总额）", async () => {
-    const { r, order, payment } = await createPaidPendingOrder("amt1");
-    const body = buildMockNotifyBody({
-      orderNo: r.orderNo,
-      providerRef: payment.providerRef!,
-      amountMinor: order.totalCents - 50,
-      currency: order.currency,
-      status: 2,
-      fiatAmount: (order.totalCents - 50) / 100,
-    });
-    const result = await handlePaymentWebhook("mock", body);
+    const { r, order, payment } = await createPendingOrder("amt1");
+    const result = await handlePaymentWebhook(
+      "mock",
+      buildMockNotifyBody({
+        orderNo: r.orderNo,
+        providerRef: payment.providerRef!,
+        amountCents: order.totalCents - 50,
+        status: 2,
+      })
+    );
     expect(result.respond).toBe("success");
     expect(result.message).toContain("金额不匹配");
-    const orderRows = await db.select().from(orders).where(eq(orders.id, order.id));
-    expect(orderRows[0]!.status).toBe("pending");
+    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("pending");
   });
 
-  it("status=3 过期回调：关闭订单并释放卡密", async () => {
-    const { r, order, payment } = await createPaidPendingOrder("exp1", 1, 3);
-    const body = buildMockNotifyBody({
-      orderNo: r.orderNo,
-      providerRef: payment.providerRef!,
-      amountMinor: order.totalCents,
-      currency: order.currency,
-      status: 3,
-      fiatAmount: order.totalCents / 100,
-    });
-    const result = await handlePaymentWebhook("mock", body);
-    expect(result.handled).toBe(true);
-    const orderRows = await db.select().from(orders).where(eq(orders.id, order.id));
-    expect(orderRows[0]!.status).toBe("closed");
-    const cardRows = await db.select().from(cards).where(eq(cards.reservedOrderId, order.id));
-    expect(cardRows.every((c) => c.status === "available")).toBe(true);
+  it("非成功通知（status≠2）：记录后忽略，订单不变", async () => {
+    const { r, order, payment } = await createPendingOrder("wait1");
+    const result = await handlePaymentWebhook(
+      "mock",
+      buildMockNotifyBody({
+        orderNo: r.orderNo,
+        providerRef: payment.providerRef!,
+        amountCents: order.totalCents,
+        status: 1,
+      })
+    );
+    expect(result.respond).toBe("success");
+    expect(result.message).toContain("已忽略");
+    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("pending");
   });
 
-  it("过期订单收到延迟成功回调：登记 late 异常，不发货", async () => {
-    const { r, order, payment } = await createPaidPendingOrder("late1");
-    const expiredBody = buildMockNotifyBody({
-      orderNo: r.orderNo,
-      providerRef: payment.providerRef!,
-      amountMinor: order.totalCents,
-      currency: order.currency,
-      status: 3,
-      fiatAmount: order.totalCents / 100,
-    });
-    await handlePaymentWebhook("mock", expiredBody);
+  it("已关闭订单收到成功回调：登记 late 异常，不发卡", async () => {
+    const { r, order, payment } = await createPendingOrder("late1");
+    await db.update(orders).set({ status: "closed" }).where(eq(orders.id, order.id));
 
-    const paidBody = buildMockNotifyBody({
-      orderNo: r.orderNo,
-      providerRef: payment.providerRef!,
-      amountMinor: order.totalCents,
-      currency: order.currency,
-      status: 2,
-      fiatAmount: order.totalCents / 100,
-    });
-    const result = await handlePaymentWebhook("mock", paidBody);
+    const result = await handlePaymentWebhook(
+      "mock",
+      buildMockNotifyBody({
+        orderNo: r.orderNo,
+        providerRef: payment.providerRef!,
+        amountCents: order.totalCents,
+        status: 2,
+      })
+    );
     expect(result.respond).toBe("success");
     expect(result.message).toContain("延迟到账");
 
-    const orderRows = await db.select().from(orders).where(eq(orders.id, order.id));
-    expect(orderRows[0]!.status).toBe("closed");
-    const deliveryRows = await db.select().from(deliveries).where(eq(deliveries.orderId, order.id));
-    expect(deliveryRows).toHaveLength(0);
+    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("closed");
+    expect(await db.select().from(deliveries).where(eq(deliveries.orderId, order.id))).toHaveLength(0);
     const payRows = await db.select().from(payments).where(eq(payments.id, payment.id));
     expect(payRows[0]!.status).toBe("late");
     expect(payRows[0]!.anomaly).toBe("late");
   });
 
-  it("status=1 等待通知：仅记录，不改变状态", async () => {
-    const { r, order, payment } = await createPaidPendingOrder("wait1");
-    const body = buildMockNotifyBody({
-      orderNo: r.orderNo,
-      providerRef: payment.providerRef!,
-      amountMinor: order.totalCents,
-      currency: order.currency,
-      status: 1,
-      fiatAmount: order.totalCents / 100,
-    });
-    const result = await handlePaymentWebhook("mock", body);
-    expect(result.handled).toBe(true);
-    const orderRows = await db.select().from(orders).where(eq(orders.id, order.id));
-    expect(orderRows[0]!.status).toBe("pending");
-  });
-
-  it("人工发货商品：确认支付后停留 paid，人工交付后完成", async () => {
-    await seedManualProduct("manual1", null, 100);
-    const r = await createOrder({ email: "buyer@test.dev", items: [{ slug: "manual1", quantity: 1 }] });
-    const orderRows = await db.select().from(orders).where(eq(orders.orderNo, r.orderNo));
-    const order = orderRows[0]!;
-    const payRows = await db.select().from(payments).where(eq(payments.orderId, order.id));
-    const body = buildMockNotifyBody({
-      orderNo: r.orderNo,
-      providerRef: payRows[0]!.providerRef!,
-      amountMinor: order.totalCents,
-      currency: order.currency,
-      status: 2,
-      fiatAmount: order.totalCents / 100,
-    });
-    const result = await handlePaymentWebhook("mock", body);
-    expect(result.message).toContain("等待交付");
-    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("paid");
-  });
-
   it("未知订单/未知交易的回调被安全忽略", async () => {
-    await seedAutoProduct("unk1", 1);
-    const body = buildMockNotifyBody({
-      orderNo: "LS99999999999999",
-      providerRef: "mock_ghost",
-      amountMinor: 100,
-      currency: "USD",
-      status: 2,
-      fiatAmount: 1,
-    });
-    const result = await handlePaymentWebhook("mock", body);
+    const result = await handlePaymentWebhook(
+      "mock",
+      buildMockNotifyBody({
+        orderNo: "LS99999999999999",
+        providerRef: "mock_ghost",
+        amountCents: 100,
+        status: 2,
+      })
+    );
     expect(result.respond).toBe("success");
     expect(result.message).toBe("订单不存在");
+  });
+});
+
+describe("LitePay 渠道回调", () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  it("签名正确的成功回调：确认支付并发放卡密", async () => {
+    const { r, order, payment } = await lipayTestHelpers.prepareLitepayOrder("lp1");
+    const body = lipayTestHelpers.signedNotify({
+      orderNo: r.orderNo,
+      providerRef: payment.providerRef!,
+      amountCents: order.totalCents,
+      status: 2,
+    });
+
+    const result = await handlePaymentWebhook("litepay", body);
+    expect(result.respond).toBe("success");
+    expect(result.handled).toBe(true);
+    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("completed");
+    expect(await db.select().from(deliveries).where(eq(deliveries.orderId, order.id))).toHaveLength(1);
+  });
+
+  it("签名不符：拒绝处理，订单保持待支付", async () => {
+    const { r, order, payment } = await lipayTestHelpers.prepareLitepayOrder("lp2");
+    const body = lipayTestHelpers.signedNotify({
+      orderNo: r.orderNo,
+      providerRef: payment.providerRef!,
+      amountCents: order.totalCents,
+      status: 2,
+    });
+    const tampered = JSON.stringify({ ...JSON.parse(body), amount: 0.01 });
+
+    const result = await handlePaymentWebhook("litepay", tampered);
+    expect(result.respond).toBe("success");
+    expect(result.handled).toBe(false);
+    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("pending");
   });
 });

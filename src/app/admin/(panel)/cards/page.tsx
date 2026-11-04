@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { cards, products } from "@/db/schema";
 import { getCardLowStockThreshold } from "@/server/settings";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminCardsPage() {
   const csrf = await csrfToken();
   const [productRows, recent, threshold] = await Promise.all([
-    db.select().from(products).where(eq(products.deliveryType, "auto")).orderBy(asc(products.id)),
+    db.select().from(products).orderBy(asc(products.id)),
     db.select().from(cards).orderBy(desc(cards.id)).limit(100),
     getCardLowStockThreshold(),
   ]);
@@ -24,11 +24,11 @@ export default async function AdminCardsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>导入卡密（每行一条）</CardTitle>
+          <CardTitle>导入卡密（每行一条，重复内容自动跳过）</CardTitle>
         </CardHeader>
         <CardContent>
           {productRows.length === 0 ? (
-            <p className="text-sm text-muted">暂无自动发卡商品，请先创建。</p>
+            <p className="text-sm text-muted">还没有商品，先去「商品」创建。</p>
           ) : (
             <AdminForm action={importCardsAction} csrf={csrf} submitLabel="导入" className="space-y-3">
               <div className="space-y-1.5">
@@ -43,7 +43,13 @@ export default async function AdminCardsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="card-content">卡密内容</Label>
-                <Textarea id="card-content" name="content" rows={8} required placeholder={"CARD-AAAA-BBBB\nCARD-CCCC-DDDD"} />
+                <Textarea
+                  id="card-content"
+                  name="content"
+                  rows={8}
+                  required
+                  placeholder={"CARD-AAAA-BBBB\nCARD-CCCC-DDDD"}
+                />
               </div>
             </AdminForm>
           )}
@@ -51,10 +57,10 @@ export default async function AdminCardsPage() {
       </Card>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">最近 100 条卡密（低于 {threshold} 条时后台告警）</h2>
+        <h2 className="text-sm font-semibold">最近 100 条（低于 {threshold} 条时该补货）</h2>
         <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
           {recent.length === 0 ? (
-            <li className="p-4 text-sm text-muted">暂无卡密</li>
+            <li className="p-4 text-sm text-muted">还没有卡密。</li>
           ) : (
             recent.map((c) => (
               <li key={c.id} className="flex items-center justify-between gap-3 p-3 text-sm">

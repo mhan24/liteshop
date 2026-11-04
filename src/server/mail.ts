@@ -73,10 +73,7 @@ export async function flushDeliveryEmails(limit = 50): Promise<{ sent: number; f
   let sent = 0;
   let failed = 0;
   for (const row of rows) {
-    if (!row.content.trim()) {
-      // 纯人工占位内容为空时不发送
-      continue;
-    }
+    if (!row.content.trim()) continue;
     const result = await sendDeliveryEmail(row.orderNo, row.email, row.content);
     if (result.ok) {
       await markDeliveryEmailSent(row.deliveryId);

@@ -2,7 +2,6 @@ import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { categories } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
-import { getSiteCurrency } from "@/server/settings";
 import { csrfToken } from "@/server/admin-auth";
 import { listAllProducts } from "@/server/catalog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,12 +17,16 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/**
+ * 商品与分类。
+ * 商品只有一种履约方式（卡密自动发货），库存 = 可用卡密数量，
+ * 因此表单里没有「发货方式」「库存上限」这类字段。
+ */
 export default async function AdminProductsPage() {
   const csrf = await csrfToken();
-  const [items, cats, currency] = await Promise.all([
+  const [items, cats] = await Promise.all([
     listAllProducts(),
     db.select().from(categories).orderBy(asc(categories.sortOrder)),
-    getSiteCurrency(),
   ]);
 
   return (
@@ -35,7 +38,12 @@ export default async function AdminProductsPage() {
           <CardTitle>新建分类</CardTitle>
         </CardHeader>
         <CardContent>
-          <AdminForm action={createCategoryAction} csrf={csrf} submitLabel="创建分类" className="grid gap-3 sm:grid-cols-4">
+          <AdminForm
+            action={createCategoryAction}
+            csrf={csrf}
+            submitLabel="创建分类"
+            className="grid gap-3 sm:grid-cols-4"
+          >
             <div className="space-y-1.5">
               <Label htmlFor="cat-name">名称</Label>
               <Input id="cat-name" name="name" required />
@@ -56,7 +64,10 @@ export default async function AdminProductsPage() {
           {cats.length > 0 ? (
             <ul className="mt-3 space-y-2">
               {cats.map((c) => (
-                <li key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2 text-sm">
+                <li
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2 text-sm"
+                >
                   <span>
                     {c.name} <span className="font-mono text-xs text-muted">/{c.slug}</span>
                   </span>
@@ -75,20 +86,20 @@ export default async function AdminProductsPage() {
           <CardTitle>新建商品</CardTitle>
         </CardHeader>
         <CardContent>
-          <ProductFields csrf={csrf} action={createProductAction} submitLabel="创建商品" categories={cats} currency={currency} />
+          <ProductFields csrf={csrf} action={createProductAction} submitLabel="创建商品" categories={cats} />
         </CardContent>
       </Card>
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">全部商品</h2>
+        {items.length === 0 ? <p className="text-sm text-muted">还没有商品。</p> : null}
         {items.map((p) => (
           <Card key={p.id}>
             <CardHeader>
               <CardTitle className="text-base">
-                {p.name}{" "}
-                <span className="font-mono text-xs text-muted">/{p.slug}</span>{" "}
-                <span className="text-xs text-muted">
-                  {formatMoney(p.priceCents, currency)} · {p.status === "on" ? "上架" : "下架"}
+                {p.name} <span className="font-mono text-xs text-muted">/{p.slug}</span>{" "}
+                <span className="text-xs font-normal text-muted">
+                  {formatMoney(p.priceCents)} · 库存 {p.stock} · {p.status === "on" ? "上架" : "下架"}
                 </span>
               </CardTitle>
             </CardHeader>
@@ -98,17 +109,15 @@ export default async function AdminProductsPage() {
                 action={updateProductAction}
                 submitLabel="保存修改"
                 categories={cats}
-                currency={currency}
                 initial={{
                   id: p.id,
                   name: p.name,
                   slug: p.slug,
                   description: p.description,
                   priceMinor: p.priceCents,
-                  deliveryType: p.deliveryType,
-                  stockLimit: p.stockDisplay,
                   status: p.status,
                   imageUrl: p.imageUrl ?? "",
+                  seoDescription: p.seoDescription ?? "",
                   categoryId: p.categoryId,
                 }}
               />
@@ -128,24 +137,21 @@ function ProductFields<S extends { ok: boolean; message: string }>({
   action,
   submitLabel,
   categories: cats,
-  currency,
   initial,
 }: {
   csrf: string;
   action: (prev: S | null, formData: FormData) => Promise<S>;
   submitLabel: string;
   categories: Array<typeof categories.$inferSelect>;
-  currency: string;
   initial?: {
     id: number;
     name: string;
     slug: string;
     description: string;
     priceMinor: number;
-    deliveryType: "auto" | "manual";
-    stockLimit: number | null;
     status: "on" | "off";
     imageUrl: string;
+    seoDescription: string;
     categoryId: number | null;
   };
 }) {
@@ -161,19 +167,8 @@ function ProductFields<S extends { ok: boolean; message: string }>({
         <Input name="slug" required pattern="[a-z0-9][a-z0-9-]+" defaultValue={initial?.slug} />
       </div>
       <div className="space-y-1.5">
-        <Label>价格（{currency} 最小单位，分）</Label>
-        <Input name="priceMinor" type="number" min={0} required defaultValue={initial?.priceMinor ?? 0} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>发货方式</Label>
-        <Select name="deliveryType" defaultValue={initial?.deliveryType ?? "auto"}>
-          <option value="auto">自动发卡</option>
-          <option value="manual">人工发货</option>
-        </Select>
-      </div>
-      <div className="space-y-1.5">
-        <Label>库存上限（manual 型；留空不限）</Label>
-        <Input name="stockLimit" type="number" min={0} defaultValue={initial?.stockLimit ?? ""} />
+        <Label>价格（美分，100 = $1.00）</Label>
+        <Input name="priceMinor" type="number" min={1} max={99999999} required defaultValue={initial?.priceMinor ?? 100} />
       </div>
       <div className="space-y-1.5">
         <Label>状态</Label>
@@ -203,7 +198,7 @@ function ProductFields<S extends { ok: boolean; message: string }>({
       </div>
       <div className="space-y-1.5 sm:col-span-2">
         <Label>SEO 描述（可选，≤300 字）</Label>
-        <Input name="seoDescription" maxLength={300} />
+        <Input name="seoDescription" maxLength={300} defaultValue={initial?.seoDescription} />
       </div>
     </AdminForm>
   );

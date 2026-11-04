@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { cards, orders } from "@/db/schema";
 import { createOrder } from "@/server/orders";
-import { resetDb, seedAutoProduct, seedCurrency } from "../helpers";
+import { resetDb, seedAutoProduct } from "../helpers";
 
 /**
  * 并发卡密分配：PostgreSQL 行级锁（FOR UPDATE SKIP LOCKED）保证一卡不两卖。
@@ -12,7 +12,6 @@ import { resetDb, seedAutoProduct, seedCurrency } from "../helpers";
 describe("并发卡密分配", () => {
   beforeEach(async () => {
     await resetDb();
-    await seedCurrency("USD");
   });
 
   it("并发 N 单抢 N 张卡：全部成功且卡密不重复", async () => {
@@ -28,8 +27,7 @@ describe("并发卡密分配", () => {
     const allCards = await db.select().from(cards);
     const reserved = allCards.filter((c) => c.status === "reserved");
     expect(reserved).toHaveLength(total);
-    const distinctOrders = new Set(reserved.map((c) => c.reservedOrderId));
-    expect(distinctOrders.size).toBe(total); // 每个订单恰好 1 张卡，无重复分配
+    expect(new Set(reserved.map((c) => c.reservedOrderId)).size).toBe(total);
   });
 
   it("并发超卖尝试：库存不足的订单失败，成功订单之间零重复", async () => {
@@ -40,12 +38,9 @@ describe("并发卡密分配", () => {
         createOrder({ email: `racer${i}@test.dev`, items: [{ slug: "race2", quantity: 1 }] })
       )
     );
-    const fulfilled = settled.filter((s) => s.status === "fulfilled");
-    const rejected = settled.filter((s) => s.status === "rejected");
-    expect(fulfilled).toHaveLength(5);
-    expect(rejected).toHaveLength(7);
+    expect(settled.filter((s) => s.status === "fulfilled")).toHaveLength(5);
+    expect(settled.filter((s) => s.status === "rejected")).toHaveLength(7);
 
-    // 失败订单不留任何残留：订单数 = 5，卡密全部 reserved 且各属一个订单
     const allOrders = await db.select().from(orders);
     expect(allOrders).toHaveLength(5);
     expect(allOrders.every((o) => o.status === "pending")).toBe(true);

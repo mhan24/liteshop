@@ -14,7 +14,6 @@ import { desc } from "drizzle-orm";
 export interface OrderQueryView {
   orderNo: string;
   status: string;
-  currency: string;
   totalCents: number;
   createdAt: Date;
   paidAt: Date | null;
@@ -63,7 +62,6 @@ export async function queryOrder(
   return {
     orderNo: order.orderNo,
     status: order.status,
-    currency: order.currency,
     totalCents: order.totalCents,
     createdAt: order.createdAt,
     paidAt: order.paidAt,

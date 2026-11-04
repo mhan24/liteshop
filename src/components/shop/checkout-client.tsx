@@ -6,26 +6,22 @@ import { checkoutAction, type CheckoutSuccess } from "@/actions/shop";
 import { useCart } from "./cart";
 import { TurnstileWidget } from "./turnstile-widget";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
 import { formatMoney } from "@/lib/money";
 import type { TurnstileClientConfig } from "@/server/settings";
 
-export interface ChannelOption {
-  key: string;
-  displayName: string;
-}
-
-/** 结算页：购物车 + 邮箱 + 支付方式 → 创建订单（金额由服务端计算） */
+/**
+ * 结算页：购物车明细 + 邮箱 + 人机验证 → 创建订单。
+ * 金额由服务端按商品表重算；支付走 LitePay 收银台（USD，USDT/USDC）。
+ */
 export function CheckoutClient({
-  channels,
-  currency,
   human,
+  gatewayReady,
 }: {
-  channels: ChannelOption[];
-  currency: string;
   human: TurnstileClientConfig;
+  gatewayReady: boolean;
 }) {
-  const { items, setQuantity, remove } = useCart();
+  const { items, setQuantity, remove, clear } = useCart();
   const [state, formAction, pending] = useActionState(checkoutAction, null);
   const [cfToken, setCfToken] = useState("");
   const [verifyKey, setVerifyKey] = useState(0);
@@ -44,49 +40,65 @@ export function CheckoutClient({
   if (state?.ok && state.data) {
     const d: CheckoutSuccess = state.data;
     return (
-      <div className="mx-auto max-w-xl space-y-5 rounded-xl border border-line bg-surface p-8">
-        <div className="space-y-1">
-          <h2 className="font-serif text-xl font-semibold tracking-tight">订单已创建</h2>
-          <p className="text-sm text-muted">{state.message}</p>
+      <div className="mx-auto max-w-xl space-y-6 rounded-xl border border-line bg-surface p-8">
+        <div className="space-y-2">
+          <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">订单已创建</p>
+          <h2 className="font-serif text-2xl font-semibold tracking-[-0.02em]">{state.message}</h2>
         </div>
-        <dl className="space-y-2 rounded-lg bg-surface-2 p-4 text-sm">
-          <div className="flex justify-between gap-4">
+
+        <dl className="divide-y divide-line rounded-lg border border-line text-sm">
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
             <dt className="text-muted">订单号</dt>
             <dd className="font-mono">{d.orderNo}</dd>
           </div>
-          <div className="flex justify-between gap-4">
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
             <dt className="text-muted">应付金额</dt>
-            <dd className="font-semibold">{d.totalDisplay}</dd>
+            <dd className="font-serif text-lg font-semibold">{d.totalDisplay}</dd>
           </div>
         </dl>
+
         <div className="rounded-lg border border-tint-yellow-fg/25 bg-tint-yellow p-4">
-          <p className="text-sm font-medium text-tint-yellow-fg">查单密码 · 仅显示一次</p>
+          <p className="text-sm font-medium text-tint-yellow-fg">查单密码 · 只显示这一次</p>
           <p className="mt-2 select-all font-mono text-2xl tracking-[0.3em] text-fg">{d.queryPassword}</p>
           <p className="mt-2 text-xs leading-5 text-tint-yellow-fg">
-            凭订单号、邮箱与查单密码可随时查询订单与卡密，请立即保存；遗失后需联系客服找回。
+            和订单号一起保存。之后查询订单、找回卡密都要用到它，遗失只能联系客服核对。
           </p>
         </div>
+
         {d.paymentUrl ? (
           <a
             href={d.paymentUrl}
             className="inline-flex h-10 w-full items-center justify-center rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
           >
-            前往收银台支付
+            打开收银台付款
           </a>
-        ) : null}
+        ) : (
+          <p className="rounded-lg border border-tint-yellow-fg/25 bg-tint-yellow px-4 py-3 text-xs leading-5 text-tint-yellow-fg">
+            收银台响应超时，订单已保留待核实。请先不要重复下单，稍后到订单查询页确认状态。
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={clear}
+          className="text-xs text-muted underline decoration-line underline-offset-4 hover:text-fg"
+        >
+          清空购物车
+        </button>
       </div>
     );
   }
 
   if (items.length === 0) {
     return (
-      <div className="space-y-1 rounded-xl border border-line bg-surface p-10 text-center">
+      <div className="space-y-2 rounded-xl border border-line bg-surface px-6 py-16 text-center">
         <p className="font-serif text-lg">购物车是空的</p>
         <p className="text-sm text-muted">
-          先去挑选商品，再回来完成结算。{" "}
+          先挑商品再结算，
           <Link href="/" className="text-fg underline decoration-line underline-offset-4 hover:decoration-fg">
             返回商品列表
           </Link>
+          。
         </p>
       </div>
     );
@@ -95,17 +107,21 @@ export function CheckoutClient({
   const total = items.reduce((acc, i) => acc + i.priceCents * i.quantity, 0);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+    <div className="grid gap-8 lg:grid-cols-[1.3fr_1fr]">
       <form action={formAction} className="space-y-6">
-        <input type="hidden" name="items" value={JSON.stringify(items.map((i) => ({ slug: i.slug, quantity: i.quantity })))} />
-        <input type="hidden" name="channelKey" value={channels[0]?.key ?? ""} />
-        <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
+        <input
+          type="hidden"
+          name="items"
+          value={JSON.stringify(items.map((i) => ({ slug: i.slug, quantity: i.quantity })))}
+        />
+
+        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
           {items.map((item) => (
-            <li key={item.slug} className="flex items-center justify-between gap-4 p-5">
-              <div className="min-w-0">
+            <li key={item.slug} className="flex flex-wrap items-center justify-between gap-4 p-5">
+              <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{item.name}</p>
-                <p className="mt-0.5 text-xs text-muted">
-                  {formatMoney(item.priceCents, currency)} × {item.quantity}
+                <p className="mt-1 font-mono text-xs text-muted">
+                  {formatMoney(item.priceCents)} × {item.quantity}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -114,7 +130,7 @@ export function CheckoutClient({
                   min={1}
                   max={99}
                   value={item.quantity}
-                  onChange={(e) => setQuantity(item.slug, Number(e.target.value))}
+                  onChange={(e) => setQuantity(item.slug, Number(e.target.value) || 1)}
                   aria-label={`${item.name} 数量`}
                   className="w-20"
                 />
@@ -128,67 +144,88 @@ export function CheckoutClient({
 
         <div className="space-y-5 rounded-xl border border-line bg-surface p-6">
           <div className="space-y-1.5">
-            <Label htmlFor="co-email">联系邮箱</Label>
+            <Label htmlFor="co-email">下单邮箱</Label>
             <Input id="co-email" name="email" type="email" required placeholder="you@example.com" />
-            <p className="text-xs text-muted">交付内容与订单信息会发送到这个邮箱。</p>
+            <p className="text-xs leading-5 text-muted">卡密会同时发到这个邮箱，请填写常用地址。</p>
           </div>
-          {channels.length > 1 ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="co-channel">支付方式</Label>
-              <Select id="co-channel" name="channelKey" defaultValue={channels[0]?.key}>
-                {channels.map((c) => (
-                  <option key={c.key} value={c.key}>
-                    {c.displayName}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          ) : null}
+
           <div className="space-y-1.5">
             <Label htmlFor="co-note">备注（可选）</Label>
-            <Textarea id="co-note" name="note" maxLength={500} rows={2} placeholder="如有特殊说明请在此填写" />
+            <Textarea
+              id="co-note"
+              name="note"
+              maxLength={500}
+              rows={2}
+              placeholder="需要补充的说明写在这里"
+            />
           </div>
+
           {state && !state.ok ? (
-            <p role="alert" className="rounded-lg border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg">
+            <p
+              role="alert"
+              className="rounded-lg border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg"
+            >
               {state.message}
             </p>
           ) : null}
+
           {human.enabled ? (
             <div className="space-y-1.5">
               <Label>人机验证</Label>
               <TurnstileWidget key={verifyKey} siteKey={human.siteKey} onToken={setCfToken} />
               <input type="hidden" name="cfToken" value={cfToken} />
               {human.fallback ? (
-                <p className="text-xs text-muted">验证加载失败时仍可提交，系统会以其他方式防护。</p>
+                <p className="text-xs text-muted">验证组件加载失败时仍可提交，下单频率限制仍然生效。</p>
               ) : null}
             </div>
           ) : null}
-          <Button type="submit" disabled={pending} className="w-full">
-            {pending ? "正在创建订单…" : "提交订单并支付"}
+
+          {!gatewayReady ? (
+            <p className="rounded-lg border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg">
+              支付网关尚未配置，暂时无法下单。请联系客服或稍后再试。
+            </p>
+          ) : null}
+
+          <Button type="submit" disabled={pending || !gatewayReady} className="w-full">
+            {pending ? "正在创建订单…" : `提交订单 · ${formatMoney(total)}`}
           </Button>
           <p className="text-center text-xs leading-5 text-muted">
-            点击「提交订单并支付」即表示同意：数字商品一经交付，非质量问题不支持退款。
+            提交后跳转 LitePay 收银台，可用 USDT / USDC 付款。数字商品一经发放不支持退款。
           </p>
         </div>
       </form>
 
-      <aside className="lg:sticky lg:top-10 lg:self-start">
-        <div className="space-y-3 rounded-xl border border-line bg-surface p-6">
-          <h2 className="font-serif text-lg font-semibold tracking-tight">订单摘要</h2>
+      <aside className="lg:sticky lg:top-24 lg:self-start">
+        <div className="space-y-4 rounded-xl border border-line bg-surface p-6">
+          <h2 className="font-serif text-lg font-semibold tracking-[-0.01em]">订单摘要</h2>
           <ul className="space-y-2 text-sm">
             {items.map((item) => (
               <li key={item.slug} className="flex justify-between gap-4">
                 <span className="min-w-0 truncate text-muted">
                   {item.name} × {item.quantity}
                 </span>
-                <span>{formatMoney(item.priceCents * item.quantity, currency)}</span>
+                <span>{formatMoney(item.priceCents * item.quantity)}</span>
               </li>
             ))}
           </ul>
-          <div className="flex items-baseline justify-between border-t border-line pt-3">
+          <div className="flex items-baseline justify-between border-t border-line pt-4">
             <span className="text-sm text-muted">应付金额</span>
-            <span className="font-serif text-xl font-semibold tracking-tight">{formatMoney(total, currency)}</span>
+            <span className="font-serif text-xl font-semibold tracking-[-0.01em]">{formatMoney(total)}</span>
           </div>
+          <dl className="space-y-2 border-t border-line pt-4 text-xs text-muted">
+            <div className="flex justify-between gap-4">
+              <dt>计价币种</dt>
+              <dd className="font-mono">USD</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt>收款方式</dt>
+              <dd>LitePay 收银台</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt>发货方式</dt>
+              <dd>付款后自动发卡</dd>
+            </div>
+          </dl>
         </div>
       </aside>
     </div>

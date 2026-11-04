@@ -5,44 +5,30 @@ import { cards, deliveries, orders, payments } from "@/db/schema";
 import {
   cancelPendingOrder,
   createOrder,
-  handlePaymentWebhook,
-  manualDeliver,
   resolveReconcilingAsNotCreated,
+  resolveReconcilingAsPaid,
   retryDelivery,
   sweepExpired,
 } from "@/server/orders";
 import { queryOrder } from "@/server/order-query";
-import { buildMockNotifyBody } from "@/server/payments/mock";
-import { resetDb, seedAutoProduct, seedCurrency } from "../helpers";
+import { payOrderWithMock, resetDb, seedAutoProduct } from "../helpers";
 
-/** 查单密码验证、过期清扫、取消、人工交付与恢复路径 */
+/** 查单密码验证、过期清扫、取消、对账与重试发卡 */
 describe("订单查询与生命周期", () => {
   beforeEach(async () => {
     await resetDb();
-    await seedCurrency("USD");
   });
 
   async function setupCompletedOrder(slug: string) {
     await seedAutoProduct(slug, 3, 100);
     const r = await createOrder({ email: "buyer@test.dev", items: [{ slug, quantity: 1 }] });
+    await payOrderWithMock(r.orderNo);
     const order = (await db.select().from(orders).where(eq(orders.orderNo, r.orderNo)))[0]!;
-    const payment = (await db.select().from(payments).where(eq(payments.orderId, order.id)))[0]!;
-    await handlePaymentWebhook(
-      "mock",
-      buildMockNotifyBody({
-        orderNo: r.orderNo,
-        providerRef: payment.providerRef!,
-        amountMinor: order.totalCents,
-        currency: order.currency,
-        status: 2,
-        fiatAmount: order.totalCents / 100,
-      })
-    );
     return { r, order };
   }
 
   it("查询：三因子正确返回交付内容；任一因子错误返回 null", async () => {
-    const { r, order } = await setupCompletedOrder("q1");
+    const { r } = await setupCompletedOrder("q1");
     const good = await queryOrder("buyer@test.dev", r.orderNo, r.queryPassword);
     expect(good).not.toBeNull();
     expect(good!.status).toBe("completed");
@@ -51,12 +37,10 @@ describe("订单查询与生命周期", () => {
     expect(await queryOrder("wrong@test.dev", r.orderNo, r.queryPassword)).toBeNull();
     expect(await queryOrder("buyer@test.dev", r.orderNo, "2AAAAAAA")).toBeNull();
     expect(await queryOrder("buyer@test.dev", "LS00000000000000", r.queryPassword)).toBeNull();
-    void order;
   });
 
   it("邮箱无法单独获取订单（不允许仅凭邮箱访问）", async () => {
     const { r } = await setupCompletedOrder("q2");
-    // 缺密码或缺订单号一律 null
     expect(await queryOrder("buyer@test.dev", "", r.queryPassword)).toBeNull();
     expect(await queryOrder("buyer@test.dev", r.orderNo, "")).toBeNull();
   });
@@ -65,10 +49,7 @@ describe("订单查询与生命周期", () => {
     await seedAutoProduct("sw1", 2);
     const r = await createOrder({ email: "buyer@test.dev", items: [{ slug: "sw1", quantity: 1 }] });
     const order = (await db.select().from(orders).where(eq(orders.orderNo, r.orderNo)))[0]!;
-    await db
-      .update(orders)
-      .set({ expiresAt: new Date(Date.now() - 1000) })
-      .where(eq(orders.id, order.id));
+    await db.update(orders).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(orders.id, order.id));
 
     const result = await sweepExpired();
     expect(result.closedOrders).toContain(r.orderNo);
@@ -79,17 +60,15 @@ describe("订单查询与生命周期", () => {
     expect(payRows[0]!.status).toBe("expired");
   });
 
-  it("买家取消：双因子校验 + 库存释放", async () => {
+  it("买家取消：双因子校验 + 卡密退回库存", async () => {
     await seedAutoProduct("c1", 2);
     const r = await createOrder({ email: "buyer@test.dev", items: [{ slug: "c1", quantity: 1 }] });
     const order = (await db.select().from(orders).where(eq(orders.orderNo, r.orderNo)))[0]!;
 
-    const bad = await cancelPendingOrder(r.orderNo, "wrong@test.dev");
-    expect(bad.ok).toBe(false);
+    expect((await cancelPendingOrder(r.orderNo, "wrong@test.dev")).ok).toBe(false);
     expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("pending");
 
-    const good = await cancelPendingOrder(r.orderNo, "buyer@test.dev");
-    expect(good.ok).toBe(true);
+    expect((await cancelPendingOrder(r.orderNo, "buyer@test.dev")).ok).toBe(true);
     expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("closed");
     const cardRows = await db.select().from(cards).where(eq(cards.reservedOrderId, order.id));
     expect(cardRows.every((c) => c.status === "available")).toBe(true);
@@ -98,31 +77,11 @@ describe("订单查询与生命周期", () => {
     expect((await cancelPendingOrder(r.orderNo, "buyer@test.dev")).ok).toBe(false);
   });
 
-  it("人工交付：paid → completed；内容追加幂等", async () => {
-    await seedAutoProduct("md1", 2);
-    const r = await createOrder({ email: "buyer@test.dev", items: [{ slug: "md1", quantity: 1 }] });
-    const order = (await db.select().from(orders).where(eq(orders.orderNo, r.orderNo)))[0]!;
-    // 先过期回调关闭，再走异常恢复路径演练人工交付（直接造 paid 订单）
-    await db
-      .update(orders)
-      .set({ status: "paid", paidAt: new Date() })
-      .where(eq(orders.id, order.id));
-
-    const d1 = await manualDeliver(r.orderNo, "MANUAL-CONTENT-1", "admin");
-    expect(d1.ok).toBe(true);
-    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("completed");
-    const deliveryRows = await db.select().from(deliveries).where(eq(deliveries.orderId, order.id));
-    expect(deliveryRows[0]!.content).toBe("MANUAL-CONTENT-1");
-  });
-
-  it("reconciling 订单：确认未建单 → 关闭释放；不允许直接关闭", async () => {
+  it("reconciling 订单：确认未建单 → 关闭并释放卡密", async () => {
     await seedAutoProduct("rc1", 2);
     const r = await createOrder({ email: "buyer@test.dev", items: [{ slug: "rc1", quantity: 1 }] });
     const order = (await db.select().from(orders).where(eq(orders.orderNo, r.orderNo)))[0]!;
-    await db
-      .update(orders)
-      .set({ status: "reconciling", expiresAt: null })
-      .where(eq(orders.id, order.id));
+    await db.update(orders).set({ status: "reconciling", expiresAt: null }).where(eq(orders.id, order.id));
 
     const closed = await resolveReconcilingAsNotCreated(r.orderNo, "admin");
     expect(closed.ok).toBe(true);
@@ -131,12 +90,24 @@ describe("订单查询与生命周期", () => {
     expect(cardRows.every((c) => c.status === "available")).toBe(true);
   });
 
-  it("paid 订单重试交付：卡密已交付时幂等完成", async () => {
+  it("reconciling 订单：人工确认到账 → paid → 发卡完成", async () => {
+    await seedAutoProduct("rc2", 2);
+    const r = await createOrder({ email: "buyer@test.dev", items: [{ slug: "rc2", quantity: 1 }] });
+    const order = (await db.select().from(orders).where(eq(orders.orderNo, r.orderNo)))[0]!;
+    await db.update(orders).set({ status: "reconciling", expiresAt: null }).where(eq(orders.id, order.id));
+
+    const paid = await resolveReconcilingAsPaid(r.orderNo, "admin");
+    expect(paid.ok).toBe(true);
+    expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("completed");
+    expect(await db.select().from(deliveries).where(eq(deliveries.orderId, order.id))).toHaveLength(1);
+  });
+
+  it("paid 订单重试发卡：卡密齐备时补发并完成", async () => {
     await seedAutoProduct("rd1", 2);
     const r = await createOrder({ email: "buyer@test.dev", items: [{ slug: "rd1", quantity: 1 }] });
     const order = (await db.select().from(orders).where(eq(orders.orderNo, r.orderNo)))[0]!;
     const payment = (await db.select().from(payments).where(eq(payments.orderId, order.id)))[0]!;
-    // 只推进到 paid（模拟确认时交付中断）
+    // 只推进到 paid（模拟确认时发卡中断）
     await db.transaction(async (tx) => {
       await tx.update(orders).set({ status: "paid", paidAt: new Date() }).where(eq(orders.id, order.id));
       await tx
@@ -148,7 +119,6 @@ describe("订单查询与生命周期", () => {
     const retry = await retryDelivery(r.orderNo, "admin");
     expect(retry.ok).toBe(true);
     expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("completed");
-    const deliveryRows = await db.select().from(deliveries).where(eq(deliveries.orderId, order.id));
-    expect(deliveryRows).toHaveLength(1);
+    expect(await db.select().from(deliveries).where(eq(deliveries.orderId, order.id))).toHaveLength(1);
   });
 });

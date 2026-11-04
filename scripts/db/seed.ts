@@ -2,10 +2,11 @@ import { scryptSync, randomBytes } from "node:crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq } from "drizzle-orm";
-import { admins, cards, categories, paymentChannels, products } from "../../src/db/schema";
+import { admins, cards, categories, products } from "../../src/db/schema";
 
 /**
- * 种子数据（开发/演示）：管理员（env 引导）+ 演示分类/商品/卡密 + mock 支付渠道。
+ * 种子数据（开发/演示）：管理员（env 引导）+ 演示分类/商品/卡密。
+ * 支付网关不在这里配置——网关地址与令牌请在后台「设置 · 支付网关」填写。
  * 幂等：存在即跳过。
  */
 
@@ -28,11 +29,6 @@ async function main() {
       await db.insert(admins).values({ username: adminUser, passwordHash: hashPassword(adminPass) });
       console.log(`[seed] 管理员已创建: ${adminUser} / ${adminPass}（仅开发用）`);
     }
-
-    await db
-      .insert(paymentChannels)
-      .values({ key: "mock", type: "mock", displayName: "模拟支付（开发）", enabled: true })
-      .onConflictDoNothing();
 
     let catRows = await db.select().from(categories).where(eq(categories.slug, "demo")).limit(1);
     if (catRows.length === 0) {
@@ -57,20 +53,26 @@ async function main() {
             categoryId: category.id,
             slug: dp.slug,
             name: dp.name,
-            description: "演示商品：下单支付后自动发放卡密。",
+            description: "演示商品：付款确认后自动发放卡密。",
             priceCents: dp.priceCents,
-            deliveryType: "auto",
             status: "on",
           })
           .returning({ id: products.id });
         productId = inserted[0]!.id;
       }
-      const cardCount = await db.select({ id: cards.id }).from(cards).where(eq(cards.productId, productId)).limit(1);
+      const cardCount = await db
+        .select({ id: cards.id })
+        .from(cards)
+        .where(eq(cards.productId, productId))
+        .limit(1);
       if (cardCount.length === 0) {
         await db.insert(cards).values(
           Array.from({ length: dp.count }, (_, i) => ({
             productId: productId!,
-            content: `DEMO-${dp.slug.toUpperCase()}-${String(i + 1).padStart(3, "0")}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+            content: `DEMO-${dp.slug.toUpperCase()}-${String(i + 1).padStart(3, "0")}-${Math.random()
+              .toString(36)
+              .slice(2, 8)
+              .toUpperCase()}`,
           }))
         );
       }

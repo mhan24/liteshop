@@ -8,6 +8,13 @@
       "when": 1792834141329,
       "tag": "0000_elite_thunderbird",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792920541329,
+      "tag": "0001_litepay_gateway",
+      "breakpoints": true
     }
   ]
 }

@@ -8,8 +8,11 @@ export const metadata: Metadata = {
 
 export default function CartPage() {
   return (
-    <div className="space-y-6">
-      <h1 className="font-serif text-2xl font-semibold tracking-tight">购物车</h1>
+    <div className="mx-auto max-w-3xl space-y-8">
+      <header className="space-y-2 border-b border-line pb-6">
+        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">购物车</p>
+        <h1 className="font-serif text-3xl font-semibold tracking-[-0.025em]">确认要买的东西</h1>
+      </header>
       <CartList />
     </div>
   );

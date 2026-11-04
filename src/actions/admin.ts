@@ -4,10 +4,9 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { admins, categories, cards, paymentChannels, products } from "@/db/schema";
-import { normalizeOrigin } from "@/lib/http-url";
-import { encryptSecret } from "@/lib/secret-box";
-import { normalizeChannelKey } from "@/lib/order-no";
+import { admins, categories, cards, products } from "@/db/schema";
+import { normalizeHttpUrl } from "@/lib/http-url";
+import { encryptSecret, isEncryptedSecret } from "@/lib/secret-box";
 import {
   assertCsrf,
   audit,
@@ -21,19 +20,22 @@ import {
 } from "@/server/admin-auth";
 import {
   adminCloseOrder,
-  manualDeliver,
   resolveReconcilingAsNotCreated,
   resolveReconcilingAsPaid,
   retryDelivery,
 } from "@/server/orders";
 import { sendTestEmail } from "@/server/mail";
 import {
+  DEFAULT_TIMEOUT_SECONDS,
+  MAX_TIMEOUT_SECONDS,
+  MIN_TIMEOUT_SECONDS,
+} from "@/server/payments/litepay";
+import {
   bumpAdminSessionVersion,
   getSetting,
   SETTING_KEYS,
   setSetting,
 } from "@/server/settings";
-import { SUPPORTED_CURRENCIES } from "@/server/settings";
 
 /** 管理后台 Server Actions（统一 useActionState 内联反馈，POST 直返，无 GET 重定向） */
 
@@ -164,9 +166,7 @@ const productSchema = z.object({
     .trim()
     .regex(/^[a-z0-9][a-z0-9-]{1,127}$/),
   description: z.string().max(20_000).default(""),
-  priceMinor: z.coerce.number().int().min(0).max(10_000_000_000),
-  deliveryType: z.enum(["auto", "manual"]),
-  stockLimit: z.coerce.number().int().min(0).max(1_000_000).nullable(),
+  priceMinor: z.coerce.number().int().min(1).max(99_999_999),
   status: z.enum(["on", "off"]),
   imageUrl: z.string().trim().max(2000).optional(),
   seoDescription: z.string().trim().max(300).optional(),
@@ -174,7 +174,6 @@ const productSchema = z.object({
 });
 
 function parseProductForm(formData: FormData): z.infer<typeof productSchema> | null {
-  const stockRaw = String(formData.get("stockLimit") ?? "").trim();
   const catRaw = String(formData.get("categoryId") ?? "").trim();
   const imageRaw = String(formData.get("imageUrl") ?? "").trim();
   return productSchema.safeParse({
@@ -182,8 +181,6 @@ function parseProductForm(formData: FormData): z.infer<typeof productSchema> | n
     slug: String(formData.get("slug") ?? "").trim(),
     description: String(formData.get("description") ?? ""),
     priceMinor: formData.get("priceMinor"),
-    deliveryType: formData.get("deliveryType") === "manual" ? "manual" : "auto",
-    stockLimit: stockRaw === "" ? null : Number(stockRaw),
     status: formData.get("status") === "off" ? "off" : "on",
     imageUrl: imageRaw || undefined,
     seoDescription: String(formData.get("seoDescription") ?? "").trim() || undefined,
@@ -199,15 +196,13 @@ export async function createProductAction(
     const csrfErr = await checkCsrf(formData);
     if (csrfErr) return csrfErr;
     const input = parseProductForm(formData);
-    if (!input) return { ok: false, message: "商品字段不合法（名称 / slug / 价格必填）" };
+    if (!input) return { ok: false, message: "商品字段不合法：名称、slug、价格（美分）必填" };
     try {
       await db.insert(products).values({
         name: input.name,
         slug: input.slug,
         description: input.description,
         priceCents: input.priceMinor,
-        deliveryType: input.deliveryType,
-        stockLimit: input.stockLimit,
         status: input.status,
         imageUrl: input.imageUrl ?? null,
         seoDescription: input.seoDescription ?? null,
@@ -240,8 +235,6 @@ export async function updateProductAction(
         slug: input.slug,
         description: input.description,
         priceCents: input.priceMinor,
-        deliveryType: input.deliveryType,
-        stockLimit: input.stockLimit,
         status: input.status,
         imageUrl: input.imageUrl ?? null,
         seoDescription: input.seoDescription ?? null,
@@ -359,143 +352,64 @@ export async function retryDeliveryAction(
   });
 }
 
-export async function manualDeliverAction(
+/* ===== 支付网关（LitePay，单实例） ===== */
+
+/**
+ * 保存 LitePay 网关配置：地址、接口令牌、订单有效期、收银台币种与重选开关。
+ * 令牌不回显：留空 = 保持原值，输入 __CLEAR__ 表示清除。
+ */
+export async function saveLitepayAction(
   _prev: AdminActionResult | null,
   formData: FormData
 ): Promise<AdminActionResult> {
   return withAdmin(async (session) => {
     const csrfErr = await checkCsrf(formData);
     if (csrfErr) return csrfErr;
-    return manualDeliver(
-      String(formData.get("orderNo") ?? ""),
-      String(formData.get("content") ?? ""),
-      session.username
-    );
-  });
-}
 
-/* ===== 支付渠道（统一保存） ===== */
+    const enabled = String(formData.get("litepayEnabled") ?? "") === "on";
+    const apiBaseRaw = String(formData.get("litepayApiBase") ?? "").trim();
+    const submitted = String(formData.get("litepayToken") ?? "").trim();
+    const timeoutSeconds = Number(formData.get("litepayTimeout") ?? DEFAULT_TIMEOUT_SECONDS);
+    const currencies = String(formData.get("litepayCurrencies") ?? "").trim().slice(0, 64);
+    const reselect = String(formData.get("litepayReselect") ?? "") === "on";
 
-function channelFields(formData: FormData, prefix: string) {
-  return {
-    enabled: String(formData.get(`${prefix}.enabled`) ?? "") === "on",
-    apiBase: String(formData.get(`${prefix}.apiBase`) ?? "").trim(),
-    token: String(formData.get(`${prefix}.token`) ?? "").trim(),
-    timeoutSeconds: Number(formData.get(`${prefix}.timeout`) ?? 600),
-    currencies: String(formData.get(`${prefix}.currencies`) ?? "").trim(),
-    displayName: String(formData.get(`${prefix}.displayName`) ?? "").trim().slice(0, 30),
-    sortOrder: Number(formData.get(`${prefix}.sortOrder`) ?? 0),
-    reselect: String(formData.get(`${prefix}.reselect`) ?? "") === "on",
-  };
-}
-
-function normalizeTimeout(n: number): number {
-  if (!Number.isFinite(n)) return 600;
-  return Math.min(Math.max(Math.trunc(n), 180), 3600);
-}
-
-export interface ChannelSaveState extends AdminActionResult {
-  detail?: Array<{ key: string; enabled: boolean }>;
-}
-
-/**
- * 统一保存全部支付渠道：一次提交、全部校验后落库；
- * 结果经 useActionState 内联渲染（POST 直返，无 GET 重定向）。
- */
-export async function savePaymentChannelsAction(
-  _prev: ChannelSaveState | null,
-  formData: FormData
-): Promise<ChannelSaveState> {
-  return withAdmin(async (session) => {
-    const csrfErr = await checkCsrf(formData);
-    if (csrfErr) return csrfErr;
-
-    const rows = await db.select().from(paymentChannels);
-    const detail: Array<{ key: string; enabled: boolean }> = [];
-    for (const row of rows) {
-      if (row.type === "mock") continue;
-      const f = channelFields(formData, row.key);
-      const apiOrigin = f.apiBase ? normalizeOrigin(f.apiBase) : null;
-      if (f.apiBase && !apiOrigin) {
-        return { ok: false, message: `${row.key} 网关地址不合法（仅接受 http/https 域名）` };
-      }
-      if (f.enabled && (!apiOrigin || !f.token)) {
-        return {
-          ok: false,
-          message: `启用 ${row.key} 前请填写网关地址与对接令牌（令牌留空表示沿用已保存值）`,
-        };
-      }
-      const existingToken = row.tokenEnc ? "set" : "";
-      const tokenEnc =
-        f.token === "__CLEAR__" ? null : f.token !== "" ? encryptSecret(f.token) : row.tokenEnc;
-      if (f.enabled && !tokenEnc && existingToken !== "set") {
-        return { ok: false, message: `启用 ${row.key} 前请填写对接令牌` };
-      }
-      await db
-        .update(paymentChannels)
-        .set({
-          enabled: f.enabled,
-          apiBase: apiOrigin,
-          tokenEnc,
-          timeoutSeconds: normalizeTimeout(f.timeoutSeconds),
-          currencies: f.currencies || null,
-          displayName: f.displayName || row.displayName,
-          sortOrder: Number.isFinite(f.sortOrder) && f.sortOrder >= 0 ? Math.trunc(Math.min(f.sortOrder, 999)) : 0,
-          reselect: f.reselect,
-          updatedAt: new Date(),
-        })
-        .where(eq(paymentChannels.id, row.id));
-      detail.push({ key: row.key, enabled: f.enabled });
-      await audit("channel.save", `${row.key} enabled=${f.enabled}`, session.username);
+    const apiBase = apiBaseRaw === "" ? null : normalizeHttpUrl(apiBaseRaw);
+    if (apiBaseRaw !== "" && !apiBase) {
+      return { ok: false, message: "网关地址不合法（只接受 http/https 域名）" };
     }
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < MIN_TIMEOUT_SECONDS || timeoutSeconds > MAX_TIMEOUT_SECONDS) {
+      return { ok: false, message: `订单有效期需在 ${MIN_TIMEOUT_SECONDS}–${MAX_TIMEOUT_SECONDS} 秒之间` };
+    }
+
+    const existing = await getSetting(SETTING_KEYS.litepayTokenEnc);
+    const tokenEnc =
+      submitted === "__CLEAR__"
+        ? null
+        : submitted !== ""
+          ? encryptSecret(submitted)
+          : isEncryptedSecret(existing)
+            ? existing
+            : null;
+    if (enabled && (!apiBase || !tokenEnc)) {
+      return {
+        ok: false,
+        message: "启用网关前请填写网关地址与接口令牌（令牌留空表示沿用已保存值）",
+      };
+    }
+
+    await setSetting(SETTING_KEYS.litepayEnabled, enabled ? "1" : "0");
+    await setSetting(SETTING_KEYS.litepayApiBase, apiBase ?? "");
+    if (tokenEnc === null) await setSetting(SETTING_KEYS.litepayTokenEnc, "");
+    else if (tokenEnc !== existing) await setSetting(SETTING_KEYS.litepayTokenEnc, tokenEnc);
+    await setSetting(SETTING_KEYS.litepayTimeoutSeconds, String(Math.trunc(timeoutSeconds)));
+    await setSetting(SETTING_KEYS.litepayCurrencies, currencies);
+    await setSetting(SETTING_KEYS.litepayReselect, reselect ? "1" : "0");
+    await audit("settings.litepay", `enabled=${enabled}`, session.username);
     revalidateStorefront();
     return {
       ok: true,
-      message: `支付渠道配置已保存（${detail.map((d) => `${d.key}=${d.enabled ? "启用" : "停用"}`).join("，")}）`,
-      detail,
+      message: enabled ? "支付网关配置已保存并启用" : "支付网关配置已保存（当前停用，前台无法下单）",
     };
-  });
-}
-
-export async function createChannelAction(
-  _prev: AdminActionResult | null,
-  formData: FormData
-): Promise<AdminActionResult> {
-  return withAdmin(async (session) => {
-    const csrfErr = await checkCsrf(formData);
-    if (csrfErr) return csrfErr;
-    const key = normalizeChannelKey(String(formData.get("key") ?? ""));
-    const displayName = String(formData.get("displayName") ?? "").trim().slice(0, 30);
-    if (!key || !displayName) return { ok: false, message: "渠道标识（2-32 位小写字母数字短横线）与名称必填" };
-    try {
-      await db.insert(paymentChannels).values({
-        key,
-        type: "epusdt",
-        displayName,
-        timeoutSeconds: 600,
-      });
-    } catch {
-      return { ok: false, message: "渠道创建失败（标识可能已存在）" };
-    }
-    await audit("channel.create", key, session.username);
-    revalidatePath("/admin/payments");
-    return { ok: true, message: "渠道已创建，请在下方填写网关地址与令牌" };
-  });
-}
-
-export async function deleteChannelAction(
-  _prev: AdminActionResult | null,
-  formData: FormData
-): Promise<AdminActionResult> {
-  return withAdmin(async (session) => {
-    const csrfErr = await checkCsrf(formData);
-    if (csrfErr) return csrfErr;
-    const id = Number(formData.get("id"));
-    if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
-    await db.delete(paymentChannels).where(eq(paymentChannels.id, id));
-    await audit("channel.delete", String(id), session.username);
-    revalidatePath("/admin/payments");
-    return { ok: true, message: "渠道已删除" };
   });
 }
 
@@ -510,7 +424,6 @@ export async function saveSiteSettingsAction(
     if (csrfErr) return csrfErr;
     const siteName = String(formData.get("siteName") ?? "").trim().slice(0, 50);
     const siteUrl = String(formData.get("siteUrl") ?? "").trim();
-    const currency = String(formData.get("currency") ?? "USD").toUpperCase();
     const supportUrl = String(formData.get("supportUrl") ?? "").trim();
     const threshold = Number(formData.get("threshold") ?? 5);
 
@@ -519,10 +432,6 @@ export async function saveSiteSettingsAction(
       return { ok: false, message: "站点地址需以 http:// 或 https:// 开头" };
     }
     if (siteUrl) await setSetting(SETTING_KEYS.siteUrl, siteUrl.replace(/\/+$/, ""));
-    if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
-      return { ok: false, message: "币种不支持" };
-    }
-    await setSetting(SETTING_KEYS.currency, currency);
     if (supportUrl) {
       if (!/^https?:\/\//.test(supportUrl)) return { ok: false, message: "客服地址需为 http/https 链接" };
       await setSetting(SETTING_KEYS.supportUrl, supportUrl);
@@ -532,7 +441,7 @@ export async function saveSiteSettingsAction(
     if (Number.isFinite(threshold) && threshold >= 0) {
       await setSetting(SETTING_KEYS.cardLowStockThreshold, String(Math.trunc(threshold)));
     }
-    await audit("settings.site", `currency=${currency}`, session.username);
+    await audit("settings.site", siteName || "site", session.username);
     revalidateStorefront();
     return { ok: true, message: "站点设置已保存" };
   });

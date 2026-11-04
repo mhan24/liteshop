@@ -4,16 +4,23 @@ import { deliveries, orders } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
 import { csrfToken } from "@/server/admin-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge, Label, Textarea } from "@/components/ui/input";
+import { Badge } from "@/components/ui/input";
 import { AdminForm } from "@/components/admin/admin-form";
 import {
   closeOrderAction,
-  manualDeliverAction,
   resolveReconcilingAction,
   retryDeliveryAction,
 } from "@/actions/admin";
 
 export const dynamic = "force-dynamic";
+
+const STATUS_LABEL: Record<string, { label: string; tone: "neutral" | "green" | "yellow" | "blue" | "red" }> = {
+  pending: { label: "待支付", tone: "neutral" },
+  paid: { label: "已付款待发卡", tone: "blue" },
+  completed: { label: "已完成", tone: "green" },
+  closed: { label: "已关闭", tone: "neutral" },
+  reconciling: { label: "待核实", tone: "yellow" },
+};
 
 export default async function AdminOrdersPage() {
   const csrf = await csrfToken();
@@ -24,10 +31,12 @@ export default async function AdminOrdersPage() {
   return (
     <div className="space-y-6">
       <h1 className="font-serif text-xl font-semibold">订单</h1>
-      {rows.length === 0 ? <p className="text-sm text-muted">暂无订单</p> : null}
+      {rows.length === 0 ? <p className="text-sm text-muted">还没有订单。</p> : null}
+
       <ul className="space-y-4">
         {rows.map((o) => {
           const delivery = deliveryByOrder.get(o.id);
+          const status = STATUS_LABEL[o.status] ?? { label: o.status, tone: "neutral" as const };
           return (
             <li key={o.id}>
               <Card>
@@ -35,49 +44,43 @@ export default async function AdminOrdersPage() {
                   <div>
                     <CardTitle className="font-mono text-sm">{o.orderNo}</CardTitle>
                     <p className="text-xs text-muted">
-                      {o.email} · {formatMoney(o.totalCents, o.currency)} ·{" "}
-                      {o.createdAt.toLocaleString("zh-CN")}
+                      {o.email} · {formatMoney(o.totalCents)} · {o.createdAt.toLocaleString("zh-CN")}
                     </p>
                   </div>
-                  <Badge>{o.status}</Badge>
+                  <Badge tone={status.tone}>{status.label}</Badge>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {o.note ? <p className="text-sm text-muted">备注：{o.note}</p> : null}
+                  {o.note ? <p className="text-sm text-muted">买家备注：{o.note}</p> : null}
+
                   {o.status === "reconciling" ? (
                     <div className="flex flex-wrap gap-2">
-                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="确认已到账并交付">
+                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关已到账，发卡">
                         <input type="hidden" name="orderNo" value={o.orderNo} />
                         <input type="hidden" name="asPaid" value="1" />
                       </AdminForm>
-                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="确认未建单，关闭">
+                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关未建单，关闭">
                         <input type="hidden" name="orderNo" value={o.orderNo} />
                         <input type="hidden" name="asPaid" value="0" />
                       </AdminForm>
                     </div>
                   ) : null}
+
                   {o.status === "pending" ? (
                     <AdminForm action={closeOrderAction} csrf={csrf} submitLabel="关闭订单">
                       <input type="hidden" name="orderNo" value={o.orderNo} />
                     </AdminForm>
                   ) : null}
+
                   {o.status === "paid" ? (
-                    <div className="space-y-3">
-                      <AdminForm action={retryDeliveryAction} csrf={csrf} submitLabel="重试自动交付">
-                        <input type="hidden" name="orderNo" value={o.orderNo} />
-                      </AdminForm>
-                      <AdminForm action={manualDeliverAction} csrf={csrf} submitLabel="人工交付">
-                        <input type="hidden" name="orderNo" value={o.orderNo} />
-                        <div className="space-y-1.5">
-                          <Label htmlFor={`content-${o.id}`}>交付内容</Label>
-                          <Textarea id={`content-${o.id}`} name="content" rows={3} required />
-                        </div>
-                      </AdminForm>
-                    </div>
+                    <AdminForm action={retryDeliveryAction} csrf={csrf} submitLabel="重试发卡">
+                      <input type="hidden" name="orderNo" value={o.orderNo} />
+                    </AdminForm>
                   ) : null}
-                  {delivery && o.status === "completed" ? (
-                    <details>
-                      <summary className="cursor-pointer text-xs text-muted">查看已交付内容</summary>
-                      <pre className="mt-2 whitespace-pre-wrap break-all rounded-lg border border-line bg-bg p-3 text-xs">
+
+                  {delivery ? (
+                    <details className="faq-item">
+                      <summary className="summary-sm">已交付内容</summary>
+                      <pre className="mt-1 whitespace-pre-wrap break-all rounded-lg border border-line bg-bg p-3 text-xs">
                         {delivery.content}
                       </pre>
                     </details>

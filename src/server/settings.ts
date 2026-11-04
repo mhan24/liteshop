@@ -3,12 +3,11 @@ import { db } from "@/db";
 import { settings } from "@/db/schema";
 import { normalizeHttpUrl } from "@/lib/http-url";
 
-/** 站点级配置（KV 表；支付渠道在 payment_channels 表）。node-postgres 为异步 API。 */
+/** 站点级配置（KV 表）。node-postgres 为异步 API。 */
 
 export const SETTING_KEYS = {
   siteName: "site_name",
   siteUrl: "site_url",
-  currency: "currency",
   supportUrl: "support_url",
   cardLowStockThreshold: "card_low_stock_threshold",
   adminSessionVersion: "admin_session_version",
@@ -23,9 +22,14 @@ export const SETTING_KEYS = {
   turnstileSiteKey: "turnstile_site_key",
   turnstileSecretKey: "turnstile_secret_key",
   turnstileFallbackEnabled: "turnstile_fallback_enabled",
+  /* LitePay 网关（单一渠道；令牌 AES-GCM 加密落库） */
+  litepayEnabled: "litepay_enabled",
+  litepayApiBase: "litepay_api_base",
+  litepayTokenEnc: "litepay_token_enc",
+  litepayTimeoutSeconds: "litepay_timeout_seconds",
+  litepayCurrencies: "litepay_currencies",
+  litepayReselect: "litepay_reselect",
 } as const;
-
-export const SUPPORTED_CURRENCIES = ["USD", "CNY", "EUR", "GBP", "JPY"] as const;
 
 export async function getAllSettings(): Promise<Record<string, string>> {
   const rows = await db.select().from(settings);
@@ -51,12 +55,6 @@ export async function getSettingNumber(key: string, fallback: number): Promise<n
 
 export async function getSiteName(): Promise<string> {
   return (await getSetting(SETTING_KEYS.siteName))?.trim() || "liteshop";
-}
-
-/** 站点默认币种（新商品定价、订单与支付渠道 fiat 全站统一跟随） */
-export async function getSiteCurrency(): Promise<string> {
-  const c = (await getSetting(SETTING_KEYS.currency))?.trim().toUpperCase();
-  return (SUPPORTED_CURRENCIES as readonly string[]).includes(c ?? "") ? (c as string) : "USD";
 }
 
 /** 站点对外地址：settings.site_url 优先，回落 env。用于 canonical / sitemap / 支付回调与回跳 URL */

@@ -11,10 +11,10 @@ export async function generateMetadata(): Promise<Metadata> {
   }
   return {
     title: {
-      default: `${siteName} · 数字商品自动发货`,
+      default: `${siteName} · 数字卡密商店`,
       template: `%s · ${siteName}`,
     },
-    description: "挑选数字商品，付款后卡密自动发放到邮箱；凭订单号与查单密码随时取回。",
+    description: "数字卡密商店：付款确认后卡密自动发放，并发送到下单邮箱；凭订单号、邮箱与查单密码可再次查看。",
     metadataBase: new URL(process.env.SITE_URL ?? "http://localhost:3000"),
     openGraph: {
       type: "website",

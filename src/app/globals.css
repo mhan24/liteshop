@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
 /*
- * 设计基调：暖调单色画布 + 炭黑主按钮 + 粉彩点缀。
- * - 画布 #F7F6F3，卡片纯白，1px #EAEAEA 边框，最大圆角 12px
- * - 主按钮为炭黑 #111（不用彩色大面积按钮），hover #333
- * - 状态/提示一律用低饱和粉彩底 + 同系深色文字
+ * 设计基调：暖调单色画布 + 炭黑主按钮 + 低饱和粉彩点缀。
+ * - 画布 #F7F6F3，卡片纯白，1px #EAEAEA 边框，圆角最大 12px，无重阴影
+ * - 主按钮炭黑 #111（不用大面积彩色），hover #333，按下 scale(0.98)
+ * - 状态一律「粉彩底 + 同系深色文字」，颜色只承担语义
  */
 @theme {
   --color-bg: #f7f6f3;
@@ -19,7 +19,6 @@
   --color-danger: #9f2f2d;
   --color-success: #346538;
 
-  /* 粉彩 tint：底色 + 同系文字色（边框用 fg/25 之类透明度派生） */
   --color-tint-red: #fdebec;
   --color-tint-red-fg: #9f2f2d;
   --color-tint-blue: #e1f3fe;
@@ -51,7 +50,6 @@ body {
   color: #111111;
 }
 
-/* 焦点可见性（无障碍） */
 :focus-visible {
   outline: 2px solid #111111;
   outline-offset: 2px;
@@ -59,7 +57,7 @@ body {
 
 /*
  * 滚动入场：translateY(12px) + opacity，600ms 减速曲线；
- * --reveal-index 实现 80ms 步进交错；系统减少动效时直接呈现。
+ * --reveal-index 控制 80ms 交错步进。系统减少动效时直接呈现。
  */
 .reveal {
   opacity: 0;
@@ -79,4 +77,76 @@ body {
     transform: none;
     transition: none;
   }
+}
+
+/*
+ * 常见问题：去掉容器盒子，只用 1px 分隔线；
+ * 开合用右上角的 + / −，不引入图标库。
+ */
+.faq-item > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 1.125rem 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+.faq-item > summary::-webkit-details-marker {
+  display: none;
+}
+.faq-item > summary::after {
+  content: "+";
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--color-muted);
+  flex: none;
+}
+.faq-item[open] > summary::after {
+  content: "−";
+}
+/* 后台/次要位置用的紧凑开关 */
+.faq-item > summary.summary-sm {
+  padding: 0.5rem 0;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+.faq-item > summary:hover::after {
+  color: var(--color-fg);
+}
+.faq-answer {
+  padding-bottom: 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.75;
+  color: var(--color-muted);
+  max-width: 46rem;
+}
+
+/* 分类筛选：静态链接，靠边框与底色区分选中态 */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 2rem;
+  padding: 0 0.875rem;
+  border: 1px solid var(--color-line);
+  border-radius: 9999px;
+  background: transparent;
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+.chip:hover {
+  color: var(--color-fg);
+  border-color: #dedcd8;
+}
+.chip[data-active="true"] {
+  background: #111111;
+  border-color: #111111;
+  color: #ffffff;
 }

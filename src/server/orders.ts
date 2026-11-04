@@ -11,25 +11,23 @@ import {
 } from "@/db/schema";
 import { generateOrderNo } from "@/lib/order-no";
 import { generateQueryPassword, hashQueryPassword } from "@/lib/query-password";
-import { sha256Hex } from "@/lib/epusdt";
+import { sha256Hex } from "@/lib/litepay-sign";
 import { toMinorUnits } from "@/lib/money";
-import {
-  releaseStock,
-  reserveStock,
-  sellReservedCards,
-} from "./catalog";
-import { getAdapter, getChannelById, getChannelByKey, listEnabledChannels } from "./payments";
-import type { ChannelRuntime, NotifyPayload } from "./payments/types";
+import { releaseStock, reserveStock, sellReservedCards } from "./catalog";
+import { getActiveGateway, getAdapter, getGatewayByType, webhookPath } from "./payments";
+import type { GatewayType, NotifyPayload } from "./payments/types";
 import { getSiteUrl } from "./settings";
 
 /**
  * 订单服务：创建、支付回调确认、状态机、原子发卡、过期清扫。
  *
+ * 站点只有一种履约方式：卡密自动发货。支付走单一 LitePay 网关。
+ *
  * 安全不变量：
  * - 金额永远由服务端按商品价格计算，买家输入只含 slug + 数量
  * - 履约只信**验签通过的服务端回调**；前端回跳仅用于展示
  * - 卡密分配在数据库事务内完成（FOR UPDATE SKIP LOCKED），一卡不会两卖
- * - 回调幂等：payments(channel_id, provider_ref) 唯一 + notify_logs(payload_hash) 去重
+ * - 回调幂等：payments(channel, provider_ref) 唯一 + notify_logs(payload_hash) 去重
  * - 创建结果未知（超时/5xx）→ reconciling，绝不释放库存（网关可能已建单）
  */
 
@@ -70,14 +68,12 @@ export interface CreateOrderInput {
   email: string;
   items: CheckoutItemInput[];
   note?: string;
-  channelKey?: string;
 }
 
 export interface CreateOrderResult {
   orderNo: string;
   queryPassword: string;
   totalCents: number;
-  currency: string;
   status: string;
   paymentUrl: string | null;
   reconciling: boolean;
@@ -99,15 +95,15 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   if (items.some((i) => i.quantity < 1 || i.quantity > 99)) {
     throw new OrderError("INVALID_INPUT", "单件商品数量需在 1-99 之间");
   }
+  // 网关没配置就不要建单：否则会留下占着卡密却无法付款的僵尸订单
+  if (!(await getActiveGateway())) {
+    throw new OrderError("NO_PAYMENT_CHANNEL", "支付网关未配置或已停用，请稍后再试或联系客服");
+  }
   const note = input.note?.trim().slice(0, 500) ?? "";
   const queryPassword = generateQueryPassword();
   const passwordHash = await hashQueryPassword(queryPassword);
 
-  // 站点币种（全站统一；事务外读取即可——改配置不会影响进行中的下单）
-  const { getSiteCurrency } = await import("./settings");
-  const currency = await getSiteCurrency();
-
-  // 1) 事务：加载商品快照 → 建订单 + 明细 → 锁库存（单一事务；订单号冲突整体重试）
+  // 1) 事务：加载商品快照 → 建订单 + 明细 → 锁卡（订单号冲突整体重试）
   let created: {
     orderId: string;
     orderNo: string;
@@ -142,7 +138,6 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
             email,
             queryPasswordHash: passwordHash,
             status: "pending",
-            currency,
             subtotalCents: subtotal,
             totalCents: subtotal,
             note: note || null,
@@ -175,36 +170,24 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   }
   if (!created) throw new OrderError("ORDER_NO_COLLISION", "订单号生成失败");
 
-  // 2) 渠道建单（网络调用在库存事务之外）
+  // 2) 网关建单（网络调用在库存事务之外）
   const outcome = await startPaymentAttempt({
     orderId: created.orderId,
     orderNo: created.orderNo,
     amountCents: created.totalCents,
-    currency,
     subject: created.itemRows.map((r) => r.productName).join(" + "),
-    requestedChannelKey: input.channelKey,
   });
 
   if (outcome.kind === "rejected") {
-    await closeOrderInternal(created.orderId, created.orderNo, created.itemRows, "rejected");
-    throw new OrderError("PAYMENT_FAILED", `支付渠道创建失败: ${outcome.message}`);
+    await closeOrderInternal(created.orderId, created.orderNo, "rejected");
+    throw new OrderError("PAYMENT_FAILED", `支付网关建单失败: ${outcome.message}`);
   }
   if (outcome.kind === "unknown") {
-    await db.transaction(async (tx) => {
-      const rows = await tx.select().from(orders).where(eq(orders.id, created.orderId)).limit(1).for("update");
-      const order = rows[0];
-      if (!order || order.status !== "pending") return;
-      assertTransition(order.status, "reconciling");
-      await tx
-        .update(orders)
-        .set({ status: "reconciling", expiresAt: null, updatedAt: new Date() })
-        .where(eq(orders.id, created.orderId));
-    });
+    await markReconciling(created.orderId);
     return {
       orderNo: created.orderNo,
       queryPassword,
       totalCents: created.totalCents,
-      currency,
       status: "reconciling",
       paymentUrl: null,
       reconciling: true,
@@ -214,7 +197,6 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     orderNo: created.orderNo,
     queryPassword,
     totalCents: created.totalCents,
-    currency,
     status: "pending",
     paymentUrl: outcome.payment.paymentUrl,
     reconciling: false,
@@ -223,6 +205,19 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { code?: string }).code === "23505";
+}
+
+async function markReconciling(orderId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const rows = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for("update");
+    const order = rows[0];
+    if (!order || order.status !== "pending") return;
+    assertTransition(order.status, "reconciling");
+    await tx
+      .update(orders)
+      .set({ status: "reconciling", expiresAt: null, updatedAt: new Date() })
+      .where(eq(orders.id, orderId));
+  });
 }
 
 interface PendingItemRow {
@@ -236,21 +231,20 @@ async function startPaymentAttempt(input: {
   orderId: string;
   orderNo: string;
   amountCents: number;
-  currency: string;
   subject: string;
-  requestedChannelKey?: string;
 }): Promise<
   | { kind: "created"; payment: { paymentUrl: string | null; expiresAt: Date | null } }
   | { kind: "rejected"; message: string }
   | { kind: "unknown"; message: string }
 > {
-  const channel = input.requestedChannelKey
-    ? ((await getChannelByKey(input.requestedChannelKey)) ?? (await requireDefaultChannel()))
-    : await requireDefaultChannel();
-  if (!channel) throw new OrderError("NO_PAYMENT_CHANNEL", "未启用任何支付渠道，请到后台设置");
-  const adapter = getAdapter(channel.type);
+  const gateway = await getActiveGateway();
+  if (!gateway) {
+    // 校验与调用之间网关被停用：按「明确拒绝」处理，让上层关单并退回卡密
+    return { kind: "rejected", message: "支付网关未配置或已停用" };
+  }
+  const adapter = getAdapter(gateway.type);
   const base = await getSiteUrl();
-  const notifyUrl = `${base}/api/webhooks/pay/${channel.key}`;
+  const notifyUrl = `${base}${webhookPath(gateway.type)}`;
   const redirectUrl = `${base}/pay/${input.orderNo}`;
 
   // 先落一条 pending 支付记录（作废旧尝试），让「unknown」也有归属
@@ -261,18 +255,16 @@ async function startPaymentAttempt(input: {
       .where(and(eq(payments.orderId, input.orderId), eq(payments.isCurrent, true)));
     await tx.insert(payments).values({
       orderId: input.orderId,
-      channelId: channel.id,
+      channel: gateway.type,
       status: "pending",
       isCurrent: true,
       amountCents: input.amountCents,
-      currency: input.currency,
     });
   });
 
-  const outcome = await adapter.createPayment(channel, {
+  const outcome = await adapter.createPayment(gateway.runtime, {
     orderNo: input.orderNo,
-    amountMinor: input.amountCents,
-    currency: input.currency,
+    amountCents: input.amountCents,
     subject: input.subject,
     notifyUrl,
     redirectUrl,
@@ -320,38 +312,20 @@ async function startPaymentAttempt(input: {
   return outcome;
 }
 
-async function requireDefaultChannel(): Promise<ChannelRuntime> {
-  const channels = await listEnabledChannels();
-  if (channels.length === 0) throw new OrderError("NO_PAYMENT_CHANNEL", "未启用任何支付渠道");
-  return channels[0]!;
-}
-
-/** 明确拒绝：补偿关单并释放库存 */
-async function closeOrderInternal(
-  orderId: string,
-  orderNo: string,
-  items: PendingItemRow[],
-  reason: string
-): Promise<void> {
+/** 明确拒绝：补偿关单并释放卡密 */
+async function closeOrderInternal(orderId: string, orderNo: string, reason: string): Promise<void> {
   await db.transaction(async (tx) => {
     const rows = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for("update");
     const order = rows[0];
     if (!order || order.status !== "pending") return;
     assertTransition(order.status, "closed");
-    await tx
-      .update(orders)
-      .set({ status: "closed", updatedAt: new Date() })
-      .where(eq(orders.id, order.id));
-    await releaseStock(
-      tx,
-      order.id,
-      items.map((i) => ({ productId: i.productId, quantity: i.quantity }))
-    );
+    await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
+    await releaseStock(tx, order.id);
     await tx.insert(notifyLogs).values({
-      channelKey: "internal",
+      channel: "internal",
       orderNo,
       payloadHash: sha256Hex(`rejected:${orderNo}:${reason}:${Date.now()}`),
-      payload: `支付创建被拒绝，订单已关闭并释放库存：${reason}`.slice(0, 2000),
+      payload: `网关建单被拒绝，订单已关闭并释放卡密：${reason}`.slice(0, 2000),
       handled: true,
     });
   });
@@ -371,15 +345,14 @@ export function rejectedNotifyStats(): Record<string, number> {
   return Object.fromEntries(rejectedNotify);
 }
 
-export async function handlePaymentWebhook(channelKey: string, rawBody: string): Promise<WebhookResult> {
-  const channel = await getChannelByKey(channelKey);
-  if (!channel) return { respond: "fail", handled: false, message: `未启用渠道: ${channelKey}` };
-  const adapter = getAdapter(channel.type);
-  const verification = adapter.verifyNotify(channel, rawBody);
+export async function handlePaymentWebhook(channel: GatewayType, rawBody: string): Promise<WebhookResult> {
+  const gateway = await getGatewayByType(channel);
+  const adapter = getAdapter(channel);
+  const verification = adapter.verifyNotify(gateway, rawBody);
 
   if (!verification.ok || !verification.payload) {
     const hour = Math.floor(Date.now() / 3600_000);
-    const key = `${channelKey}|${hour}`;
+    const key = `${channel}|${hour}`;
     rejectedNotify.set(key, (rejectedNotify.get(key) ?? 0) + 1);
     return { respond: "success", handled: false, message: verification.error ?? "验签失败" };
   }
@@ -388,7 +361,7 @@ export async function handlePaymentWebhook(channelKey: string, rawBody: string):
 
   try {
     await db.insert(notifyLogs).values({
-      channelKey,
+      channel,
       orderNo: payload.orderNo,
       providerRef: payload.providerRef,
       payloadHash,
@@ -420,13 +393,19 @@ export async function handlePaymentWebhook(channelKey: string, rawBody: string):
 
 async function processWebhook(
   tx: Tx,
-  channel: ChannelRuntime,
+  channel: GatewayType,
   payload: NotifyPayload,
   payloadHash: string
 ): Promise<WebhookResult> {
   const markHandled = async (handled: boolean) => {
     await tx.update(notifyLogs).set({ handled }).where(eq(notifyLogs.payloadHash, payloadHash));
   };
+
+  // LitePay 只会发成功通知；其它 status 属于别的 BEpusdt 网关语义，记录后忽略
+  if (payload.status !== 2) {
+    await markHandled(true);
+    return { respond: "success", handled: true, message: `非成功通知（status=${payload.status}），已忽略` };
+  }
 
   const orderRows = await tx
     .select()
@@ -444,7 +423,7 @@ async function processWebhook(
   const paymentRows = await tx
     .select()
     .from(payments)
-    .where(and(eq(payments.channelId, channel.id), eq(payments.providerRef, payload.providerRef)))
+    .where(and(eq(payments.channel, channel), eq(payments.providerRef, payload.providerRef)))
     .limit(1);
   let payment = paymentRows[0];
 
@@ -470,38 +449,6 @@ async function processWebhook(
     return { respond: "success", handled: false, message: "交易不属于当前订单" };
   }
 
-  if (payload.status === 1) {
-    await markHandled(true);
-    return { respond: "success", handled: true, message: "等待支付通知" };
-  }
-
-  // status=3 过期：仅当属于当前尝试且订单仍 pending 时关单
-  if (payload.status === 3) {
-    if (order.status !== "pending" || !payment.isCurrent) {
-      await markHandled(true);
-      return { respond: "success", handled: true, message: "过期通知，订单状态不变" };
-    }
-    assertTransition(order.status, "closed");
-    await tx
-      .update(orders)
-      .set({ status: "closed", updatedAt: new Date() })
-      .where(eq(orders.id, order.id));
-    await tx
-      .update(payments)
-      .set({ status: "expired", updatedAt: new Date() })
-      .where(eq(payments.id, payment.id));
-    const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, order.id));
-    await releaseStock(
-      tx,
-      order.id,
-      items.map((i) => ({ productId: i.productId, quantity: i.quantity }))
-    );
-    await markHandled(true);
-    return { respond: "success", handled: true, message: "订单已超时关闭" };
-  }
-
-  // ===== status=2 支付成功 =====
-
   if (payment.status === "confirmed") {
     await markHandled(true);
     return { respond: "success", handled: true, message: "该交易已确认（幂等）" };
@@ -513,7 +460,7 @@ async function processWebhook(
   }
   let amountMinor: number;
   try {
-    amountMinor = toMinorUnits(String(payload.amount), order.currency);
+    amountMinor = toMinorUnits(payload.amount);
   } catch {
     await markHandled(false);
     return { respond: "success", handled: false, message: "回调金额非法" };
@@ -555,11 +502,11 @@ async function processWebhook(
     .set({ status: "confirmed", confirmedAt: new Date(), updatedAt: new Date() })
     .where(eq(payments.id, payment.id));
 
-  const deliveryDone = await deliverAutoItems(tx, order.id);
+  const delivered = await deliverOrder(tx, order.id);
   await markHandled(true);
-  return deliveryDone
-    ? { respond: "success", handled: true, message: "自动发货完成" }
-    : { respond: "success", handled: true, message: "已确认支付，等待交付" };
+  return delivered
+    ? { respond: "success", handled: true, message: "已确认支付并发放卡密" }
+    : { respond: "success", handled: false, message: "已确认支付，但卡密不足，待人工处理" };
 }
 
 function normalizeAmount(v: string): string {
@@ -569,9 +516,9 @@ function normalizeAmount(v: string): string {
 
 /**
  * 自动发卡：reserved → sold，写入交付记录（deliveries.order_id 唯一 = 数据库级幂等）。
- * 全部条目为 auto 且卡密齐备 → completed；否则保持 paid（人工商品/防御性缺卡）。
+ * 卡密数量不足（例如后台删了已锁定的卡）时保留 paid，等补货后重试。
  */
-async function deliverAutoItems(tx: Tx, orderId: string): Promise<boolean> {
+export async function deliverOrder(tx: Tx, orderId: string): Promise<boolean> {
   const orderRows = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for("update");
   const order = orderRows[0];
   if (!order) return false;
@@ -579,42 +526,19 @@ async function deliverAutoItems(tx: Tx, orderId: string): Promise<boolean> {
   if (order.status !== "paid") return false;
 
   const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
-  const itemProducts: Array<{ item: (typeof items)[number]; product: typeof products.$inferSelect }> = [];
-  for (const item of items) {
-    if (item.productId === null) return false;
-    const rows = await tx.select().from(products).where(eq(products.id, item.productId)).limit(1);
-    const p = rows[0];
-    if (!p) return false;
-    itemProducts.push({ item, product: p });
-  }
-
-  const existing = await tx
-    .select()
-    .from(deliveries)
-    .where(eq(deliveries.orderId, orderId))
-    .limit(1);
-
+  const expectedCount = items.reduce((acc, i) => acc + i.quantity, 0);
   const sold = await sellReservedCards(tx, orderId);
-  const expectedCount = itemProducts
-    .filter((r) => r.product.deliveryType === "auto")
-    .reduce((acc, r) => acc + r.item.quantity, 0);
   if (sold.length < expectedCount) return false;
 
-  const autoContent = buildAutoContent(itemProducts, sold);
-  const manualPending = itemProducts.some((r) => r.product.deliveryType === "manual");
-
+  const content = buildDeliveryContent(items, sold);
+  const existing = await tx.select().from(deliveries).where(eq(deliveries.orderId, orderId)).limit(1);
   if (existing[0]) {
-    const merged = [existing[0].content, autoContent].filter(Boolean).join("\n\n");
+    const merged = [existing[0].content, content].filter(Boolean).join("\n\n");
     await tx.update(deliveries).set({ content: merged }).where(eq(deliveries.id, existing[0].id));
   } else {
-    await tx.insert(deliveries).values({
-      orderId,
-      content: autoContent,
-      cardIds: sold.map((c) => c.id),
-    });
+    await tx.insert(deliveries).values({ orderId, content, cardIds: sold.map((c) => c.id) });
   }
 
-  if (manualPending) return false;
   assertTransition(order.status, "completed");
   await tx
     .update(orders)
@@ -623,8 +547,8 @@ async function deliverAutoItems(tx: Tx, orderId: string): Promise<boolean> {
   return true;
 }
 
-function buildAutoContent(
-  itemProducts: Array<{ item: { productName: string }; product: typeof products.$inferSelect }>,
+function buildDeliveryContent(
+  items: Array<{ productId: number | null; productName: string; quantity: number }>,
   sold: Array<{ id: number; content: string; productId: number | null }>
 ): string {
   const byProduct = new Map<number, string[]>();
@@ -635,9 +559,10 @@ function buildAutoContent(
     byProduct.set(c.productId, list);
   }
   const sections: string[] = [];
-  for (const { item, product } of itemProducts) {
-    if (product.deliveryType !== "auto") continue;
-    const contents = byProduct.get(product.id) ?? [];
+  for (const item of items) {
+    if (item.productId === null) continue;
+    const contents = byProduct.get(item.productId) ?? [];
+    if (contents.length === 0) continue;
     sections.push(`【${item.productName}】\n${contents.join("\n")}`);
   }
   return sections.filter(Boolean).join("\n\n");
@@ -649,9 +574,9 @@ export interface SweepResult {
   closedOrders: string[];
 }
 
-/** 关闭过期 pending 订单并释放库存；同步作废过期支付记录 */
+/** 关闭过期 pending 订单并释放卡密；同步作废过期支付记录 */
 export async function sweepExpired(limit = 200): Promise<SweepResult> {
-  const cancels: Array<{ channel: ChannelRuntime; providerRef: string }> = [];
+  const cancels: Array<{ channel: GatewayType; providerRef: string }> = [];
   const closed = await db.transaction(async (tx) => {
     const now = new Date();
     const candidates = await tx
@@ -663,10 +588,7 @@ export async function sweepExpired(limit = 200): Promise<SweepResult> {
     const closedNos: string[] = [];
     for (const order of candidates) {
       assertTransition(order.status, "closed");
-      await tx
-        .update(orders)
-        .set({ status: "closed", updatedAt: new Date() })
-        .where(eq(orders.id, order.id));
+      await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
       const current = await tx
         .select()
         .from(payments)
@@ -678,24 +600,19 @@ export async function sweepExpired(limit = 200): Promise<SweepResult> {
           .set({ status: "expired", updatedAt: new Date() })
           .where(eq(payments.id, current[0].id));
         if (current[0].providerRef) {
-          const rt = await getChannelById(current[0].channelId);
-          if (rt) cancels.push({ channel: rt, providerRef: current[0].providerRef });
+          cancels.push({ channel: current[0].channel, providerRef: current[0].providerRef });
         }
       }
-      const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, order.id));
-      await releaseStock(
-        tx,
-        order.id,
-        items.map((i) => ({ productId: i.productId, quantity: i.quantity }))
-      );
+      await releaseStock(tx, order.id);
       closedNos.push(order.orderNo);
     }
     return closedNos;
   });
   for (const c of cancels) {
-    void getAdapter(c.channel.type)
-      .cancelPayment?.(c.channel, c.providerRef)
-      .then((r) => console.log(`[sweep-cancel] ${c.channel.key} ${c.providerRef} ok=${r.ok} ${r.message}`))
+    const gateway = await getGatewayByType(c.channel);
+    void getAdapter(c.channel)
+      .cancelPayment?.(gateway, c.providerRef)
+      .then((r) => console.log(`[sweep-cancel] ${c.channel} ${c.providerRef} ok=${r.ok} ${r.message}`))
       .catch((err) => console.warn("[sweep-cancel] failed", err));
   }
   return { closedOrders: closed };
@@ -711,7 +628,7 @@ export async function cancelPendingOrder(
   const no = orderNo.trim();
   const mail = email.trim().toLowerCase();
   if (!no || !mail) return { ok: false, message: "请提供订单号与下单邮箱" };
-  const cancelRef: { channel: ChannelRuntime; providerRef: string } | null = await db.transaction(
+  const cancelRef: { channel: GatewayType; providerRef: string } | null = await db.transaction(
     async (tx) => {
       const rows = await tx.select().from(orders).where(eq(orders.orderNo, no)).limit(1).for("update");
       const order = rows[0];
@@ -719,10 +636,7 @@ export async function cancelPendingOrder(
       if (order.email.trim().toLowerCase() !== mail) return null;
       if (order.status !== "pending") return null;
       assertTransition(order.status, "closed");
-      await tx
-        .update(orders)
-        .set({ status: "closed", updatedAt: new Date() })
-        .where(eq(orders.id, order.id));
+      await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
       const current = await tx
         .select()
         .from(payments)
@@ -734,25 +648,20 @@ export async function cancelPendingOrder(
           .set({ status: "expired", updatedAt: new Date() })
           .where(eq(payments.id, current[0].id));
       }
-      const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, order.id));
-      await releaseStock(
-        tx,
-        order.id,
-        items.map((i) => ({ productId: i.productId, quantity: i.quantity }))
-      );
+      await releaseStock(tx, order.id);
       if (current[0]?.providerRef) {
-        const rt = await getChannelById(current[0].channelId);
-        if (rt) return { channel: rt, providerRef: current[0].providerRef };
+        return { channel: current[0].channel, providerRef: current[0].providerRef };
       }
       return null;
     }
   );
   if (!cancelRef) return { ok: false, message: "订单不存在、邮箱不匹配或状态不可取消" };
-  void getAdapter(cancelRef.channel.type)
-    .cancelPayment?.(cancelRef.channel, cancelRef.providerRef)
+  const gateway = await getGatewayByType(cancelRef.channel);
+  void getAdapter(cancelRef.channel)
+    .cancelPayment?.(gateway, cancelRef.providerRef)
     .then((r) => console.log(`[buyer-cancel] ${cancelRef.providerRef} ok=${r.ok} ${r.message}`))
     .catch(() => undefined);
-  return { ok: true, message: "订单已取消" };
+  return { ok: true, message: "订单已取消，占用的卡密已退回库存" };
 }
 
 /** 待支付订单重新发起支付（旧尝试作废） */
@@ -771,32 +680,17 @@ export async function resumePayment(
     orderId: order.id,
     orderNo: order.orderNo,
     amountCents: order.totalCents,
-    currency: order.currency,
     subject: items.map((i) => i.productName).join(" + "),
   });
   if (outcome.kind === "created") {
     return { ok: true, message: "已创建新的支付", paymentUrl: outcome.payment.paymentUrl };
   }
   if (outcome.kind === "rejected") {
-    await closeOrderInternal(
-      order.id,
-      order.orderNo,
-      items.map((i) => ({ productId: i.productId ?? 0, productName: i.productName, quantity: i.quantity })),
-      "rejected"
-    );
-    return { ok: false, message: `支付渠道创建失败: ${outcome.message}` };
+    await closeOrderInternal(order.id, order.orderNo, "rejected");
+    return { ok: false, message: `支付网关建单失败: ${outcome.message}` };
   }
-  await db.transaction(async (tx) => {
-    const fresh = await tx.select().from(orders).where(eq(orders.id, order.id)).limit(1).for("update");
-    if (fresh[0]?.status === "pending") {
-      assertTransition("pending", "reconciling");
-      await tx
-        .update(orders)
-        .set({ status: "reconciling", expiresAt: null, updatedAt: new Date() })
-        .where(eq(orders.id, order.id));
-    }
-  });
-  return { ok: false, message: "支付渠道响应超时，订单已保留待对账" };
+  await markReconciling(order.id);
+  return { ok: false, message: "支付网关响应超时，订单已保留待对账" };
 }
 
 /* ================= 管理员操作 ================= */
@@ -816,10 +710,7 @@ export async function adminCloseOrder(
       return { ok: false as const, message: `订单状态 ${order.status} 不能关闭`, ref: null };
     }
     assertTransition(order.status, "closed");
-    await tx
-      .update(orders)
-      .set({ status: "closed", updatedAt: new Date() })
-      .where(eq(orders.id, order.id));
+    await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
     const current = await tx
       .select()
       .from(payments)
@@ -831,24 +722,18 @@ export async function adminCloseOrder(
         .set({ status: "expired", updatedAt: new Date() })
         .where(eq(payments.id, current[0].id));
     }
-    const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, order.id));
-    await releaseStock(
-      tx,
-      order.id,
-      items.map((i) => ({ productId: i.productId, quantity: i.quantity }))
-    );
+    await releaseStock(tx, order.id);
     await tx.insert(auditLogs).values({ actor, action: "order.close", detail: orderNo });
     const ref = current[0]?.providerRef
-      ? {
-          channel: await getChannelById(current[0].channelId),
-          providerRef: current[0].providerRef,
-        }
+      ? { channel: current[0].channel, providerRef: current[0].providerRef }
       : null;
-    return { ok: true as const, message: "订单已关闭", ref };
+    return { ok: true as const, message: "订单已关闭，卡密已退回库存", ref };
   });
-  if (result.ok && result.ref?.channel) {
-    void getAdapter(result.ref.channel.type)
-      .cancelPayment?.(result.ref.channel, result.ref.providerRef)
+  if (result.ok && result.ref) {
+    const ref = result.ref;
+    const gateway = await getGatewayByType(ref.channel);
+    void getAdapter(ref.channel)
+      .cancelPayment?.(gateway, ref.providerRef)
       .catch(() => undefined);
   }
   return { ok: result.ok, message: result.message };
@@ -865,18 +750,10 @@ export async function resolveReconcilingAsNotCreated(
     if (!order) return { ok: false, message: "订单不存在" };
     if (order.status !== "reconciling") return { ok: false, message: `订单状态 ${order.status} 无需此操作` };
     assertTransition(order.status, "closed");
-    await tx
-      .update(orders)
-      .set({ status: "closed", updatedAt: new Date() })
-      .where(eq(orders.id, order.id));
-    const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, order.id));
-    await releaseStock(
-      tx,
-      order.id,
-      items.map((i) => ({ productId: i.productId, quantity: i.quantity }))
-    );
+    await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
+    await releaseStock(tx, order.id);
     await tx.insert(auditLogs).values({ actor, action: "order.reconcile_close", detail: orderNo });
-    return { ok: true, message: "已确认网关未建单，订单关闭并释放库存" };
+    return { ok: true, message: "已确认网关未建单，订单关闭并释放卡密" };
   });
 }
 
@@ -907,62 +784,25 @@ export async function resolveReconcilingAsPaid(
         .where(eq(payments.id, current[0].id));
     }
     await tx.insert(auditLogs).values({ actor, action: "order.reconcile_paid", detail: orderNo });
-    const done = await deliverAutoItems(tx, order.id);
+    const done = await deliverOrder(tx, order.id);
     return done
-      ? { ok: true, message: "已确认到账并完成交付" }
-      : { ok: true, message: "已确认到账，等待交付" };
+      ? { ok: true, message: "已确认到账并发放卡密" }
+      : { ok: true, message: "已确认到账，但卡密不足，请补货后重试发放" };
   });
 }
 
-/** paid 订单重试自动交付 */
+/** paid 订单重试发卡（例如补货后） */
 export async function retryDelivery(orderNo: string, actor: string): Promise<{ ok: boolean; message: string }> {
   return db.transaction(async (tx) => {
     const rows = await tx.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1).for("update");
     const order = rows[0];
     if (!order) return { ok: false, message: "订单不存在" };
-    if (order.status !== "paid") return { ok: false, message: `订单状态 ${order.status} 无需重试交付` };
-    const done = await deliverAutoItems(tx, order.id);
+    if (order.status !== "paid") return { ok: false, message: `订单状态 ${order.status} 无需重试发卡` };
+    const done = await deliverOrder(tx, order.id);
     await tx.insert(auditLogs).values({ actor, action: "order.retry_delivery", detail: orderNo });
     return done
-      ? { ok: true, message: "交付完成" }
-      : { ok: false, message: "仍含未交付的人工商品或卡密不足" };
-  });
-}
-
-/** 人工交付：paid 订单录入内容 → completed */
-export async function manualDeliver(
-  orderNo: string,
-  content: string,
-  actor: string
-): Promise<{ ok: boolean; message: string }> {
-  const trimmed = content.trim();
-  if (!trimmed) return { ok: false, message: "交付内容不能为空" };
-  if (trimmed.length > 20_000) return { ok: false, message: "交付内容过长" };
-  return db.transaction(async (tx) => {
-    const rows = await tx.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1).for("update");
-    const order = rows[0];
-    if (!order) return { ok: false, message: "订单不存在" };
-    if (order.status !== "paid") return { ok: false, message: `订单状态 ${order.status} 不能人工交付` };
-    const existing = await tx
-      .select()
-      .from(deliveries)
-      .where(eq(deliveries.orderId, order.id))
-      .limit(1);
-    if (existing[0]) {
-      await tx
-        .update(deliveries)
-        .set({ content: existing[0].content ? `${existing[0].content}\n\n${trimmed}` : trimmed })
-        .where(eq(deliveries.id, existing[0].id));
-    } else {
-      await tx.insert(deliveries).values({ orderId: order.id, content: trimmed, cardIds: [] });
-    }
-    assertTransition(order.status, "completed");
-    await tx
-      .update(orders)
-      .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
-      .where(eq(orders.id, order.id));
-    await tx.insert(auditLogs).values({ actor, action: "order.manual_deliver", detail: orderNo });
-    return { ok: true, message: "人工交付完成" };
+      ? { ok: true, message: "卡密已发放，订单完成" }
+      : { ok: false, message: "卡密数量不足，请先导入卡密再重试" };
   });
 }
 
@@ -1014,11 +854,7 @@ export async function getOrderWithItems(orderNo: string) {
   const order = rows[0];
   if (!order) return null;
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
-  const deliveryRows = await db
-    .select()
-    .from(deliveries)
-    .where(eq(deliveries.orderId, order.id))
-    .limit(1);
+  const deliveryRows = await db.select().from(deliveries).where(eq(deliveries.orderId, order.id)).limit(1);
   const paymentRows = await db
     .select()
     .from(payments)

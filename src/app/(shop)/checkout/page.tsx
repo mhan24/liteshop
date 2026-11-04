@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { listEnabledChannels } from "@/server/payments";
-import { getSiteCurrency, getTurnstileClientConfig } from "@/server/settings";
+import { getGatewayStatus } from "@/server/payments";
+import { getTurnstileClientConfig } from "@/server/settings";
 import { CheckoutClient } from "@/components/shop/checkout-client";
 
 export const metadata: Metadata = {
@@ -11,19 +11,14 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function CheckoutPage() {
-  const [channels, currency, human] = await Promise.all([
-    listEnabledChannels(),
-    getSiteCurrency(),
-    getTurnstileClientConfig(),
-  ]);
+  const [gateway, human] = await Promise.all([getGatewayStatus(), getTurnstileClientConfig()]);
   return (
-    <div className="space-y-6">
-      <h1 className="font-serif text-2xl font-semibold tracking-[-0.02em]">结算</h1>
-      <CheckoutClient
-        currency={currency}
-        channels={channels.map((c) => ({ key: c.key, displayName: c.displayName }))}
-        human={human}
-      />
+    <div className="mx-auto max-w-4xl space-y-8">
+      <header className="space-y-2 border-b border-line pb-6">
+        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">结算</p>
+        <h1 className="font-serif text-3xl font-semibold tracking-[-0.025em]">填写邮箱，去付款</h1>
+      </header>
+      <CheckoutClient human={human} gatewayReady={gateway.ready} />
     </div>
   );
 }

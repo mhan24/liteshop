@@ -1,18 +1,18 @@
-import { hmacHex, parseJsonObject, safeEqualHex, sha256Hex } from "@/lib/epusdt";
+import { hmacHex, parseJsonObject, safeEqualHex, sha256Hex } from "@/lib/litepay-sign";
 import { minorToNumber } from "@/lib/money";
 import type {
-  ChannelRuntime,
   CreateOutcome,
   CreatePaymentInput,
+  GatewayRuntime,
   NotifyVerification,
   PaymentAdapter,
 } from "./types";
 
 /**
- * 本地模拟支付（仅 PAYMENT_DRIVER=mock 时启用；生产禁用）。
+ * 进程内模拟支付（仅 PAYMENT_DRIVER=mock 时启用；生产环境不会走到）。
  *
- * 收银台 = 本站 /pay/mock 页面；回调由页面/测试用 HMAC-SHA256 签名构造，
- * 完整跑通「下单 → 回调 → 原子发卡」链路，无需真实网关。
+ * 收银台 = 本站 /pay/mock 页面；回调由页面/测试用 HMAC-SHA256 构造，
+ * 完整跑通「下单 → 回调 → 原子发卡」链路，不依赖任何外部服务。
  */
 
 export const MOCK_TOKEN = "mock-token";
@@ -20,16 +20,14 @@ export const MOCK_TOKEN = "mock-token";
 export function buildMockNotifyBody(input: {
   orderNo: string;
   providerRef: string;
-  amountMinor: number;
-  currency: string;
-  status: 1 | 2 | 3;
-  fiatAmount: number;
+  amountCents: number;
+  status: number;
 }): string {
   const body: Record<string, unknown> = {
     trade_id: input.providerRef,
     order_id: input.orderNo,
-    amount: input.fiatAmount,
-    actual_amount: input.fiatAmount,
+    amount: minorToNumber(input.amountCents),
+    actual_amount: minorToNumber(input.amountCents),
     token: "mock",
     status: input.status,
   };
@@ -40,7 +38,7 @@ export function buildMockNotifyBody(input: {
 export const mockAdapter: PaymentAdapter = {
   type: "mock",
 
-  async createPayment(_channel: ChannelRuntime, input: CreatePaymentInput): Promise<CreateOutcome> {
+  async createPayment(_gateway: GatewayRuntime, input: CreatePaymentInput): Promise<CreateOutcome> {
     const providerRef = `mock_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const url = `/pay/mock?order_no=${encodeURIComponent(input.orderNo)}&ref=${encodeURIComponent(providerRef)}`;
     return {
@@ -48,15 +46,15 @@ export const mockAdapter: PaymentAdapter = {
       payment: {
         providerRef,
         paymentUrl: url,
-        // 与回调 actual_amount 同口径（法币数值），保证快照核对一致
-        expectedAmount: String(minorToNumber(input.amountMinor, input.currency)),
+        // 与回调 actual_amount 同口径（美元数值），保证快照核对一致
+        expectedAmount: String(minorToNumber(input.amountCents)),
         expiresAt: new Date(Date.now() + 30 * 60_000),
         raw: { mock: true },
       },
     };
   },
 
-  verifyNotify(channel: ChannelRuntime, rawBody: string): NotifyVerification {
+  verifyNotify(_gateway: GatewayRuntime, rawBody: string): NotifyVerification {
     const parsed = parseJsonObject(rawBody);
     if (!parsed.ok) return { ok: false, error: parsed.error };
     const body = parsed.value;
@@ -66,9 +64,9 @@ export const mockAdapter: PaymentAdapter = {
       return { ok: false, error: "签名校验失败" };
     }
     const status = Number(rest["status"]);
-    if (![1, 2, 3].includes(status)) return { ok: false, error: "非法 status" };
-    const orderNo = String(rest["order_id"] ?? "");
-    const providerRef = String(rest["trade_id"] ?? "");
+    if (!Number.isInteger(status)) return { ok: false, error: "非法 status" };
+    const orderNo = String(rest["order_id"] ?? "").trim();
+    const providerRef = String(rest["trade_id"] ?? "").trim();
     if (!orderNo || !providerRef) return { ok: false, error: "缺少 order_id / trade_id" };
     return {
       ok: true,
@@ -77,7 +75,7 @@ export const mockAdapter: PaymentAdapter = {
         orderNo,
         amount: (rest["amount"] ?? null) as string | number | null,
         actualAmount: rest["actual_amount"] != null ? String(rest["actual_amount"]) : null,
-        status: status as 1 | 2 | 3,
+        status,
       },
     };
   },

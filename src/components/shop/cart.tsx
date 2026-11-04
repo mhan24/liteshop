@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useSyncExternalStore }
 
 /**
  * 轻量购物车：localStorage 持久化，useSyncExternalStore 订阅
- * （服务端快照恒为空数组 → 无水合不匹配；价格仅为展示快照，结算金额由服务端重算）。
+ * （服务端快照恒为空数组 → 无水合不匹配；价格只是展示快照，结算金额一律由服务端重算）。
  */
 
 export interface CartItem {
@@ -58,12 +58,11 @@ interface CartContextValue {
   remove: (slug: string) => void;
   clear: () => void;
   count: number;
-  currency: string;
 }
 
 const CartContext = createContext<CartContextValue | null>(null);
 
-export function CartProvider({ children, currency }: { children: React.ReactNode; currency: string }) {
+export function CartProvider({ children }: { children: React.ReactNode }) {
   const items = useSyncExternalStore(subscribe, read, getServerSnapshot);
 
   const add = useCallback((item: Omit<CartItem, "quantity">, quantity: number) => {
@@ -95,8 +94,8 @@ export function CartProvider({ children, currency }: { children: React.ReactNode
   const count = useMemo(() => items.reduce((acc, i) => acc + i.quantity, 0), [items]);
 
   const value = useMemo(
-    () => ({ items, add, setQuantity, remove, clear, count, currency }),
-    [items, add, setQuantity, remove, clear, count, currency]
+    () => ({ items, add, setQuantity, remove, clear, count }),
+    [items, add, setQuantity, remove, clear, count]
   );
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

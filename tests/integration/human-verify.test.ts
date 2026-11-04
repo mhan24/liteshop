@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { orders, settings } from "@/db/schema";
 import { checkoutAction, queryOrderAction } from "@/actions/shop";
-import { resetDb, seedAutoProduct, seedCurrency } from "../helpers";
+import { resetDb, seedAutoProduct } from "../helpers";
 import { SETTING_KEYS } from "@/server/settings";
 
 /**
@@ -54,7 +54,6 @@ describe("下单人机验证（checkoutAction）", () => {
   beforeEach(async () => {
     await resetDb();
     await seedAutoProduct("p1", 5);
-    await seedCurrency("USD");
   });
 
   it("未开启验证：无 token 正常下单（现状回归）", async () => {
@@ -105,7 +104,6 @@ describe("查单人机验证（queryOrderAction）", () => {
   beforeEach(async () => {
     await resetDb();
     await seedAutoProduct("p1", 5);
-    await seedCurrency("USD");
   });
 
   it("开启验证且未提供 token：拒绝查询", async () => {

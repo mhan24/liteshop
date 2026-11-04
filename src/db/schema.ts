@@ -16,13 +16,14 @@ import { sql } from "drizzle-orm";
 /**
  * 卡密商城数据模型（PostgreSQL，从零设计）。
  *
- * 金额一律 bigint「最小货币单位」（分），禁止浮点参与金额运算。
+ * 金额一律 bigint「美分」，禁止浮点参与金额运算（站点只有 USD 一种计价）。
  * 订单状态机：pending → paid → completed；pending → closed | reconciling；
  *            reconciling → paid | closed。终态：completed / closed。
  * 支付状态机：pending → confirmed | expired | failed；confirmed 之后若发现
  *            归属异常（订单已关闭收到到账）记为 late（对账特例，不推进订单）。
  * 卡密状态机：available → reserved（下单锁卡）→ sold（支付确认交付）；
  *            reserved → available（关单/过期释放）。
+ * 商品只有一种履约方式：卡密自动发货，库存即可用卡密数量。
  */
 
 /* ================= 站点配置（KV） ================= */
@@ -67,12 +68,8 @@ export const products = pgTable(
     slug: text("slug").notNull().unique(),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
-    /** 最小货币单位（分）；站点统一币种（settings.currency） */
+    /** 美分；站点只有 USD 一种计价 */
     priceCents: bigint("price_cents", { mode: "number" }).notNull(),
-    /** auto = 卡密自动发货；manual = 人工发货（email 通知 + 后台录入） */
-    deliveryType: text("delivery_type", { enum: ["auto", "manual"] }).notNull(),
-    /** manual 型库存上限；null = 不限库存 */
-    stockLimit: integer("stock_limit"),
     /** 上架状态 */
     status: text("status", { enum: ["on", "off"] }).notNull().default("on"),
     imageUrl: text("image_url"),
@@ -84,7 +81,7 @@ export const products = pgTable(
   (t) => [index("products_category_idx").on(t.categoryId), index("products_status_idx").on(t.status)]
 );
 
-/* ================= 卡密库存 ================= */
+/* ================= 订单 ================= */
 
 
 export const orders = pgTable(
@@ -99,7 +96,6 @@ export const orders = pgTable(
       enum: ["pending", "paid", "completed", "closed", "reconciling"],
     }).notNull()
       .default("pending"),
-    currency: text("currency").notNull(),
     subtotalCents: bigint("subtotal_cents", { mode: "number" }).notNull(),
     totalCents: bigint("total_cents", { mode: "number" }).notNull(),
     note: text("note"),
@@ -135,8 +131,7 @@ export const orderItems = pgTable(
   (t) => [index("order_items_order_idx").on(t.orderId)]
 );
 
-/* ================= 支付渠道与支付记录 ================= */
-
+/* ================= 卡密库存 ================= */
 
 export const cards = pgTable(
   "cards",
@@ -160,29 +155,12 @@ export const cards = pgTable(
   ]
 );
 
-/* ================= 订单 ================= */
+/* ================= 支付记录 ================= */
 
-
-export const paymentChannels = pgTable("payment_channels", {
-  id: serial("id").primaryKey(),
-  /** 回调路由标识（/api/webhooks/pay/[key]），创建后不变 */
-  key: text("key").notNull().unique(),
-  /** epusdt = BEpusdt 兼容收银台（覆盖 LitePay / 自建 BEpusdt）；mock = 本地模拟 */
-  type: text("type", { enum: ["epusdt", "mock"] }).notNull(),
-  displayName: text("display_name").notNull(),
-  apiBase: text("api_base"),
-  /** AES-256-GCM 加密存储（密钥派生自 AUTH_SECRET），前端永不回显 */
-  tokenEnc: text("token_enc"),
-  currencies: text("currencies"),
-  timeoutSeconds: integer("timeout_seconds").notNull().default(600),
-  reselect: boolean("reselect").notNull().default(true),
-  /** 前台展示排序：小在前；同序按 id */
-  sortOrder: integer("sort_order").notNull().default(0),
-  enabled: boolean("enabled").notNull().default(false),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
+/**
+ * 单一支付网关（LitePay）的支付尝试。
+ * channel 固定为 litepay，PAYMENT_DRIVER=mock 时为 mock（开发/测试）。
+ */
 
 export const payments = pgTable(
   "payments",
@@ -191,9 +169,8 @@ export const payments = pgTable(
     orderId: uuid("order_id")
       .notNull()
       .references(() => orders.id, { onDelete: "cascade" }),
-    channelId: integer("channel_id")
-      .notNull()
-      .references(() => paymentChannels.id),
+    /** 网关标识：litepay | mock */
+    channel: text("channel", { enum: ["litepay", "mock"] }).notNull(),
     /** 网关交易号（trade_id）；创建响应丢失时为 null */
     providerRef: text("provider_ref"),
     status: text("status", {
@@ -203,7 +180,6 @@ export const payments = pgTable(
     /** 每单只有一条「当前支付尝试」；重新发起支付会作废旧尝试 */
     isCurrent: boolean("is_current").notNull().default(true),
     amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
-    currency: text("currency").notNull(),
     /** 网关返回的应付加密货币数量快照（字符串原样保存，用于到账核对） */
     expectedAmount: text("expected_amount"),
     paymentUrl: text("payment_url"),
@@ -216,9 +192,9 @@ export const payments = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // 幂等锚点：同一渠道的同一笔网关交易只能确认一次
+    // 幂等锚点：同一网关的同一笔交易只能确认一次
     uniqueIndex("payments_channel_ref_uq")
-      .on(t.channelId, t.providerRef)
+      .on(t.channel, t.providerRef)
       .where(sql`provider_ref is not null`),
     index("payments_order_idx").on(t.orderId),
     index("payments_current_idx").on(t.orderId, t.isCurrent),
@@ -255,7 +231,7 @@ export const notifyLogs = pgTable(
   "notify_logs",
   {
     id: serial("id").primaryKey(),
-    channelKey: text("channel_key").notNull(),
+    channel: text("channel").notNull(),
     orderNo: text("order_no"),
     providerRef: text("provider_ref"),
     payloadHash: text("payload_hash").notNull(),

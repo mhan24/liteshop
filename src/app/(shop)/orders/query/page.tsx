@@ -4,7 +4,7 @@ import { getTurnstileClientConfig } from "@/server/settings";
 
 export const metadata: Metadata = {
   title: "订单查询",
-  description: "凭订单号、下单邮箱与查单密码，随时查看订单状态与已购卡密。",
+  description: "用订单号、下单邮箱与查单密码查看订单状态和已发放的卡密。",
   robots: { index: false, follow: false },
 };
 
@@ -14,10 +14,13 @@ export const dynamic = "force-dynamic";
 export default async function OrderQueryPage() {
   const human = await getTurnstileClientConfig();
   return (
-    <div className="mx-auto max-w-xl space-y-6">
-      <header className="text-center">
-        <h1 className="font-serif text-2xl font-semibold tracking-[-0.02em]">订单查询</h1>
-        <p className="mt-1 text-sm text-muted">输入订单号、下单邮箱与查单密码，查看订单与交付内容</p>
+    <div className="mx-auto max-w-xl space-y-8">
+      <header className="space-y-2 border-b border-line pb-6">
+        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">订单查询</p>
+        <h1 className="font-serif text-3xl font-semibold tracking-[-0.025em]">找回订单与卡密</h1>
+        <p className="text-sm leading-6 text-muted">
+          三项都要填对：订单号、下单时用的邮箱、建单时显示的 8 位查单密码。缺一项都查不到。
+        </p>
       </header>
       <OrderQueryClient human={human} />
     </div>

@@ -4,13 +4,12 @@ import { db } from "@/db";
 import { cards, orders, payments } from "@/db/schema";
 import { createOrder, OrderError } from "@/server/orders";
 import { hashQueryPassword, verifyQueryPassword } from "@/lib/query-password";
-import { resetDb, seedAutoProduct, seedManualProduct, seedCurrency } from "../helpers";
+import { resetDb, seedAutoProduct } from "../helpers";
 
-/** 游客下单：金额服务端计算、库存锁定、查单密码 */
+/** 游客下单：金额服务端计算、卡密锁定、一次性查单密码 */
 describe("游客下单（createOrder）", () => {
   beforeEach(async () => {
     await resetDb();
-    await seedCurrency("USD");
   });
 
   it("成功下单：锁定卡密、金额按服务端价格计算、返回一次性查单密码", async () => {
@@ -26,8 +25,7 @@ describe("游客下单（createOrder）", () => {
     expect(result.reconciling).toBe(false);
 
     const reserved = await db.select().from(cards).where(eq(cards.productId, productId));
-    const reservedCount = reserved.filter((c) => c.status === "reserved").length;
-    expect(reservedCount).toBe(2);
+    expect(reserved.filter((c) => c.status === "reserved")).toHaveLength(2);
 
     const orderRows = await db.select().from(orders).where(eq(orders.orderNo, result.orderNo));
     const order = orderRows[0]!;
@@ -38,6 +36,7 @@ describe("游客下单（createOrder）", () => {
     const payRows = await db.select().from(payments).where(eq(payments.orderId, order.id));
     expect(payRows).toHaveLength(1);
     expect(payRows[0]!.status).toBe("pending");
+    expect(payRows[0]!.channel).toBe("mock");
     expect(payRows[0]!.isCurrent).toBe(true);
   });
 
@@ -52,13 +51,13 @@ describe("游客下单（createOrder）", () => {
     expect(allCards.every((c) => c.status === "available")).toBe(true);
   });
 
-  it("manual 商品：库存上限原子扣减", async () => {
-    await seedManualProduct("m1", 2);
-    const r1 = await createOrder({ email: "buyer@test.dev", items: [{ slug: "m1", quantity: 2 }] });
-    expect(r1.totalCents).toBe(200);
+  it("下架商品不可下单", async () => {
+    const { products } = await import("@/db/schema");
+    await seedAutoProduct("off1", 3);
+    await db.update(products).set({ status: "off" }).where(eq(products.slug, "off1"));
     await expect(
-      createOrder({ email: "other@test.dev", items: [{ slug: "m1", quantity: 1 }] })
-    ).rejects.toThrow(/OUT_OF_STOCK|库存不足/);
+      createOrder({ email: "buyer@test.dev", items: [{ slug: "off1", quantity: 1 }] })
+    ).rejects.toThrow(/商品不存在或已下架/);
   });
 
   it("输入校验：邮箱 / 数量 / 空购物车", async () => {

@@ -19,7 +19,6 @@ export default async function AdminPanelLayout({ children }: { children: React.R
     [`${base}/orders`, "订单"],
     [`${base}/products`, "商品"],
     [`${base}/cards`, "卡密"],
-    [`${base}/payments`, "支付渠道"],
     [`${base}/settings`, "设置"],
   ] as const;
 

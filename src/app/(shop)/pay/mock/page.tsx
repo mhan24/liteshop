@@ -18,9 +18,10 @@ export default async function MockPayPage({
 
   return (
     <div className="mx-auto max-w-md space-y-5 rounded-xl border border-line bg-surface p-8">
-      <h1 className="font-serif text-xl font-semibold tracking-tight">模拟收银台（开发环境）</h1>
+      <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">开发环境</p>
+      <h1 className="font-serif text-xl font-semibold tracking-[-0.01em]">模拟收银台</h1>
       <p className="text-sm leading-6 text-muted">
-        订单 <span className="font-mono">{orderNo}</span> —— 点击下方按钮模拟支付成功回调，验证完整发卡链路。
+        订单 <span className="font-mono">{orderNo}</span>。点下面的按钮会发送一条支付成功回调，用来验证从回调到发卡的整条链路。
       </p>
       <form action={mockPayAction}>
         <input type="hidden" name="orderNo" value={orderNo} />

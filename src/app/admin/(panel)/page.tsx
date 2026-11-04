@@ -19,7 +19,7 @@ export default async function AdminDashboard() {
       <div className="grid gap-4 sm:grid-cols-4">
         <StatCard label="订单总数" value={String(total)} />
         <StatCard label="待支付" value={String(counts["pending"] ?? 0)} />
-        <StatCard label="待交付" value={String(counts["paid"] ?? 0)} />
+        <StatCard label="待发卡" value={String(counts["paid"] ?? 0)} />
         <StatCard label="待核实" value={String(counts["reconciling"] ?? 0)} />
       </div>
 
@@ -36,7 +36,7 @@ export default async function AdminDashboard() {
                   <p className="truncate text-xs text-muted">{o.email}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span>{formatMoney(o.totalCents, o.currency)}</span>
+                  <span>{formatMoney(o.totalCents)}</span>
                   <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">
                     {o.status}
                   </span>

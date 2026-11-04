@@ -1,54 +1,45 @@
 /**
- * 金额处理：内部一律「最小货币单位」整数（分），禁止浮点参与金额运算。
+ * 金额处理：内部一律「分」这个整数单位，禁止浮点参与金额运算。
  *
- * - 两位小数币种（USD/CNY/EUR/GBP）：1 元 = 100 分
- * - 零小数币种（JPY）：1 元 = 1（不接受小数）
+ * 站点只有 USD 一种计价：商品以美分定价，收银台（LitePay）按 USD 建单，
+ * 回调金额也按 USD 核对，因此不再保留多币种换算。
  */
 
-export const ZERO_DECIMAL_CURRENCIES = new Set(["JPY", "KRW"]);
+/** 全站计价币种（LitePay 只受理 USD） */
+export const SITE_CURRENCY = "USD";
 
 export class MoneyParseError extends Error {}
 
-export function isZeroDecimalCurrency(currency: string): boolean {
-  return ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase());
-}
-
-/** "12.34" / 12.34 / 1234 → 最小单位整数；拒绝非法与超精度输入 */
-export function toMinorUnits(input: string | number, currency: string): number {
-  const cur = currency.toUpperCase();
+/**
+ * "12.34" / 12.34 / 1234 → 美分整数。
+ *
+ * 网关回调用小数表示金额，最多可能出现 6 位小数（0.000001 USD）；
+ * 低于一分的尾数无法结算，出现即判为非法金额，绝不四舍五入。
+ */
+export function toMinorUnits(input: string | number): number {
   const s = String(input).trim();
-  const m = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(s);
+  const m = /^(\d+)(?:\.(\d{1,6}))?$/.exec(s);
   if (!m) throw new MoneyParseError(`非法金额: ${input}`);
-  const [, sign, intPart, frac = ""] = m;
-  if (isZeroDecimalCurrency(cur)) {
-    if (/[1-9]/.test(frac)) throw new MoneyParseError(`${cur} 不支持小数金额: ${input}`);
-    const v = Number(intPart);
-    return sign === "-" ? -v : v;
-  }
-  if (frac.length > 2) throw new MoneyParseError(`金额最多两位小数: ${input}`);
-  const frac2 = frac.padEnd(2, "0");
-  const v = Number(intPart) * 100 + Number(frac2 || "0");
-  return sign === "-" ? -v : v;
+  const [, intPart, frac = ""] = m;
+  if (/[1-9]/.test(frac.slice(2))) throw new MoneyParseError(`金额精度低于 0.01，无法结算: ${input}`);
+  const frac2 = frac.slice(0, 2).padEnd(2, "0");
+  return Number(intPart) * 100 + Number(frac2);
 }
 
-/** 最小单位整数 → "12.34" 展示字符串 */
-export function formatMinor(cents: number, currency: string): string {
-  if (isZeroDecimalCurrency(currency)) return String(cents);
+/** 美分整数 → "12.34" */
+export function formatMinor(cents: number): string {
   const neg = cents < 0;
   const abs = Math.abs(cents).toString().padStart(3, "0");
   const body = `${abs.slice(0, -2)}.${abs.slice(-2)}`;
   return neg ? `-${body}` : body;
 }
 
-/** 最小单位整数 → 符号 + 金额（如 "$12.34"） */
-export function formatMoney(cents: number, currency: string): string {
-  const symbols: Record<string, string> = { USD: "$", CNY: "¥", EUR: "€", GBP: "£", JPY: "¥" };
-  const sym = symbols[currency.toUpperCase()] ?? `${currency} `;
-  return `${sym}${formatMinor(cents, currency)}`;
+/** 美分整数 → "$12.34" */
+export function formatMoney(cents: number): string {
+  return `$${formatMinor(cents)}`;
 }
 
-/** 最小单位 → 网关 JSON number（两位小数可精确往返；零小数币种原样） */
-export function minorToNumber(cents: number, currency: string): number {
-  if (isZeroDecimalCurrency(currency)) return cents;
+/** 美分整数 → 网关 JSON number（两位小数可精确往返） */
+export function minorToNumber(cents: number): number {
   return cents / 100;
 }
