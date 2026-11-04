@@ -63,6 +63,22 @@ docker compose up -d --build
 上线后在后台「设置 · 支付网关」填 LitePay 的网关地址与接口令牌，并把
 `https://<站点>/api/webhooks/litepay` 填到网关的商店设置里。
 
+`scripts/deploy.sh` 默认在**本地**构建 arm64 镜像再上传。若执行部署的机器没有 Docker，
+可改为在服务器上构建（服务器本身就是 arm64，产物等价）：
+
+```bash
+git archive --format=tar.gz -o /tmp/src.tar.gz HEAD
+scp /tmp/src.tar.gz root@<host>:/tmp/
+ssh root@<host> 'rm -rf /opt/liteshop-build && mkdir -p /opt/liteshop-build \
+  && tar xzf /tmp/src.tar.gz -C /opt/liteshop-build \
+  && docker tag liteshop:latest liteshop:previous \
+  && cd /opt/liteshop-build && docker build --build-arg SITE_URL=https://<域名> -t liteshop:latest . \
+  && cd /opt/liteshop && docker compose up -d --no-build --remove-orphans app'
+```
+
+注意：镜像回滚（`liteshop:previous`）不包含数据库回滚。破坏性迁移（0001）执行后，
+如需回到旧版本还要同时恢复部署前的 `backups/pre-deploy-*.dump`。
+
 架构：`app`（Next standalone，非 root）+ `db`（PostgreSQL 18，仅内网）+ `caddy`（边缘 TLS）+ `backup` + `cron`（每分钟：过期清扫 / 邮件重投 / 日志清理）。
 
 ## 业务规则速览
