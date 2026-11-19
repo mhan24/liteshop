@@ -10,6 +10,7 @@
 # 用法：
 #   scripts/deploy.sh            # 部署 origin/main 当前提交
 #   scripts/deploy.sh <提交号>    # 部署指定提交（回滚也用它）
+#   HATOBA_HOST=ORACLE scripts/deploy.sh   # 经 Hatoba 执行远程命令（不用本机 SSH 密钥）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,7 +19,8 @@ DEPLOY_ENV_FILE=".deploy.env"
 # shellcheck disable=SC1090
 source "$DEPLOY_ENV_FILE"
 
-SSH_HOST="${SSH_HOST:?SSH_HOST 未配置}"
+SSH_HOST="${SSH_HOST:-}"
+[ -n "$SSH_HOST" ] || [ -n "${HATOBA_HOST:-}" ] || { echo "✗ 需配置 SSH_HOST 或 HATOBA_HOST"; exit 1; }
 SSH_PORT="${SSH_PORT:-22}"
 SSH_USER="${SSH_USER:-root}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/liteshop}"
@@ -26,8 +28,15 @@ SITE_URL="${SITE_URL:-https://shop.9527.tr}"
 REPO="${IMAGE_REPO:-ghcr.io/mhan24/liteshop}"
 SSH_OPTS=(-p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
 
-run_remote() { ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" "$@"; }
-copy_remote() { scp -q -P "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=15 -r "$1" "$SSH_USER@$SSH_HOST:$2"; }
+# 远程执行通道：默认 SSH 密钥；设置 HATOBA_HOST（Hatoba 里保存的主机名）则改用 hatoba exec，
+# 凭据留在 Hatoba 桌面端，不经过本脚本。例：HATOBA_HOST=ORACLE scripts/deploy.sh
+if [ -n "${HATOBA_HOST:-}" ]; then
+  command -v hatoba >/dev/null || { echo "✗ 找不到 hatoba 命令（需安装 Hatoba 并开启「在终端使用 hatoba 命令」）"; exit 1; }
+  run_remote() { hatoba exec "$HATOBA_HOST" -- "$*"; }
+  echo "▶ 远程通道：Hatoba（${HATOBA_HOST}）"
+else
+  run_remote() { ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" "$@"; }
+fi
 
 # ---- 1. 确定要部署的提交，并确认 CI 已为它构建镜像 ----
 git fetch -q origin main

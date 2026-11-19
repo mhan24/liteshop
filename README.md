@@ -71,6 +71,7 @@ docker compose up -d --build
 ```bash
 scripts/deploy.sh             # 部署 origin/main 最新提交（CI 镜像需已构建完）
 scripts/deploy.sh <提交号>     # 部署指定版本；回滚也用它
+HATOBA_HOST=ORACLE scripts/deploy.sh   # 远程命令改经 Hatoba 执行（凭据留在 Hatoba，不用本机 SSH 密钥）
 ```
 
 脚本会依次：确认镜像存在 → 校验服务器 `.env` 指纹与 `DOMAIN` → 暂存目录校验新编排 →
