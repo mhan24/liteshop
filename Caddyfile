@@ -1,7 +1,7 @@
 {
 	# 双站点边缘代理：{$DOMAIN} → liteshop 应用；{$PAY_DOMAIN} → LitePay 网关
-	# 域名来自 compose 注入的环境变量（.env 里的 DOMAIN / PAY_DOMAIN，必填）
-	# pay 站点要求 litepay 容器与 caddy 处在同一 docker 网络（部署时 docker network connect）
+	# 域名来自 compose 注入的环境变量（.env 里的 DOMAIN 必填；PAY_DOMAIN 默认 pay.9527.tr）
+	# pay 站点：caddy 经 compose 声明的外部网络 liteshop_default 访问 litepay 容器
 }
 
 (security_headers) {

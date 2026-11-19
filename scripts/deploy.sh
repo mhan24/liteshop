@@ -48,11 +48,7 @@ if [ "$REMOTE_DOMAIN" != "$SITE_HOST" ]; then
   echo "  请先在服务器 $REMOTE_DIR/.env 写入 DOMAIN=${SITE_HOST}，再重新部署"
   exit 1
 fi
-if [ -z "$REMOTE_PAY_DOMAIN" ]; then
-  echo "✗ 服务器 .env 未设置 PAY_DOMAIN（LitePay 网关域名），请先写入后再部署"
-  exit 1
-fi
-echo "  DOMAIN=${REMOTE_DOMAIN} PAY_DOMAIN=${REMOTE_PAY_DOMAIN}"
+echo "  DOMAIN=${REMOTE_DOMAIN} PAY_DOMAIN=${REMOTE_PAY_DOMAIN:-pay.9527.tr（默认）}"
 
 echo "▶ 本地构建镜像 $IMAGE"
 docker build --platform linux/arm64 --build-arg "SITE_URL=$SITE_URL" -t "$IMAGE" .

@@ -88,7 +88,7 @@ services:
     environment:
       # 必填：缺失时 compose 在创建任何容器前报错退出（不会带着错误域名申请证书）
       DOMAIN: ${DOMAIN:?请在 .env 设置 DOMAIN（商店域名）}
-      PAY_DOMAIN: ${PAY_DOMAIN:?请在 .env 设置 PAY_DOMAIN（LitePay 网关域名）}
+      PAY_DOMAIN: ${PAY_DOMAIN:-pay.9527.tr}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -98,6 +98,8 @@ services:
         condition: service_healthy
     networks:
       - edge
+      # LitePay 网关容器所在网络（pay 站点反代 litepay:3000）
+      - litepay
 
 volumes:
   pgdata:
@@ -108,3 +110,9 @@ networks:
   internal:
     internal: true
   edge:
+  # LitePay 网关容器（独立部署，不在本 compose 内）所在的网络。
+  # external：compose 只负责把 caddy 接进去，不创建也不删除它；
+  # 取代原来每次重建 caddy 后手工 docker network connect 的步骤。
+  litepay:
+    external: true
+    name: liteshop_default

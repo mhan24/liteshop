@@ -59,8 +59,8 @@
 
 ### 仍待确认
 
-- **生产 `.env` 必须有 `DOMAIN` 和 `PAY_DOMAIN`。** 本轮不能读取生产配置（权限限制），无法确认现值。
-  缺失或不一致时 `deploy.sh` 会在构建前中止，不会影响线上服务；按提示补上即可。
-- `pay` 站点依赖手工把 litepay 容器接入 caddy 所在网络，属运维约定，未改。
+- ~~生产 `.env` 的 DOMAIN / PAY_DOMAIN~~：部署时已核实 `DOMAIN=shop.9527.tr`；`PAY_DOMAIN` 未设置，改为可选（默认 pay.9527.tr）。
+- ~~pay 站点依赖手工 network connect~~：部署时发现 caddy 被手工接入 `liteshop_default`（litepay 所在网络），
+  重建 caddy 会丢失该连接导致 pay 站点 502。已在 compose 中声明为 external 网络，重建后自动接入。
 - 限流仍为进程内内存（单实例前提）。
 - Caddyfile 本机未能用 caddy 实测（下载外部程序被权限拦截），由 CI 校验。
