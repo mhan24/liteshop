@@ -1,10 +1,10 @@
 # 多阶段构建：deps → builder → runner（standalone，非 root 运行）
-FROM node:22-bookworm-slim AS deps
+FROM node:24-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:22-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -15,7 +15,7 @@ ENV AUTH_SECRET=build-placeholder-secret-0123456789abcdef
 ENV DATABASE_URL=postgres://build:build@localhost:5432/build
 RUN npm run build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:24-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000

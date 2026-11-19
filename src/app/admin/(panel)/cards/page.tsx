@@ -1,7 +1,7 @@
 import { asc, desc, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { cards, products } from "@/db/schema";
-import { getCardLowStockThreshold } from "@/server/settings";
+import { getConfig } from "@/server/settings";
 import { csrfToken } from "@/server/admin-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/input";
@@ -18,7 +18,7 @@ export default async function AdminCardsPage() {
   const [productRows, recent, threshold, counts] = await Promise.all([
     db.select().from(products).orderBy(asc(products.id)),
     db.select().from(cards).orderBy(desc(cards.id)).limit(100),
-    getCardLowStockThreshold(),
+    getConfig().then((c) => c.lowStockThreshold),
     db
       .select({ productId: cards.productId, status: cards.status, n: sql<number>`count(*)::int` })
       .from(cards)

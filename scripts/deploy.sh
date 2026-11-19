@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# 生产部署：本地构建 arm64 镜像 → 上传 → 服务器加载 → compose 滚动更新。
+# 生产部署：拉取 CI 构建好的镜像（ghcr.io，标签 = 提交号）→ 服务器滚动更新。
 #
 # 约定（见 AGENTS.md）：
-# - 每次部署都必须是用户当次的显式指令，脚本只做部署这一件事；
-# - 服务器 /opt/liteshop/.env 是生产配置（含真实网关凭证），脚本**从不上传**它，
-#   并在部署前后校验其 sha256 指纹，一旦变化立即报错终止；
-# - 回滚：服务器上保留上一版镜像为 liteshop:previous，
-#   手动执行 `docker tag liteshop:previous liteshop:latest && docker compose up -d` 即可。
+# - 每次部署都必须是用户当次的显式指令；
+# - 服务器 .env 是生产配置（含真实网关凭证），脚本从不上传它，并在部署前后校验 sha256 指纹；
+# - 镜像只由 CI 在测试全部通过后构建（.github/workflows/ci.yml 的 image 任务），本机不需要 Docker。
 #
-# 用法：scripts/deploy.sh
+# 用法：
+#   scripts/deploy.sh            # 部署 origin/main 当前提交
+#   scripts/deploy.sh <提交号>    # 部署指定提交（回滚也用它）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,59 +22,88 @@ SSH_HOST="${SSH_HOST:?SSH_HOST 未配置}"
 SSH_PORT="${SSH_PORT:-22}"
 SSH_USER="${SSH_USER:-root}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/liteshop}"
-SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
-
-run_remote() { sshpass -f "$DEPLOY_ENV_FILE" ssh -p "$SSH_PORT" "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" "$@"; }
-copy_remote() { sshpass -f "$DEPLOY_ENV_FILE" scp -P "$SSH_PORT" "${SSH_OPTS[@]}" "$1" "$SSH_USER@$SSH_HOST:$2"; }
-
 SITE_URL="${SITE_URL:-https://shop.9527.tr}"
-IMAGE="liteshop:latest"
-echo "▶ 部署目标 ${SSH_USER}@${SSH_HOST}:${REMOTE_DIR}（SITE_URL=${SITE_URL}）"
+REPO="${IMAGE_REPO:-ghcr.io/mhan24/liteshop}"
+SSH_OPTS=(-p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
 
-echo "▶ 校验本地环境（镜像构建在本地完成，服务器不执行 npm/docker build）"
-[ -f docker-compose.yml ] || { echo "✗ 缺少 docker-compose.yml"; exit 1; }
-[ -f Caddyfile ] || { echo "✗ 缺少 Caddyfile"; exit 1; }
+run_remote() { ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" "$@"; }
+copy_remote() { scp -q -P "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=15 -r "$1" "$SSH_USER@$SSH_HOST:$2"; }
 
-echo "▶ 记录服务器 .env 指纹（部署过程不得改变它）"
-ENV_BEFORE="$(run_remote "sha256sum $REMOTE_DIR/.env" | awk '{print $1}')"
-echo "  $ENV_BEFORE"
+# ---- 1. 确定要部署的提交，并确认 CI 已为它构建镜像 ----
+git fetch -q origin main
+SHA="$(git rev-parse "${1:-origin/main}")"
+IMAGE="$REPO:$SHA"
+echo "▶ 部署提交 ${SHA:0:12}（$(git log -1 --format=%s "$SHA")）"
 
-echo "▶ 校验服务器 .env 的 Caddy 域名（Caddyfile 读取 DOMAIN / PAY_DOMAIN）"
-SITE_HOST="$(printf '%s' "$SITE_URL" | sed -E 's#^https?://##; s#[/:].*$##')"
-REMOTE_DOMAIN="$(run_remote "sed -n 's/^DOMAIN=//p' $REMOTE_DIR/.env | tail -n 1" | tr -d "\r\"' ")"
-REMOTE_PAY_DOMAIN="$(run_remote "sed -n 's/^PAY_DOMAIN=//p' $REMOTE_DIR/.env | tail -n 1" | tr -d "\r\"' ")"
-if [ "$REMOTE_DOMAIN" != "$SITE_HOST" ]; then
-  echo "✗ 服务器 .env 的 DOMAIN（${REMOTE_DOMAIN:-未设置}）与 SITE_URL 域名（${SITE_HOST}）不一致"
-  echo "  请先在服务器 $REMOTE_DIR/.env 写入 DOMAIN=${SITE_HOST}，再重新部署"
+if ! git merge-base --is-ancestor "$SHA" origin/main; then
+  echo "✗ 该提交不在 origin/main 上（未推送或不属于主分支），CI 不会为它构建镜像"
   exit 1
 fi
-echo "  DOMAIN=${REMOTE_DOMAIN} PAY_DOMAIN=${REMOTE_PAY_DOMAIN:-pay.9527.tr（默认）}"
+if [ -n "$(git status --porcelain)" ] && [ -z "${1:-}" ]; then
+  echo "  注意：本地有未提交改动，它们不会被部署（部署的是 origin/main 上的提交）"
+fi
 
-echo "▶ 本地构建镜像 $IMAGE"
-docker build --platform linux/arm64 --build-arg "SITE_URL=$SITE_URL" -t "$IMAGE" .
+echo "▶ 确认镜像已构建：$IMAGE"
+TOKEN="$(curl -fsS "https://ghcr.io/token?scope=repository:${REPO#ghcr.io/}:pull" | sed -E 's/.*"token":"([^"]+)".*/\1/')"
+if ! curl -fsS -o /dev/null -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+  "https://ghcr.io/v2/${REPO#ghcr.io/}/manifests/$SHA"; then
+  echo "✗ 镜像不存在。CI 可能还在运行或失败了：gh run list --commit $SHA"
+  exit 1
+fi
 
-TARBALL="$(mktemp -d)/liteshop-image.tar.gz"
-echo "▶ 导出镜像"
-docker save "$IMAGE" | gzip > "$TARBALL"
+# ---- 2. 服务器前置检查 ----
+echo "▶ 记录服务器 .env 指纹（部署过程不得改变它）"
+ENV_BEFORE="$(run_remote "sha256sum $REMOTE_DIR/.env" | awk '{print $1}')"
+echo "  ${ENV_BEFORE:0:16}"
 
-echo "▶ 上传镜像与编排文件"
-copy_remote "$TARBALL" "/tmp/liteshop-image.tar.gz"
-copy_remote docker-compose.yml "$REMOTE_DIR/docker-compose.yml"
-copy_remote Caddyfile "$REMOTE_DIR/Caddyfile"
+echo "▶ 校验 Caddy 域名（DOMAIN 必须与 SITE_URL 一致）"
+SITE_HOST="$(printf '%s' "$SITE_URL" | sed -E 's#^https?://##; s#[/:].*$##')"
+REMOTE_DOMAIN="$(run_remote "sed -n 's/^DOMAIN=//p' $REMOTE_DIR/.env | tail -n 1" | tr -d "\r\"' ")"
+if [ "$REMOTE_DOMAIN" != "$SITE_HOST" ]; then
+  echo "✗ 服务器 .env 的 DOMAIN（${REMOTE_DOMAIN:-未设置}）与 SITE_URL 域名（${SITE_HOST}）不一致"
+  exit 1
+fi
 
-echo "▶ 服务器：备份当前镜像 → 加载新镜像 → 滚动更新"
-run_remote "set -e
-  docker image inspect liteshop:previous >/dev/null 2>&1 && docker rmi liteshop:previous || true
-  docker tag $IMAGE liteshop:previous
-  gunzip -c /tmp/liteshop-image.tar.gz | docker load
-  rm -f /tmp/liteshop-image.tar.gz
-  cd $REMOTE_DIR
+# ---- 3. 准备新编排（先放到暂存目录校验，校验通过才替换） ----
+echo "▶ 上传编排文件到暂存目录并校验"
+STAGE="/tmp/liteshop-deploy-$SHA"
+run_remote "rm -rf $STAGE && mkdir -p $STAGE"
+for f in docker-compose.yml Caddyfile ops; do
+  git archive "$SHA" "$f" | run_remote "tar -x -C $STAGE"
+done
+run_remote "docker compose --project-directory $REMOTE_DIR -f $STAGE/docker-compose.yml config -q"
+
+# ---- 4. 备份 + 拉镜像（此时线上服务未受影响） ----
+echo "▶ 部署前备份数据库"
+run_remote "set -e; cd $REMOTE_DIR
+  ts=\$(date +%Y%m%d-%H%M%S)
+  docker compose exec -T db pg_dump -U liteshop -d liteshop -F c > backups/pre-deploy-\$ts.dump
+  docker compose exec -T db pg_restore -l < backups/pre-deploy-\$ts.dump > /dev/null
+  echo \"  backups/pre-deploy-\$ts.dump\""
+
+echo "▶ 服务器拉取镜像"
+run_remote "docker pull -q $IMAGE"
+
+# ---- 5. 切换 ----
+echo "▶ 切换：保留旧镜像为 liteshop:previous → 更新编排 → 滚动更新"
+run_remote "set -e; cd $REMOTE_DIR
+  docker image inspect liteshop:latest >/dev/null 2>&1 && docker tag liteshop:latest liteshop:previous
+  docker tag $IMAGE liteshop:latest
+  ts=\$(date +%Y%m%d-%H%M%S)
+  cp docker-compose.yml backups/docker-compose.yml.pre-\$ts
+  cp Caddyfile backups/Caddyfile.pre-\$ts
+  rm -rf ops && cp -r $STAGE/ops ops && cp $STAGE/docker-compose.yml $STAGE/Caddyfile .
+  echo $SHA > DEPLOYED_REVISION
   docker compose up -d --no-build --remove-orphans
+  rm -rf $STAGE
   docker image prune -f >/dev/null"
 
-echo "▶ 等待应用容器 healthy（compose up 已按 HEALTHCHECK 等待）"
+# ---- 6. 验证 ----
+echo "▶ 等待应用容器 healthy"
 if ! run_remote "cd $REMOTE_DIR && docker compose ps app | grep -F '(healthy)' >/dev/null"; then
-  echo "✗ 应用容器未达 healthy，回滚请执行：docker tag liteshop:previous liteshop:latest && cd $REMOTE_DIR && docker compose up -d --no-build"
+  echo "✗ 应用容器未达 healthy。回滚：scripts/deploy.sh <上一个提交号>"
+  echo "  或在服务器执行：docker tag liteshop:previous liteshop:latest && cd $REMOTE_DIR && docker compose up -d --no-build"
   exit 1
 fi
 echo "  app (healthy)"
@@ -82,12 +111,10 @@ echo "  app (healthy)"
 echo "▶ 复核 .env 指纹"
 ENV_AFTER="$(run_remote "sha256sum $REMOTE_DIR/.env" | awk '{print $1}')"
 if [ "$ENV_BEFORE" != "$ENV_AFTER" ]; then
-  echo "✗ 服务器 .env 在部署过程中被修改（$ENV_BEFORE → $ENV_AFTER），请立即检查！"
+  echo "✗ 服务器 .env 在部署过程中被修改（${ENV_BEFORE:0:16} → ${ENV_AFTER:0:16}），请立即检查！"
   exit 1
 fi
-echo "  一致：$ENV_AFTER"
+echo "  一致"
 
 echo "▶ 外部可达性检查 $SITE_URL"
-curl -fsS "$SITE_URL/api/health" >/dev/null && echo "✓ https 入口正常"
-
-echo "✓ 部署完成"
+curl -fsS "$SITE_URL/api/health" >/dev/null && echo "✓ 部署完成：${SHA:0:12}"

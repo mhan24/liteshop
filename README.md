@@ -44,7 +44,7 @@ docker run -d --name liteshop-pg-test \
   -e POSTGRES_PASSWORD=liteshop-test -e POSTGRES_DB=liteshop_test \
   -p 54330:5432 postgres:18-alpine
 
-npm test        # 88 用例：金额/签名/适配器/入口伪装单元 + 下单/回调幂等/并发发卡/补货重发/过期清扫/鉴权集成
+npm test        # 94 用例：金额/签名/适配器/入口伪装单元 + 下单/回调幂等/并发发卡/补货重发/过期清扫/鉴权集成
 npx tsc --noEmit
 npm run lint
 ```
@@ -63,23 +63,36 @@ docker compose up -d --build
 上线后在后台「设置 · 支付网关」填 LitePay 的网关地址与接口令牌，并把
 `https://<站点>/api/webhooks/litepay` 填到网关的商店设置里。
 
-`scripts/deploy.sh` 默认在**本地**构建 arm64 镜像再上传。若执行部署的机器没有 Docker，
-可改为在服务器上构建（服务器本身就是 arm64，产物等价）：
+### 日常部署
+
+镜像由 CI 构建：推送到 `main` 后，测试全部通过才会在 arm64 机器上构建镜像，推到
+`ghcr.io/mhan24/liteshop:<提交号>`。部署脚本只负责让服务器拉取并切换，本机不需要 Docker：
 
 ```bash
-git archive --format=tar.gz -o /tmp/src.tar.gz HEAD
-scp /tmp/src.tar.gz root@<host>:/tmp/
-ssh root@<host> 'rm -rf /opt/liteshop-build && mkdir -p /opt/liteshop-build \
-  && tar xzf /tmp/src.tar.gz -C /opt/liteshop-build \
-  && docker tag liteshop:latest liteshop:previous \
-  && cd /opt/liteshop-build && docker build --build-arg SITE_URL=https://<域名> -t liteshop:latest . \
-  && cd /opt/liteshop && docker compose up -d --no-build --remove-orphans app'
+scripts/deploy.sh             # 部署 origin/main 最新提交（CI 镜像需已构建完）
+scripts/deploy.sh <提交号>     # 部署指定版本；回滚也用它
 ```
 
-注意：镜像回滚（`liteshop:previous`）不包含数据库回滚。破坏性迁移（0001）执行后，
-如需回到旧版本还要同时恢复部署前的 `backups/pre-deploy-*.dump`。
+脚本会依次：确认镜像存在 → 校验服务器 `.env` 指纹与 `DOMAIN` → 暂存目录校验新编排 →
+备份数据库 → 拉镜像 → 切换并滚动更新 → 健康检查 → 复核 `.env` 指纹未变。
 
-架构：`app`（Next standalone，非 root）+ `db`（PostgreSQL 18，仅内网）+ `caddy`（边缘 TLS）+ `backup` + `cron`（每分钟：过期清扫 / 邮件重投 / 日志清理）。
+注意：回滚镜像不包含数据库回滚。含破坏性迁移的版本（如 0002 配置表重构）回滚时，
+还要同时恢复部署前的 `backups/pre-deploy-*.dump`。
+
+### 备份
+
+- `backup`：每天备份到 `./backups`（保留 14 份），每份做完整性检查；每周日完整恢复到临时库、
+  核对订单/卡密数量（恢复演练）。最近一次结果见 `backups/status.json`。
+- `offsite`：每天把备份**加密**上传到异地存储（R2 / S3 / B2 / SFTP 等，rclone 支持的都行），远端保留 30 天。
+  配置：把 `.env.offsite.example` 复制为服务器上的 `/opt/liteshop/.env.offsite` 并填写；未配置时只打印提醒。
+
+### 运营通知
+
+后台「设置 · 运营通知」填 Telegram Bot Token 与 Chat ID 后，订单待核实、延迟到账、
+付款后卡密不足、库存跌破阈值或售罄时会推送消息。
+
+架构：`app`（Next standalone，非 root）+ `db`（PostgreSQL 18，仅内网）+ `caddy`（边缘 TLS）+
+`backup` + `offsite` + `cron`（每分钟：过期清扫 / 邮件重投 / 通知投递 / 日志清理）。
 
 ## 业务规则速览
 

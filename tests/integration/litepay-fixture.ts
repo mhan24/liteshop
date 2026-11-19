@@ -4,7 +4,7 @@ import { orders, payments } from "@/db/schema";
 import { encryptSecret } from "@/lib/secret-box";
 import { litepaySign } from "@/lib/litepay-sign";
 import { minorToNumber } from "@/lib/money";
-import { setSetting, SETTING_KEYS } from "@/server/settings";
+import { updateConfig } from "@/server/settings";
 import { createOrder } from "@/server/orders";
 import { seedAutoProduct } from "../helpers";
 
@@ -16,12 +16,14 @@ import { seedAutoProduct } from "../helpers";
 export const LITEPAY_TEST_TOKEN = "litepay-test-token";
 
 async function configureGateway(): Promise<void> {
-  await setSetting(SETTING_KEYS.litepayEnabled, "1");
-  await setSetting(SETTING_KEYS.litepayApiBase, "https://pay.test.local");
-  await setSetting(SETTING_KEYS.litepayTokenEnc, encryptSecret(LITEPAY_TEST_TOKEN));
-  await setSetting(SETTING_KEYS.litepayCurrencies, "USDT,USDC");
-  await setSetting(SETTING_KEYS.litepayTimeoutSeconds, "600");
-  await setSetting(SETTING_KEYS.litepayReselect, "1");
+  await updateConfig({
+    litepayEnabled: true,
+    litepayApiBase: "https://pay.test.local",
+    litepayTokenEnc: encryptSecret(LITEPAY_TEST_TOKEN),
+    litepayCurrencies: "USDT,USDC",
+    litepayTimeoutSeconds: 600,
+    litepayReselect: true,
+  });
 }
 
 async function prepareLitepayOrder(slug: string, quantity = 1, cardCount = 3) {

@@ -1,7 +1,6 @@
 import { csrfToken } from "@/server/admin-auth";
 import { getGatewayStatus, webhookPath } from "@/server/payments";
-import { getSiteUrl, getAllSettings, SETTING_KEYS } from "@/server/settings";
-import { isEncryptedSecret } from "@/lib/secret-box";
+import { getConfig, getSiteUrl } from "@/server/settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, Input, Label } from "@/components/ui/input";
 import { AdminForm } from "@/components/admin/admin-form";
@@ -12,13 +11,15 @@ import {
   saveSmtpAction,
   saveTurnstileAction,
   sendTestEmailAction,
+  saveTelegramAction,
+  sendTestNotificationAction,
 } from "@/actions/admin";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminSettingsPage() {
   const csrf = await csrfToken();
-  const [s, gateway, siteUrl] = await Promise.all([getAllSettings(), getGatewayStatus(), getSiteUrl()]);
+  const [c, gateway, siteUrl] = await Promise.all([getConfig(), getGatewayStatus(), getSiteUrl()]);
   const webhookUrl = `${siteUrl}${webhookPath("litepay")}`;
 
   return (
@@ -38,7 +39,7 @@ export default async function AdminSettingsPage() {
           >
             <div className="space-y-1.5">
               <Label htmlFor="s-name">站点名称</Label>
-              <Input id="s-name" name="siteName" defaultValue={s[SETTING_KEYS.siteName] ?? ""} />
+              <Input id="s-name" name="siteName" defaultValue={c.siteName} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="s-url">站点地址（canonical / 支付回调用）</Label>
@@ -46,7 +47,7 @@ export default async function AdminSettingsPage() {
                 id="s-url"
                 name="siteUrl"
                 type="url"
-                defaultValue={s[SETTING_KEYS.siteUrl] ?? ""}
+                defaultValue={c.siteUrl}
                 placeholder="https://shop.example.com"
               />
             </div>
@@ -57,7 +58,7 @@ export default async function AdminSettingsPage() {
                 name="threshold"
                 type="number"
                 min={0}
-                defaultValue={s[SETTING_KEYS.cardLowStockThreshold] ?? "5"}
+                defaultValue={c.lowStockThreshold}
               />
             </div>
             <div className="space-y-1.5">
@@ -66,7 +67,7 @@ export default async function AdminSettingsPage() {
                 id="s-support"
                 name="supportUrl"
                 type="url"
-                defaultValue={s[SETTING_KEYS.supportUrl] ?? ""}
+                defaultValue={c.supportUrl}
                 placeholder="https://t.me/…"
               />
             </div>
@@ -97,7 +98,7 @@ export default async function AdminSettingsPage() {
               <Input
                 id="lp-api"
                 name="litepayApiBase"
-                defaultValue={s[SETTING_KEYS.litepayApiBase] ?? ""}
+                defaultValue={c.litepayApiBase}
                 placeholder="https://pay.example.com"
               />
             </div>
@@ -127,7 +128,7 @@ export default async function AdminSettingsPage() {
               <Input
                 id="lp-currencies"
                 name="litepayCurrencies"
-                defaultValue={s[SETTING_KEYS.litepayCurrencies] ?? ""}
+                defaultValue={c.litepayCurrencies}
                 placeholder="USDT,USDC"
               />
             </div>
@@ -172,22 +173,22 @@ export default async function AdminSettingsPage() {
               <input
                 type="checkbox"
                 name="smtpEnabled"
-                defaultChecked={s[SETTING_KEYS.smtpEnabled] === "1"}
+                defaultChecked={c.smtpEnabled}
                 className="size-4"
               />
               启用邮件通知（卡密同时发到买家邮箱）
             </label>
             <div className="space-y-1.5">
               <Label htmlFor="smtp-host">SMTP 服务器</Label>
-              <Input id="smtp-host" name="smtpHost" defaultValue={s[SETTING_KEYS.smtpHost] ?? ""} />
+              <Input id="smtp-host" name="smtpHost" defaultValue={c.smtpHost} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="smtp-port">端口</Label>
-              <Input id="smtp-port" name="smtpPort" type="number" defaultValue={s[SETTING_KEYS.smtpPort] ?? "465"} />
+              <Input id="smtp-port" name="smtpPort" type="number" defaultValue={c.smtpPort} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="smtp-user">用户名</Label>
-              <Input id="smtp-user" name="smtpUser" defaultValue={s[SETTING_KEYS.smtpUser] ?? ""} />
+              <Input id="smtp-user" name="smtpUser" defaultValue={c.smtpUser} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="smtp-pass">密码（留空保持不变）</Label>
@@ -196,7 +197,7 @@ export default async function AdminSettingsPage() {
                 name="smtpPass"
                 type="password"
                 autoComplete="off"
-                placeholder={isEncryptedSecret(s[SETTING_KEYS.smtpPass]) ? "已保存，留空保持不变（输入 __CLEAR__ 清除）" : "未设置"}
+                placeholder={c.smtpPassEnc !== "" ? "已保存，留空保持不变（输入 __CLEAR__ 清除）" : "未设置"}
               />
             </div>
             <div className="space-y-1.5">
@@ -204,7 +205,7 @@ export default async function AdminSettingsPage() {
               <Input
                 id="smtp-from"
                 name="smtpFrom"
-                defaultValue={s[SETTING_KEYS.smtpFrom] ?? ""}
+                defaultValue={c.smtpFrom}
                 placeholder="noreply@example.com"
               />
             </div>
@@ -212,7 +213,7 @@ export default async function AdminSettingsPage() {
               <input
                 type="checkbox"
                 name="smtpSecure"
-                defaultChecked={s[SETTING_KEYS.smtpSecure] !== "0"}
+                defaultChecked={c.smtpSecure}
                 className="size-4"
               />
               使用 TLS（465 端口）
@@ -242,7 +243,7 @@ export default async function AdminSettingsPage() {
               <input
                 type="checkbox"
                 name="tsEnabled"
-                defaultChecked={s[SETTING_KEYS.turnstileEnabled] === "1"}
+                defaultChecked={c.turnstileEnabled}
                 className="size-4"
               />
               启用人机验证（下单与订单查询需先完成验证）
@@ -252,28 +253,28 @@ export default async function AdminSettingsPage() {
               <Input
                 id="ts-site"
                 name="tsSiteKey"
-                defaultValue={s[SETTING_KEYS.turnstileSiteKey] ?? ""}
+                defaultValue={c.turnstileSiteKey}
                 autoComplete="off"
                 placeholder="0x…"
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="ts-secret">
-                Secret Key {isEncryptedSecret(s[SETTING_KEYS.turnstileSecretKey]) ? "（已配置：留空保持不变）" : ""}
+                Secret Key {c.turnstileSecretEnc !== "" ? "（已配置：留空保持不变）" : ""}
               </Label>
               <Input
                 id="ts-secret"
                 name="tsSecretKey"
                 type="password"
                 autoComplete="off"
-                placeholder={isEncryptedSecret(s[SETTING_KEYS.turnstileSecretKey]) ? "留空保持不变，输入 __CLEAR__ 清除" : ""}
+                placeholder={c.turnstileSecretEnc !== "" ? "留空保持不变，输入 __CLEAR__ 清除" : ""}
               />
             </div>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input
                 type="checkbox"
                 name="tsFallback"
-                defaultChecked={s[SETTING_KEYS.turnstileFallbackEnabled] === "1"}
+                defaultChecked={c.turnstileFallback}
                 className="size-4"
               />
               降级开关：验证组件加载失败时仍允许提交（由频率限制兜底）
@@ -281,6 +282,48 @@ export default async function AdminSettingsPage() {
             <p className="text-xs leading-5 text-muted sm:col-span-2">
               在 Cloudflare 控制台创建 Turnstile Widget 后填两把 Key，并把本站域名加入该 Site Key 的允许列表。
             </p>
+          </AdminForm>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            运营通知 · Telegram
+            {c.telegramEnabled && c.telegramBotTokenEnc && c.telegramChatId ? (
+              <Badge tone="green" live>已启用</Badge>
+            ) : (
+              <Badge>未启用</Badge>
+            )}
+          </CardTitle>
+          <CardDescription>
+            订单待核实、延迟到账、付款后卡密不足、库存跌破阈值或售罄时推送消息。先在 Telegram 找 @BotFather 创建机器人拿到 Token，
+            再把机器人拉进群（或直接私聊它），用 @userinfobot 等工具查到 Chat ID。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <AdminForm action={saveTelegramAction} csrf={csrf} submitLabel="保存通知设置" className="grid max-w-xl gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" name="tgEnabled" defaultChecked={c.telegramEnabled} />
+              启用 Telegram 通知
+            </label>
+            <div className="space-y-1.5">
+              <Label htmlFor="tg-token">Bot Token</Label>
+              <Input
+                id="tg-token"
+                name="tgToken"
+                type="password"
+                autoComplete="off"
+                placeholder={c.telegramBotTokenEnc ? "已保存，留空保持不变（输入 __CLEAR__ 清除）" : "123456:ABC-DEF…"}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tg-chat">Chat ID</Label>
+              <Input id="tg-chat" name="tgChatId" defaultValue={c.telegramChatId} placeholder="-1001234567890" className="font-mono" />
+            </div>
+          </AdminForm>
+          <AdminForm action={sendTestNotificationAction} csrf={csrf} submitLabel="发送测试消息" variant="outline">
+            <p className="text-xs text-muted">先保存设置，再点这里确认能收到。</p>
           </AdminForm>
         </CardContent>
       </Card>

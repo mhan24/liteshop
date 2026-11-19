@@ -18,6 +18,7 @@ import type { Tx } from "./db-tx";
 import { getActiveGateway, getAdapter, getGatewayByType, webhookPath } from "./payments";
 import type { CreateOutcome, GatewayType, NotifyPayload } from "./payments/types";
 import { getSiteUrl } from "./settings";
+import { notifyLatePayment, notifyLowStockCrossings, notifyPaidUndelivered, notifyReconciling } from "./notify";
 
 /**
  * 订单服务：创建、支付回调确认、状态机、原子发卡、过期清扫。
@@ -160,11 +161,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
             lineTotalCents: r.lineTotalCents,
           }))
         );
-        await reserveStock(
-          tx,
-          order.id,
-          itemRows.map((r) => ({ productId: r.productId, quantity: r.quantity }))
-        );
+        const reserved = itemRows.map((r) => ({ productId: r.productId, quantity: r.quantity }));
+        await reserveStock(tx, order.id, reserved);
+        await notifyLowStockCrossings(tx, reserved);
         return { orderId: order.id, orderNo: order.orderNo, totalCents: subtotal, itemRows };
       });
       break;
@@ -188,7 +187,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     throw new OrderError("PAYMENT_FAILED", `支付网关建单失败: ${outcome.message}`);
   }
   if (outcome.kind === "unknown") {
-    await markReconciling(created.orderId);
+    await markReconciling(created.orderId, outcome.message);
     return {
       orderNo: created.orderNo,
       queryPassword,
@@ -212,7 +211,7 @@ function isUniqueViolation(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { code?: string }).code === "23505";
 }
 
-async function markReconciling(orderId: string): Promise<void> {
+async function markReconciling(orderId: string, reason: string): Promise<void> {
   await db.transaction(async (tx) => {
     const rows = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for("update");
     const order = rows[0];
@@ -222,6 +221,7 @@ async function markReconciling(orderId: string): Promise<void> {
       .update(orders)
       .set({ status: "reconciling", expiresAt: null, updatedAt: new Date() })
       .where(eq(orders.id, orderId));
+    await notifyReconciling(tx, order.orderNo, order.totalCents, reason);
   });
 }
 
@@ -541,6 +541,10 @@ async function processWebhook(
 
   // 订单已终结/已由其它交易完成/非当前尝试 → 延迟到账，登记对账特例
   if (order.status === "closed" || order.status === "completed" || !payment.isCurrent) {
+    // 网关重复推送同一笔延迟到账时只通知一次
+    if (payment.status !== "late") {
+      await notifyLatePayment(tx, order.orderNo, payment.providerRef ?? payload.providerRef, String(payload.amount));
+    }
     await tx
       .update(payments)
       .set({ status: "late", anomaly: "late", confirmedAt: new Date(), updatedAt: new Date() })
@@ -564,6 +568,7 @@ async function processWebhook(
     .where(eq(payments.id, payment.id));
 
   const delivered = await deliverOrder(tx, order.id);
+  if (!delivered) await notifyPaidUndelivered(tx, order.orderNo);
   await markHandled(true);
   return delivered
     ? { respond: "success", handled: true, message: "已确认支付并发放卡密" }
@@ -712,7 +717,7 @@ export async function resumePayment(
     await closeOrderInternal(order.id, order.orderNo, outcome.message);
     return { ok: false, message: `支付网关建单失败: ${outcome.message}` };
   }
-  await markReconciling(order.id);
+  await markReconciling(order.id, outcome.message);
   return { ok: false, message: "支付网关响应超时，订单已保留待对账" };
 }
 
@@ -785,6 +790,7 @@ export async function resolveReconcilingAsPaid(
     }
     await tx.insert(auditLogs).values({ actor, action: "order.reconcile_paid", detail: orderNo });
     const done = await deliverOrder(tx, order.id);
+    if (!done) await notifyPaidUndelivered(tx, orderNo);
     return done
       ? { ok: true, message: "已确认到账并发放卡密" }
       : { ok: true, message: "已确认到账，但卡密不足，请补货后重试发放" };

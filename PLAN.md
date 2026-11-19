@@ -38,7 +38,7 @@
 
 ## 3. 数据模型（src/db/schema.ts）
 
-`settings`（KV）、`admins`、`categories`、`products`、`orders` + `order_items`、
+`app_config`（单行 JSON 配置）、`notifications`（运营通知发件箱）、`admins`、`categories`、`products`、`orders` + `order_items`、
 `cards`（available/reserved/sold + (product_id, content) 唯一）、
 `payments`（`channel` ∈ litepay|mock；`(channel, provider_ref)` 部分唯一索引 = 回调幂等锚点；
 `is_current` 标记当前尝试；`anomaly` 标记 late）、
@@ -73,9 +73,10 @@ pending|reconciling → paid → 事务内原子发卡 reserved→sold → deliv
 
 ### 网关配置（后台「设置 · 支付网关」）
 
-`settings` KV：`litepay_enabled` / `litepay_api_base` / `litepay_token_enc`（AES-GCM，密钥派生自
-AUTH_SECRET）/ `litepay_timeout_seconds`（120–86400）/ `litepay_currencies` / `litepay_reselect`。
-回调地址固定，令牌不回显；SMTP 密码与 Turnstile Secret 同样加密存储（存量明文由启动迁移一次性加密）；`PAYMENT_DRIVER=mock` 时改用进程内模拟网关（开发与测试）。
+全部站点配置存在 `app_config` 单行 JSON 里，结构与默认值由 `server/settings.ts` 的 Zod `configSchema` 定义
+（单字段非法只回落该字段默认值；进程内缓存，`updateConfig` 行锁写入并失效缓存）。
+凭据字段（`litepayTokenEnc` / `smtpPassEnc` / `turnstileSecretEnc` / `telegramBotTokenEnc`）只存 AES-GCM 密文。
+回调地址固定，令牌不回显；`PAYMENT_DRIVER=mock` 时改用进程内模拟网关（开发与测试）。
 
 ### 查询（server/order-query.ts）
 
@@ -99,6 +100,12 @@ AUTH_SECRET）/ `litepay_timeout_seconds`（120–86400）/ `litepay_currencies`
 - 删除 `products.delivery_type`、`products.stock_limit`
 
 历史订单与卡密保留；旧的人工发货商品退化为「无卡密即缺货」，需要补卡后才能继续卖。
+
+### 运营通知（server/notify.ts）
+
+需要人工关注的事件与业务**同一事务**写入 `notifications` 发件箱，cron 每分钟投递到 Telegram（失败重试 5 次，
+积压超 24 小时放弃）：订单待核实、延迟到账（同一交易只通知一次）、付款后卡密不足、
+可售数跌破阈值或售罄（只在跌破那一刻通知一次）。
 
 ## 7. 已知边界
 

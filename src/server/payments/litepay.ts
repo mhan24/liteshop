@@ -2,7 +2,7 @@ import { normalizeHttpUrl } from "@/lib/http-url";
 import { litepaySign, parseJsonObject, safeEqualHex } from "@/lib/litepay-sign";
 import { minorToNumber, SITE_CURRENCY, toMinorUnits } from "@/lib/money";
 import { revealSecret } from "@/lib/secret-box";
-import { getSetting, SETTING_KEYS } from "@/server/settings";
+import { getConfig } from "@/server/settings";
 import type {
   CreateOutcome,
   CreatePaymentInput,
@@ -69,26 +69,19 @@ function normalizeApiBase(raw: string | null | undefined): string | null {
   return origin ? origin.replace(/\/+$/, "") : null;
 }
 
-/** 读取网关配置（settings KV；令牌解密后仅存在于服务端内存） */
+/** 读取网关配置（令牌解密后仅存在于服务端内存） */
 export async function getLitepayConfig(): Promise<LitepayConfig> {
-  const [enabled, apiBase, tokenEnc, timeout, currencies, reselect] = await Promise.all([
-    getSetting(SETTING_KEYS.litepayEnabled),
-    getSetting(SETTING_KEYS.litepayApiBase),
-    getSetting(SETTING_KEYS.litepayTokenEnc),
-    getSetting(SETTING_KEYS.litepayTimeoutSeconds),
-    getSetting(SETTING_KEYS.litepayCurrencies),
-    getSetting(SETTING_KEYS.litepayReselect),
-  ]);
+  const c = await getConfig();
   // AUTH_SECRET 变更后旧密文解不开：视为未配置，等后台重新录入令牌
-  const token = revealSecret(tokenEnc) || null;
+  const token = revealSecret(c.litepayTokenEnc) || null;
   return {
-    enabled: enabled === "1",
-    apiBase: normalizeApiBase(apiBase),
+    enabled: c.litepayEnabled,
+    apiBase: normalizeApiBase(c.litepayApiBase),
     hasToken: token !== null,
     token,
-    timeoutSeconds: normalizeTimeout(timeout),
-    currencies: (currencies ?? "").trim() === "" ? null : currencies!.trim(),
-    reselect: reselect !== "0",
+    timeoutSeconds: normalizeTimeout(c.litepayTimeoutSeconds),
+    currencies: c.litepayCurrencies || null,
+    reselect: c.litepayReselect,
   };
 }
 

@@ -43,7 +43,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
@@ -66,13 +66,14 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/deploy.sh
+          for f in ops/*.sh; do sh -n "$f"; done
           # 变量名后紧跟全角字符会被 bash 并入变量名（$SHA（ → 变量 "SHA（"）
-          if grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[（），。：；、！？]' scripts/deploy.sh; then
+          if grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[（），。：；、！？]' scripts/deploy.sh ops/*.sh; then
             echo "::error::变量名后紧跟全角字符，请改用 \${VAR} 形式"
             exit 1
           fi
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck --severity=error -e SC1090,SC1091 scripts/deploy.sh
+          shellcheck --severity=error -e SC1090,SC1091 scripts/deploy.sh ops/*.sh
 
       # Caddyfile 用官方镜像解析（域名来自环境变量，缺失或语法错误都会在这里失败）
       - name: Caddyfile check
@@ -80,3 +81,39 @@ jobs:
           docker run --rm -e DOMAIN=shop.example.com -e PAY_DOMAIN=pay.example.com \
             -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
             caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+
+  # 测试全部通过后，在原生 arm64 机器上构建生产镜像并推送到 GHCR（标签 = 提交号）。
+  # 只构建、不部署：部署仍由 scripts/deploy.sh 在用户明确指令下执行（见 AGENTS.md）。
+  image:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          build-args: SITE_URL=https://shop.9527.tr
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:main
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

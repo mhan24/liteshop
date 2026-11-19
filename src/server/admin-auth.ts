@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { admins, auditLogs } from "@/db/schema";
 import { env } from "@/lib/env";
 import { rateLimit, clientIpFromHeaders } from "@/lib/rate-limit";
-import { getAdminSessionVersion, setSetting, SETTING_KEYS } from "./settings";
+import { getConfig, updateConfig } from "./settings";
 
 /**
  * 管理员认证：独立 Session（HttpOnly Cookie），与买家体系完全隔离。
@@ -98,7 +98,7 @@ function sign(data: string): string {
 }
 
 export async function createSessionCookie(username: string): Promise<void> {
-  const version = await getAdminSessionVersion();
+  const version = (await getConfig()).adminSessionVersion;
   const payload: SessionPayload = {
     u: username,
     v: version,
@@ -141,7 +141,7 @@ export async function getAdminSession(): Promise<AdminSession | null> {
     return null;
   }
   if (payload.exp < Math.floor(Date.now() / 1000)) return null;
-  const version = await getAdminSessionVersion();
+  const version = (await getConfig()).adminSessionVersion;
   if (payload.v !== version) return null;
   return { username: payload.u };
 }
@@ -154,15 +154,15 @@ export async function requireAdminSession(): Promise<AdminSession> {
 
 /** 全局登出（改密后调用）：递增版本使所有会话失效 */
 export async function revokeAllSessions(): Promise<void> {
-  const current = await getAdminSessionVersion();
-  await setSetting(SETTING_KEYS.adminSessionVersion, String(current + 1));
+  // 行锁内自增：并发改密不会丢失一次递增
+  await updateConfig((c) => ({ adminSessionVersion: c.adminSessionVersion + 1 }));
 }
 
 /* ===== CSRF ===== */
 
 /** 无状态 CSRF 令牌：HMAC(session_version)；页面渲染时嵌入，Action 提交时比对 */
 export async function csrfToken(): Promise<string> {
-  const version = await getAdminSessionVersion();
+  const version = (await getConfig()).adminSessionVersion;
   return sign(`csrf:${version}`);
 }
 

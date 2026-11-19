@@ -13,6 +13,7 @@ next-env.d.ts
 # 模板文件需要入库（供部署时复制）
 .env*
 !.env.example
+!.env.offsite.example
 
 # 部署凭证（SSH，由部署脚本读取；绝不入库）
 .deploy.env

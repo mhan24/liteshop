@@ -1,10 +1,10 @@
 import { encryptSecret } from "@/lib/secret-box";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { orders, settings } from "@/db/schema";
+import { orders } from "@/db/schema";
 import { checkoutAction, queryOrderAction } from "@/actions/shop";
 import { resetDb, seedAutoProduct } from "../helpers";
-import { SETTING_KEYS } from "@/server/settings";
+import { updateConfig } from "@/server/settings";
 
 /**
  * 人机验证闸门（action 层）：后台开启 Turnstile 后，
@@ -31,12 +31,12 @@ function stubSiteverify(success: boolean) {
 }
 
 async function enforceTurnstile(fallback: boolean) {
-  await db.insert(settings).values([
-    { key: SETTING_KEYS.turnstileEnabled, value: "1" },
-    { key: SETTING_KEYS.turnstileSiteKey, value: "site-key" },
-    { key: SETTING_KEYS.turnstileSecretKey, value: encryptSecret("secret-key") },
-    { key: SETTING_KEYS.turnstileFallbackEnabled, value: fallback ? "1" : "0" },
-  ]);
+  await updateConfig({
+    turnstileEnabled: true,
+    turnstileSiteKey: "site-key",
+    turnstileSecretEnc: encryptSecret("secret-key"),
+    turnstileFallback: fallback,
+  });
 }
 
 function checkoutForm(token?: string) {

@@ -1,11 +1,13 @@
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
   pgTable,
   serial,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -26,13 +28,17 @@ import { sql } from "drizzle-orm";
  * 商品只有一种履约方式：卡密自动发货，库存即可用卡密数量。
  */
 
-/* ================= 站点配置（KV） ================= */
+/* ================= 站点配置（单行 JSON，结构见 server/settings.ts configSchema） ================= */
 
-export const settings = pgTable("settings", {
-  key: text("key").primaryKey(),
-  value: text("value").notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const appConfig = pgTable(
+  "app_config",
+  {
+    id: smallint("id").primaryKey().default(1),
+    data: jsonb("data").notNull().default({}),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [check("app_config_singleton", sql`id = 1`)]
+);
 
 /* ================= 管理员 ================= */
 
@@ -240,6 +246,28 @@ export const notifyLogs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("notify_logs_hash_idx").on(t.payloadHash), index("notify_logs_created_idx").on(t.createdAt)]
+);
+
+/* ================= 运营通知发件箱 ================= */
+
+/**
+ * 需要人工关注的事件（待核实、延迟到账、卡密不足、低库存）。
+ * 与业务变更同一事务写入，cron 负责投递（Telegram）与重试——业务成功则通知必在，回滚则不多发。
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: serial("id").primaryKey(),
+    kind: text("kind", {
+      enum: ["order_reconciling", "payment_late", "paid_undelivered", "stock_low", "test"],
+    }).notNull(),
+    text: text("text").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("notifications_pending_idx").on(t.sentAt, t.attempts)]
 );
 
 /* ================= 管理审计 ================= */

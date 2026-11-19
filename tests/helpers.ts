@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { orders, payments } from "@/db/schema";
 import { buildMockNotifyBody } from "@/server/payments/mock";
 import { handlePaymentWebhook } from "@/server/orders";
+import { invalidateConfig } from "@/server/settings";
 
 /** 清空业务表（保留结构）；每个集成测试用例前调用，保证用例独立 */
 export async function resetDb(): Promise<void> {
@@ -10,9 +11,10 @@ export async function resetDb(): Promise<void> {
     TRUNCATE TABLE
       notify_logs, deliveries, payments, order_items, orders,
       cards, products, categories,
-      audit_logs, settings, admins
+      audit_logs, app_config, admins, notifications
     RESTART IDENTITY CASCADE
   `);
+  invalidateConfig();
 }
 
 /** 造一个卡密商品 + N 张卡密，返回商品 id 与卡密内容 */

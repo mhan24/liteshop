@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { admins, categories, cards, products } from "@/db/schema";
 import { normalizeHttpUrl } from "@/lib/http-url";
-import { encryptSecret, isEncryptedSecret } from "@/lib/secret-box";
+import { encryptSecret } from "@/lib/secret-box";
 import {
   assertCsrf,
   audit,
@@ -25,16 +25,13 @@ import {
   retryDelivery,
 } from "@/server/orders";
 import { sendTestEmail } from "@/server/mail";
+import { sendTestNotification } from "@/server/notify";
 import {
   DEFAULT_TIMEOUT_SECONDS,
   MAX_TIMEOUT_SECONDS,
   MIN_TIMEOUT_SECONDS,
 } from "@/server/payments/litepay";
-import {
-  getSetting,
-  SETTING_KEYS,
-  setSetting,
-} from "@/server/settings";
+import { getConfig, updateConfig } from "@/server/settings";
 
 /** 管理后台 Server Actions（统一 useActionState 内联反馈，POST 直返，无 GET 重定向） */
 
@@ -374,6 +371,12 @@ export async function retryDeliveryAction(
 
 /* ===== 支付网关（LitePay，单实例） ===== */
 
+/** 凭据输入框语义：留空 = 保持原值；__CLEAR__ = 清除；其它 = 加密后替换 */
+function nextSecret(submitted: string, existing: string): string {
+  if (submitted === "__CLEAR__") return "";
+  return submitted === "" ? existing : encryptSecret(submitted);
+}
+
 /**
  * 保存 LitePay 网关配置：地址、接口令牌、订单有效期、收银台币种与重选开关。
  * 令牌不回显：留空 = 保持原值，输入 __CLEAR__ 表示清除。
@@ -393,37 +396,24 @@ export async function saveLitepayAction(
     const currencies = String(formData.get("litepayCurrencies") ?? "").trim().slice(0, 64);
     const reselect = String(formData.get("litepayReselect") ?? "") === "on";
 
-    const apiBase = apiBaseRaw === "" ? null : normalizeHttpUrl(apiBaseRaw);
-    if (apiBaseRaw !== "" && !apiBase) {
-      return { ok: false, message: "网关地址不合法（只接受 http/https 域名）" };
+    const apiBase = apiBaseRaw === "" ? "" : normalizeHttpUrl(apiBaseRaw);
+    if (apiBase === null) return { ok: false, message: "网关地址不合法（只接受 http/https 域名）" };
+    if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < MIN_TIMEOUT_SECONDS || timeoutSeconds > MAX_TIMEOUT_SECONDS) {
+      return { ok: false, message: `订单有效期需为 ${MIN_TIMEOUT_SECONDS}–${MAX_TIMEOUT_SECONDS} 之间的整数秒` };
     }
-    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < MIN_TIMEOUT_SECONDS || timeoutSeconds > MAX_TIMEOUT_SECONDS) {
-      return { ok: false, message: `订单有效期需在 ${MIN_TIMEOUT_SECONDS}–${MAX_TIMEOUT_SECONDS} 秒之间` };
-    }
-
-    const existing = await getSetting(SETTING_KEYS.litepayTokenEnc);
-    const tokenEnc =
-      submitted === "__CLEAR__"
-        ? null
-        : submitted !== ""
-          ? encryptSecret(submitted)
-          : isEncryptedSecret(existing)
-            ? existing
-            : null;
+    const tokenEnc = nextSecret(submitted, (await getConfig()).litepayTokenEnc);
     if (enabled && (!apiBase || !tokenEnc)) {
-      return {
-        ok: false,
-        message: "启用网关前请填写网关地址与接口令牌（令牌留空表示沿用已保存值）",
-      };
+      return { ok: false, message: "启用网关前请填写网关地址与接口令牌（令牌留空表示沿用已保存值）" };
     }
 
-    await setSetting(SETTING_KEYS.litepayEnabled, enabled ? "1" : "0");
-    await setSetting(SETTING_KEYS.litepayApiBase, apiBase ?? "");
-    if (tokenEnc === null) await setSetting(SETTING_KEYS.litepayTokenEnc, "");
-    else if (tokenEnc !== existing) await setSetting(SETTING_KEYS.litepayTokenEnc, tokenEnc);
-    await setSetting(SETTING_KEYS.litepayTimeoutSeconds, String(Math.trunc(timeoutSeconds)));
-    await setSetting(SETTING_KEYS.litepayCurrencies, currencies);
-    await setSetting(SETTING_KEYS.litepayReselect, reselect ? "1" : "0");
+    await updateConfig({
+      litepayEnabled: enabled,
+      litepayApiBase: apiBase,
+      litepayTokenEnc: tokenEnc,
+      litepayTimeoutSeconds: timeoutSeconds,
+      litepayCurrencies: currencies,
+      litepayReselect: reselect,
+    });
     await audit("settings.litepay", `enabled=${enabled}`, session.username);
     revalidateStorefront();
     return {
@@ -443,24 +433,18 @@ export async function saveSiteSettingsAction(
     const csrfErr = await checkCsrf(formData);
     if (csrfErr) return csrfErr;
     const siteName = String(formData.get("siteName") ?? "").trim().slice(0, 50);
-    const siteUrl = String(formData.get("siteUrl") ?? "").trim();
+    const siteUrl = String(formData.get("siteUrl") ?? "").trim().replace(/\/+$/, "");
     const supportUrl = String(formData.get("supportUrl") ?? "").trim();
     const threshold = Number(formData.get("threshold") ?? 5);
 
-    if (siteName) await setSetting(SETTING_KEYS.siteName, siteName);
-    if (siteUrl && !/^https?:\/\//.test(siteUrl)) {
-      return { ok: false, message: "站点地址需以 http:// 或 https:// 开头" };
+    // 先全部校验，再一次性写入：不会出现「站点名已改、地址校验失败」的半保存状态
+    if (siteUrl && !normalizeHttpUrl(siteUrl)) return { ok: false, message: "站点地址需为 http:// 或 https:// 开头的有效地址" };
+    if (supportUrl && !normalizeHttpUrl(supportUrl)) return { ok: false, message: "客服地址需为 http/https 链接" };
+    if (!Number.isInteger(threshold) || threshold < 0 || threshold > 100_000) {
+      return { ok: false, message: "低库存提醒阈值需为非负整数" };
     }
-    if (siteUrl) await setSetting(SETTING_KEYS.siteUrl, siteUrl.replace(/\/+$/, ""));
-    if (supportUrl) {
-      if (!/^https?:\/\//.test(supportUrl)) return { ok: false, message: "客服地址需为 http/https 链接" };
-      await setSetting(SETTING_KEYS.supportUrl, supportUrl);
-    } else {
-      await setSetting(SETTING_KEYS.supportUrl, "");
-    }
-    if (Number.isFinite(threshold) && threshold >= 0) {
-      await setSetting(SETTING_KEYS.cardLowStockThreshold, String(Math.trunc(threshold)));
-    }
+
+    await updateConfig({ siteName, siteUrl, supportUrl, lowStockThreshold: threshold });
     await audit("settings.site", siteName || "site", session.username);
     revalidateStorefront();
     return { ok: true, message: "站点设置已保存" };
@@ -478,28 +462,22 @@ export async function saveTurnstileAction(
     if (csrfErr) return csrfErr;
     const enabled = String(formData.get("tsEnabled") ?? "") === "on";
     const siteKey = String(formData.get("tsSiteKey") ?? "").trim();
-    const submitted = String(formData.get("tsSecretKey") ?? "").trim();
-
-    // Secret Key 不回显、加密存储：留空 = 保持原值，输入 __CLEAR__ 表示清除
-    const existing = await getSetting(SETTING_KEYS.turnstileSecretKey);
-    const secretKey =
-      submitted === "__CLEAR__"
-        ? ""
-        : submitted !== ""
-          ? encryptSecret(submitted)
-          : isEncryptedSecret(existing)
-            ? existing!
-            : "";
+    const fallback = String(formData.get("tsFallback") ?? "") === "on";
+    const secretEnc = nextSecret(
+      String(formData.get("tsSecretKey") ?? "").trim(),
+      (await getConfig()).turnstileSecretEnc
+    );
 
     // 强制校验要求两把 Key 齐备；缺一会 widget 渲染不出来、下单被全量拒绝
-    if (enabled && (siteKey === "" || secretKey === "")) {
+    if (enabled && (siteKey === "" || secretEnc === "")) {
       return { ok: false, message: "启用人机验证需填写 Site Key 与 Secret Key" };
     }
-    const fallback = String(formData.get("tsFallback") ?? "") === "on";
-    await setSetting(SETTING_KEYS.turnstileEnabled, enabled ? "1" : "0");
-    await setSetting(SETTING_KEYS.turnstileSiteKey, siteKey);
-    await setSetting(SETTING_KEYS.turnstileSecretKey, secretKey);
-    await setSetting(SETTING_KEYS.turnstileFallbackEnabled, fallback ? "1" : "0");
+    await updateConfig({
+      turnstileEnabled: enabled,
+      turnstileSiteKey: siteKey,
+      turnstileSecretEnc: secretEnc,
+      turnstileFallback: fallback,
+    });
     await audit("settings.turnstile", `enabled=${enabled} fallback=${fallback}`, session.username);
     revalidateStorefront();
     return { ok: true, message: "人机验证设置已保存" };
@@ -521,24 +499,59 @@ export async function saveSmtpAction(
     const from = String(formData.get("smtpFrom") ?? "").trim();
     const user = String(formData.get("smtpUser") ?? "").trim();
     const pass = String(formData.get("smtpPass") ?? "").trim();
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, message: "端口非法" };
     if (enabled) {
       if (!host) return { ok: false, message: "启用邮件通知需填写 SMTP 服务器地址" };
-      if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, message: "端口非法" };
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) && !/^[^@\s]+<[^@\s]+>$/.test(from)) {
         return { ok: false, message: "发件人格式无效" };
       }
     }
-    await setSetting(SETTING_KEYS.smtpEnabled, enabled ? "1" : "0");
-    await setSetting(SETTING_KEYS.smtpHost, host);
-    await setSetting(SETTING_KEYS.smtpPort, String(port));
-    await setSetting(SETTING_KEYS.smtpSecure, String(formData.get("smtpSecure") ?? "") === "on" ? "1" : "0");
-    await setSetting(SETTING_KEYS.smtpUser, user);
-    // 加密存储：留空 = 保持原密码；__CLEAR__ = 清除
-    if (pass === "__CLEAR__") await setSetting(SETTING_KEYS.smtpPass, "");
-    else if (pass !== "") await setSetting(SETTING_KEYS.smtpPass, encryptSecret(pass));
-    await setSetting(SETTING_KEYS.smtpFrom, from);
+    await updateConfig({
+      smtpEnabled: enabled,
+      smtpHost: host,
+      smtpPort: port,
+      smtpSecure: String(formData.get("smtpSecure") ?? "") === "on",
+      smtpUser: user,
+      smtpPassEnc: nextSecret(pass, (await getConfig()).smtpPassEnc),
+      smtpFrom: from,
+    });
     await audit("settings.smtp", `enabled=${enabled}`, session.username);
     return { ok: true, message: "邮件设置已保存" };
+  });
+}
+
+/* ===== 运营通知（Telegram） ===== */
+
+export async function saveTelegramAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const enabled = String(formData.get("tgEnabled") ?? "") === "on";
+    const chatId = String(formData.get("tgChatId") ?? "").trim();
+    const tokenEnc = nextSecret(String(formData.get("tgToken") ?? "").trim(), (await getConfig()).telegramBotTokenEnc);
+    if (chatId && !/^-?\d{1,20}$|^@[A-Za-z0-9_]{5,32}$/.test(chatId)) {
+      return { ok: false, message: "Chat ID 应为数字（群组以 - 开头）或 @频道名" };
+    }
+    if (enabled && (!tokenEnc || !chatId)) return { ok: false, message: "启用通知需填写 Bot Token 与 Chat ID" };
+    await updateConfig({ telegramEnabled: enabled, telegramBotTokenEnc: tokenEnc, telegramChatId: chatId });
+    await audit("settings.telegram", `enabled=${enabled}`, session.username);
+    return { ok: true, message: enabled ? "通知设置已保存，可以发一条测试消息确认" : "通知设置已保存（当前停用）" };
+  });
+}
+
+export async function sendTestNotificationAction(
+  _prev: AdminActionResult | null,
+  formData: FormData
+): Promise<AdminActionResult> {
+  return withAdmin(async (session) => {
+    const csrfErr = await checkCsrf(formData);
+    if (csrfErr) return csrfErr;
+    const r = await sendTestNotification();
+    await audit("settings.telegram_test", r.ok ? "ok" : (r.error ?? ""), session.username);
+    return r.ok ? { ok: true, message: "测试消息已发送，请在 Telegram 查看" } : { ok: false, message: `发送失败：${r.error}` };
   });
 }
 

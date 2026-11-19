@@ -47,35 +47,38 @@ function toView(p: typeof products.$inferSelect, cat: CategoryRow | null, stock:
   };
 }
 
-async function availableCards(productId: number): Promise<number> {
-  const rows = await db
-    .select({ c: sql<number>`count(*)::int` })
-    .from(cards)
-    .where(and(eq(cards.productId, productId), eq(cards.status, "available")));
-  return Number(rows[0]?.c ?? 0);
+/** 每个商品的可售卡密数（一条分组子查询，随商品列表一起 JOIN，避免 N+1） */
+const stockSq = db
+  .select({ productId: cards.productId, n: sql<number>`count(*)::int`.as("n") })
+  .from(cards)
+  .where(eq(cards.status, "available"))
+  .groupBy(cards.productId)
+  .as("stock");
+
+function selectProducts() {
+  return db
+    .select({ product: products, category: categories, stock: sql<number>`coalesce(${stockSq.n}, 0)` })
+    .from(products)
+    .leftJoin(categories, eq(products.categoryId, categories.id))
+    .leftJoin(stockSq, eq(stockSq.productId, products.id));
 }
+
+type ProductRow = { product: typeof products.$inferSelect; category: CategoryRow | null; stock: number };
+const rowToView = (r: ProductRow) => toView(r.product, r.category, Number(r.stock));
 
 /** 商城在售商品（含实时库存与分类） */
 export async function listStoreProducts(filter?: { categorySlug?: string; q?: string }): Promise<ProductView[]> {
   const conditions = [eq(products.status, "on")];
   if (filter?.categorySlug) conditions.push(eq(categories.slug, filter.categorySlug));
   if (filter?.q) {
-    const kw = `%${filter.q.replace(/[%_]/g, "")}%`;
+    const kw = `%${filter.q.replace(/[%_\\]/g, "")}%`;
     const search = or(ilike(products.name, kw), ilike(products.description, kw));
     if (search) conditions.push(search);
   }
-  const rows = await db
-    .select({ product: products, category: categories })
-    .from(products)
-    .leftJoin(categories, eq(products.categoryId, categories.id))
+  const rows = await selectProducts()
     .where(and(...conditions))
     .orderBy(asc(categories.sortOrder), asc(products.id));
-
-  const out: ProductView[] = [];
-  for (const { product: p, category } of rows) {
-    out.push(toView(p, category, await availableCards(p.id)));
-  }
-  return out;
+  return rows.map(rowToView);
 }
 
 export async function listCategories(): Promise<CategoryRow[]> {
@@ -88,29 +91,16 @@ export async function getCategoryBySlug(slug: string): Promise<CategoryRow | nul
 }
 
 export async function getProductBySlug(slug: string): Promise<ProductView | null> {
-  const rows = await db
-    .select({ product: products, category: categories })
-    .from(products)
-    .leftJoin(categories, eq(products.categoryId, categories.id))
+  const rows = await selectProducts()
     .where(and(eq(products.slug, slug), eq(products.status, "on")))
     .limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  return toView(row.product, row.category, await availableCards(row.product.id));
+  return rows[0] ? rowToView(rows[0]) : null;
 }
 
 /** 管理后台商品列表（含未上架） */
 export async function listAllProducts(): Promise<ProductView[]> {
-  const rows = await db
-    .select({ product: products, category: categories })
-    .from(products)
-    .leftJoin(categories, eq(products.categoryId, categories.id))
-    .orderBy(asc(products.id));
-  const out: ProductView[] = [];
-  for (const { product: p, category } of rows) {
-    out.push(toView(p, category, await availableCards(p.id)));
-  }
-  return out;
+  const rows = await selectProducts().orderBy(asc(products.id));
+  return rows.map(rowToView);
 }
 
 /**

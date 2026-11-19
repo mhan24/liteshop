@@ -1,8 +1,9 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sweepExpired } from "@/server/orders";
 import { flushDeliveryEmails } from "@/server/mail";
+import { flushNotifications } from "@/server/notify";
 import { db } from "@/db";
-import { notifyLogs } from "@/db/schema";
+import { notifications, notifyLogs } from "@/db/schema";
 import { lt } from "drizzle-orm";
 import { env } from "@/lib/env";
 import { rateLimit } from "@/lib/rate-limit";
@@ -13,7 +14,8 @@ export const dynamic = "force-dynamic";
  * 维护任务（外部定时器调用，如 compose 内 cron 服务每分钟）：
  * - 过期订单清扫（释放库存 + 通知网关撤销）
  * - 交付邮件重投
- * - 回调日志保留 30 天
+ * - 运营通知投递（Telegram）
+ * - 回调日志与通知记录保留 30 天
  */
 export async function POST(request: Request) {
   if (!isAuthorized(request.headers.get("authorization"))) {
@@ -25,14 +27,18 @@ export async function POST(request: Request) {
 
   const sweep = await sweepExpired();
   const mail = await flushDeliveryEmails(50);
+  const notified = await flushNotifications(20);
   const cutoff = new Date(Date.now() - 30 * 86400_000);
   await db.delete(notifyLogs).where(lt(notifyLogs.createdAt, cutoff));
+  await db.delete(notifications).where(lt(notifications.createdAt, cutoff));
 
   return Response.json({
     ok: true,
     closedOrders: sweep.closedOrders,
     emailSent: mail.sent,
     emailFailed: mail.failed,
+    notifySent: notified.sent,
+    notifyFailed: notified.failed,
   });
 }
 

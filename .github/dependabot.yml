@@ -1,0 +1,36 @@
+# 依赖更新：每周检查一次，安全更新随时提。小版本与补丁合并成一个 PR，减少噪音；
+# 合并前必须 CI 全绿。部署仍需用户明确指令（见 AGENTS.md）。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    # 框架大版本升级需要人工评估迁移指南
+    ignore:
+      - dependency-name: next
+        update-types: [version-update:semver-major]
+      - dependency-name: react
+        update-types: [version-update:semver-major]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      # Node 只跟 LTS 大版本，由人工升级
+      - dependency-name: node
+        update-types: [version-update:semver-major]
