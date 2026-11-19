@@ -2,10 +2,11 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { env } from "./env";
 
 /**
- * 支付渠道凭据静态加密（AES-256-GCM）。
+ * settings 表凭据静态加密（AES-256-GCM）：LitePay 令牌、SMTP 密码、Turnstile Secret。
  *
- * 密钥派生自 AUTH_SECRET（HKDF 语义：sha256 分域），数据库泄露不等于凭据泄露。
- * 密文格式：enc:v1:<iv-b64>:<tag-b64>:<data-b64>
+ * 密钥派生自 AUTH_SECRET（sha256 分域；域标签沿用 "payment-token"，改动会让已存密文失效），
+ * 数据库泄露不等于凭据泄露。密文格式：enc:v1:<iv-b64>:<tag-b64>:<data-b64>
+ * 存量明文由 scripts/db/encrypt-secrets.mjs 在启动迁移时一次性转换（算法与此处一致）。
  */
 
 const VERSION = "enc:v1";
@@ -37,7 +38,12 @@ export function decryptSecret(enc: string): string | null {
   }
 }
 
-/** 密文掩码（前端展示「已设置」判断用；明文永不回显） */
+/** 读取凭据：未设置、非密文或解不开（AUTH_SECRET 变更）一律返回空串 */
+export function revealSecret(enc: string | null | undefined): string {
+  return isEncryptedSecret(enc) ? (decryptSecret(enc!) ?? "") : "";
+}
+
+/** 是否已保存凭据（后台展示「已设置」用；明文永不回显） */
 export function isEncryptedSecret(enc: string | null | undefined): boolean {
   return typeof enc === "string" && enc.startsWith(VERSION);
 }

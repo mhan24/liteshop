@@ -1,7 +1,7 @@
 import { normalizeHttpUrl } from "@/lib/http-url";
 import { litepaySign, parseJsonObject, safeEqualHex } from "@/lib/litepay-sign";
 import { minorToNumber, SITE_CURRENCY, toMinorUnits } from "@/lib/money";
-import { decryptSecret, isEncryptedSecret } from "@/lib/secret-box";
+import { revealSecret } from "@/lib/secret-box";
 import { getSetting, SETTING_KEYS } from "@/server/settings";
 import type {
   CreateOutcome,
@@ -79,20 +79,12 @@ export async function getLitepayConfig(): Promise<LitepayConfig> {
     getSetting(SETTING_KEYS.litepayCurrencies),
     getSetting(SETTING_KEYS.litepayReselect),
   ]);
-  const hasToken = isEncryptedSecret(tokenEnc);
-  let token: string | null = null;
-  if (hasToken) {
-    try {
-      token = decryptSecret(tokenEnc!);
-    } catch {
-      // AUTH_SECRET 变更后旧密文无法解开：视为未配置，等后台重新录入令牌
-      token = null;
-    }
-  }
+  // AUTH_SECRET 变更后旧密文解不开：视为未配置，等后台重新录入令牌
+  const token = revealSecret(tokenEnc) || null;
   return {
     enabled: enabled === "1",
     apiBase: normalizeApiBase(apiBase),
-    hasToken: hasToken && token !== null,
+    hasToken: token !== null,
     token,
     timeoutSeconds: normalizeTimeout(timeout),
     currencies: (currencies ?? "").trim() === "" ? null : currencies!.trim(),

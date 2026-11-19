@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { settings } from "@/db/schema";
 import { normalizeHttpUrl } from "@/lib/http-url";
+import { isEncryptedSecret, revealSecret } from "@/lib/secret-box";
 
 /** 站点级配置（KV 表）。node-postgres 为异步 API。 */
 
@@ -16,10 +17,12 @@ export const SETTING_KEYS = {
   smtpPort: "smtp_port",
   smtpSecure: "smtp_secure",
   smtpUser: "smtp_user",
+  /** AES-GCM 密文 */
   smtpPass: "smtp_pass",
   smtpFrom: "smtp_from",
   turnstileEnabled: "turnstile_enabled",
   turnstileSiteKey: "turnstile_site_key",
+  /** AES-GCM 密文 */
   turnstileSecretKey: "turnstile_secret_key",
   turnstileFallbackEnabled: "turnstile_fallback_enabled",
   /* LitePay 网关（单一渠道；令牌 AES-GCM 加密落库） */
@@ -115,7 +118,7 @@ export async function getSmtpConfig(): Promise<SmtpConfig> {
     port: Number.isInteger(portNum) && portNum > 0 ? portNum : 465,
     secure: secure !== "0",
     user: user?.trim() ?? "",
-    pass: pass ?? "",
+    pass: revealSecret(pass),
     from: from?.trim() ?? "",
   };
 }
@@ -132,7 +135,7 @@ async function turnstileKeysReady(): Promise<boolean> {
     getSetting(SETTING_KEYS.turnstileSiteKey),
     getSetting(SETTING_KEYS.turnstileSecretKey),
   ]);
-  return (siteKey?.trim() ?? "") !== "" && (secretKey?.trim() ?? "") !== "";
+  return (siteKey?.trim() ?? "") !== "" && isEncryptedSecret(secretKey);
 }
 
 /** 是否强制人机验证：总开关开启且两把 Key 都已配置（缺一不生效，避免半配置态拦死所有人） */
@@ -159,7 +162,7 @@ export async function getTurnstileClientConfig(): Promise<TurnstileClientConfig>
 }
 
 export async function getTurnstileSecretKey(): Promise<string> {
-  return (await getSetting(SETTING_KEYS.turnstileSecretKey))?.trim() ?? "";
+  return revealSecret(await getSetting(SETTING_KEYS.turnstileSecretKey));
 }
 
 /**

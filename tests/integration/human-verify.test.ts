@@ -1,3 +1,4 @@
+import { encryptSecret } from "@/lib/secret-box";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { orders, settings } from "@/db/schema";
@@ -33,7 +34,7 @@ async function enforceTurnstile(fallback: boolean) {
   await db.insert(settings).values([
     { key: SETTING_KEYS.turnstileEnabled, value: "1" },
     { key: SETTING_KEYS.turnstileSiteKey, value: "site-key" },
-    { key: SETTING_KEYS.turnstileSecretKey, value: "secret-key" },
+    { key: SETTING_KEYS.turnstileSecretKey, value: encryptSecret("secret-key") },
     { key: SETTING_KEYS.turnstileFallbackEnabled, value: fallback ? "1" : "0" },
   ]);
 }

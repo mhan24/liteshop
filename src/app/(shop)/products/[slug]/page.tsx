@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { jsonForScriptTag } from "@/lib/security-headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatMoney } from "@/lib/money";
@@ -54,7 +55,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
 
   return (
     <article className="space-y-14">
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonForScriptTag(jsonLd) }} />
 
       <nav className="text-xs text-muted" aria-label="面包屑">
         <Link href="/" className="hover:text-fg">

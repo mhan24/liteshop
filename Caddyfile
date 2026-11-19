@@ -1,30 +1,27 @@
 {
-	# 双站点边缘代理：shop.9527.tr → liteshop 应用；pay.9527.tr → LitePay 网关
-	# pay 站点依赖 litepay 容器所在的 liteshop_default 网络（部署时 docker network connect）
+	# 双站点边缘代理：{$DOMAIN} → liteshop 应用；{$PAY_DOMAIN} → LitePay 网关
+	# 域名来自 compose 注入的环境变量（.env 里的 DOMAIN / PAY_DOMAIN，必填）
+	# pay 站点要求 litepay 容器与 caddy 处在同一 docker 网络（部署时 docker network connect）
 }
 
-shop.9527.tr {
-	reverse_proxy app:3000
-
+(security_headers) {
 	header {
+		Strict-Transport-Security "max-age=31536000"
 		X-Frame-Options "DENY"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
+}
 
+{$DOMAIN} {
+	reverse_proxy app:3000
+	import security_headers
 	encode zstd gzip
 }
 
-pay.9527.tr {
+{$PAY_DOMAIN} {
 	reverse_proxy litepay:3000
-
-	header {
-		X-Frame-Options "DENY"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		-Server
-	}
-
+	import security_headers
 	encode zstd gzip
 }

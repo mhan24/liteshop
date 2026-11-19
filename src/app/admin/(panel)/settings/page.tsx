@@ -1,6 +1,7 @@
 import { csrfToken } from "@/server/admin-auth";
 import { getGatewayStatus, webhookPath } from "@/server/payments";
 import { getSiteUrl, getAllSettings, SETTING_KEYS } from "@/server/settings";
+import { isEncryptedSecret } from "@/lib/secret-box";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, Input, Label } from "@/components/ui/input";
 import { AdminForm } from "@/components/admin/admin-form";
@@ -190,7 +191,13 @@ export default async function AdminSettingsPage() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="smtp-pass">密码（留空保持不变）</Label>
-              <Input id="smtp-pass" name="smtpPass" type="password" autoComplete="off" />
+              <Input
+                id="smtp-pass"
+                name="smtpPass"
+                type="password"
+                autoComplete="off"
+                placeholder={isEncryptedSecret(s[SETTING_KEYS.smtpPass]) ? "已保存，留空保持不变（输入 __CLEAR__ 清除）" : "未设置"}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="smtp-from">发件人</Label>
@@ -252,14 +259,14 @@ export default async function AdminSettingsPage() {
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="ts-secret">
-                Secret Key {s[SETTING_KEYS.turnstileSecretKey] ? "（已配置：留空保持不变）" : ""}
+                Secret Key {isEncryptedSecret(s[SETTING_KEYS.turnstileSecretKey]) ? "（已配置：留空保持不变）" : ""}
               </Label>
               <Input
                 id="ts-secret"
                 name="tsSecretKey"
                 type="password"
                 autoComplete="off"
-                placeholder={s[SETTING_KEYS.turnstileSecretKey] ? "留空保持不变，输入 __CLEAR__ 清除" : ""}
+                placeholder={isEncryptedSecret(s[SETTING_KEYS.turnstileSecretKey]) ? "留空保持不变，输入 __CLEAR__ 清除" : ""}
               />
             </div>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">

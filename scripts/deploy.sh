@@ -39,6 +39,21 @@ echo "▶ 记录服务器 .env 指纹（部署过程不得改变它）"
 ENV_BEFORE="$(run_remote "sha256sum $REMOTE_DIR/.env" | awk '{print $1}')"
 echo "  $ENV_BEFORE"
 
+echo "▶ 校验服务器 .env 的 Caddy 域名（Caddyfile 读取 DOMAIN / PAY_DOMAIN）"
+SITE_HOST="$(printf '%s' "$SITE_URL" | sed -E 's#^https?://##; s#[/:].*$##')"
+REMOTE_DOMAIN="$(run_remote "sed -n 's/^DOMAIN=//p' $REMOTE_DIR/.env | tail -n 1" | tr -d "\r\"' ")"
+REMOTE_PAY_DOMAIN="$(run_remote "sed -n 's/^PAY_DOMAIN=//p' $REMOTE_DIR/.env | tail -n 1" | tr -d "\r\"' ")"
+if [ "$REMOTE_DOMAIN" != "$SITE_HOST" ]; then
+  echo "✗ 服务器 .env 的 DOMAIN（${REMOTE_DOMAIN:-未设置}）与 SITE_URL 域名（${SITE_HOST}）不一致"
+  echo "  请先在服务器 $REMOTE_DIR/.env 写入 DOMAIN=${SITE_HOST}，再重新部署"
+  exit 1
+fi
+if [ -z "$REMOTE_PAY_DOMAIN" ]; then
+  echo "✗ 服务器 .env 未设置 PAY_DOMAIN（LitePay 网关域名），请先写入后再部署"
+  exit 1
+fi
+echo "  DOMAIN=${REMOTE_DOMAIN} PAY_DOMAIN=${REMOTE_PAY_DOMAIN}"
+
 echo "▶ 本地构建镜像 $IMAGE"
 docker build --platform linux/arm64 --build-arg "SITE_URL=$SITE_URL" -t "$IMAGE" .
 

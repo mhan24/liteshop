@@ -12,7 +12,7 @@ Next.js 16 (App Router) · React 19 · TypeScript Strict · Tailwind CSS v4 · D
 - **订单查询**：每单独立查单密码（Argon2id），订单号 + 邮箱 + 密码三因子，限流防爆破
 - **后台**：Session 认证（scrypt + HMAC 会话 + CSRF）、商品/分类/卡密/订单/站点设置/支付网关、审计日志
 - **SEO**：商品页 ISR + JSON-LD、sitemap、robots、canonical / OG；订单、支付、后台全部 noindex
-- **安全**：服务端金额计算、网关令牌 AES-GCM 加密存储、登录/下单/查询限流、后台入口伪装（ADMIN_PATH）
+- **安全**：服务端金额计算、网关令牌 / SMTP 密码 / Turnstile Secret 均 AES-GCM 加密存储、CSP + HSTS、登录/下单/查询限流、后台入口伪装（ADMIN_PATH）
 
 ## 快速开始（开发）
 
@@ -44,7 +44,7 @@ docker run -d --name liteshop-pg-test \
   -e POSTGRES_PASSWORD=liteshop-test -e POSTGRES_DB=liteshop_test \
   -p 54330:5432 postgres:18-alpine
 
-npm test        # 80 用例：金额/签名/适配器/入口伪装单元 + 下单/回调幂等/并发发卡/补货重发/过期清扫/鉴权集成
+npm test        # 86 用例：金额/签名/适配器/入口伪装单元 + 下单/回调幂等/并发发卡/补货重发/过期清扫/鉴权集成
 npx tsc --noEmit
 npm run lint
 ```
@@ -53,7 +53,7 @@ npm run lint
 
 ```bash
 cp .env.example .env
-# 填写：SITE_URL / DOMAIN / AUTH_SECRET / ADMIN_PASSWORD_HASH（npm run hash-password -- <密码>）/ POSTGRES_PASSWORD / CRON_SECRET
+# 填写：SITE_URL / DOMAIN / PAY_DOMAIN / AUTH_SECRET / ADMIN_PASSWORD_HASH（npm run hash-password -- <密码>）/ POSTGRES_PASSWORD / CRON_SECRET
 
 docker compose up -d --build
 # app 容器启动前自动执行数据库迁移（含破坏性的 0001）；Caddy 自动签发 HTTPS

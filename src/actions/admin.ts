@@ -175,6 +175,8 @@ const productSchema = z.object({
 function parseProductForm(formData: FormData): z.infer<typeof productSchema> | null {
   const catRaw = String(formData.get("categoryId") ?? "").trim();
   const imageRaw = String(formData.get("imageUrl") ?? "").trim();
+  // 商品图会渲染为 <img src> 与 og:image：只接受 http/https
+  if (imageRaw && !normalizeHttpUrl(imageRaw)) return null;
   return productSchema.safeParse({
     name: formData.get("name"),
     slug: String(formData.get("slug") ?? "").trim(),
@@ -478,10 +480,16 @@ export async function saveTurnstileAction(
     const siteKey = String(formData.get("tsSiteKey") ?? "").trim();
     const submitted = String(formData.get("tsSecretKey") ?? "").trim();
 
-    // Secret Key 不回显：留空 = 保持原值，输入 __CLEAR__ 表示清除
-    // （历史缺陷：回显会让密钥出现在页面源码中）
-    const existing = (await getSetting(SETTING_KEYS.turnstileSecretKey))?.trim() ?? "";
-    const secretKey = submitted === "__CLEAR__" ? "" : submitted === "" ? existing : submitted;
+    // Secret Key 不回显、加密存储：留空 = 保持原值，输入 __CLEAR__ 表示清除
+    const existing = await getSetting(SETTING_KEYS.turnstileSecretKey);
+    const secretKey =
+      submitted === "__CLEAR__"
+        ? ""
+        : submitted !== ""
+          ? encryptSecret(submitted)
+          : isEncryptedSecret(existing)
+            ? existing!
+            : "";
 
     // 强制校验要求两把 Key 齐备；缺一会 widget 渲染不出来、下单被全量拒绝
     if (enabled && (siteKey === "" || secretKey === "")) {
@@ -525,9 +533,9 @@ export async function saveSmtpAction(
     await setSetting(SETTING_KEYS.smtpPort, String(port));
     await setSetting(SETTING_KEYS.smtpSecure, String(formData.get("smtpSecure") ?? "") === "on" ? "1" : "0");
     await setSetting(SETTING_KEYS.smtpUser, user);
-    // 留空 = 保持原密码；__CLEAR__ = 清除
+    // 加密存储：留空 = 保持原密码；__CLEAR__ = 清除
     if (pass === "__CLEAR__") await setSetting(SETTING_KEYS.smtpPass, "");
-    else if (pass !== "") await setSetting(SETTING_KEYS.smtpPass, pass);
+    else if (pass !== "") await setSetting(SETTING_KEYS.smtpPass, encryptSecret(pass));
     await setSetting(SETTING_KEYS.smtpFrom, from);
     await audit("settings.smtp", `enabled=${enabled}`, session.username);
     return { ok: true, message: "邮件设置已保存" };

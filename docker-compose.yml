@@ -86,7 +86,9 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      DOMAIN: ${DOMAIN:-shop.example.com}
+      # 必填：缺失时 compose 在创建任何容器前报错退出（不会带着错误域名申请证书）
+      DOMAIN: ${DOMAIN:?请在 .env 设置 DOMAIN（商店域名）}
+      PAY_DOMAIN: ${PAY_DOMAIN:?请在 .env 设置 PAY_DOMAIN（LitePay 网关域名）}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

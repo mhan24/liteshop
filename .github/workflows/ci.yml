@@ -73,3 +73,10 @@ jobs:
           fi
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck --severity=error -e SC1090,SC1091 scripts/deploy.sh
+
+      # Caddyfile 用官方镜像解析（域名来自环境变量，缺失或语法错误都会在这里失败）
+      - name: Caddyfile check
+        run: |
+          docker run --rm -e DOMAIN=shop.example.com -e PAY_DOMAIN=pay.example.com \
+            -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+            caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null

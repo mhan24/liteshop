@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { contentSecurityPolicy } from "./src/lib/security-headers";
 
 const nextConfig: NextConfig = {
   // 单体 standalone 部署（Docker 多阶段构建直接运行 server.js）
@@ -14,6 +15,7 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+          { key: "Content-Security-Policy", value: contentSecurityPolicy(process.env.NODE_ENV !== "production") },
         ],
       },
       // 订单、支付、结算、后台与回调接口禁止被搜索引擎索引（双保险：另有 robots.ts + 页面 metadata）

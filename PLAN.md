@@ -75,7 +75,7 @@ pending|reconciling → paid → 事务内原子发卡 reserved→sold → deliv
 
 `settings` KV：`litepay_enabled` / `litepay_api_base` / `litepay_token_enc`（AES-GCM，密钥派生自
 AUTH_SECRET）/ `litepay_timeout_seconds`（120–86400）/ `litepay_currencies` / `litepay_reselect`。
-回调地址固定，令牌不回显；`PAYMENT_DRIVER=mock` 时改用进程内模拟网关（开发与测试）。
+回调地址固定，令牌不回显；SMTP 密码与 Turnstile Secret 同样加密存储（存量明文由启动迁移一次性加密）；`PAYMENT_DRIVER=mock` 时改用进程内模拟网关（开发与测试）。
 
 ### 查询（server/order-query.ts）
 

@@ -38,14 +38,29 @@
 
 ### 未修复（记录待决）
 
-- **SMTP 密码、Turnstile Secret 明文存 settings 表**（LitePay 令牌已加密）。加密需要处理生产库存量明文值，
-  建议下轮配合一次性迁移完成，避免引入「明文 / 密文双读」兼容层。
-- **Caddyfile 写死 `shop.9527.tr` / `pay.9527.tr`**，README 与 `.env.example` 的 `DOMAIN` 变量实际不生效；
-  `pay` 站点依赖手工 `docker network connect`。属运维约定，未改动。
-- 限流为进程内内存（单实例前提）；未配置 CSP / HSTS 头。
-- `/pay/<订单号>` 仅凭订单号可见商品与金额（不含卡密），符合当前设计，记录在案。
+第 1 轮遗留项已在第 2 轮处理，见下文。
 
 ### 部署注意
 
 本轮改动**未部署**。上线时 `docker-compose.yml` 会随 `scripts/deploy.sh` 一并上传（cron 改用 Bearer 头，
 新旧版本必须同时更新，脚本已保证）。无数据库迁移。
+
+## 2026-11-19 · 第 2 轮（处理第 1 轮遗留）
+
+修复后 86 用例全绿；`tsc`、`eslint`、`next build` 通过，并以生产模式实际启动验证了响应头与后台入口伪装。
+
+| # | 级别 | 问题 | 修复 | 回归测试 |
+|---|---|---|---|---|
+| 1 | 中 | SMTP 密码、Turnstile Secret 明文存 settings 表 | 与 LitePay 令牌同用 AES-256-GCM 加密存储；容器启动迁移（`scripts/db/encrypt-secrets.mjs`）把存量明文一次性加密，幂等。读取只认密文，不保留明文/密文双读兼容层 | `secret-settings`：迁移互通、幂等、未迁移明文不被使用 |
+| 2 | 中 | Caddyfile 写死域名，`DOMAIN` 变量不生效 | Caddyfile 改读 `{$DOMAIN}` / `{$PAY_DOMAIN}`；compose 中两者必填（缺失时创建容器前报错）；`deploy.sh` 部署前校验服务器 `.env` 的 `DOMAIN` 与 `SITE_URL` 一致，否则在构建前中止；CI 用官方 caddy 镜像解析 Caddyfile | CI `Caddyfile check` |
+| 3 | 低 | 无 CSP / HSTS | 全站 CSP（放行 Turnstile；生产不含 `unsafe-eval`；禁止嵌入与外部表单提交）；Caddy 增加 HSTS（1 年，不含子域/preload，避免误伤） | `security-headers.test` |
+| 4 | 低 | 商品页 JSON-LD 直接 `JSON.stringify` 嵌入 `<script>`，商品名含 `</script>` 可截断注入 | `jsonForScriptTag` 转义 `<` | `security-headers.test` |
+| 5 | 低 | 商品图片地址不校验协议（渲染为 `<img src>` / og:image） | 只接受 http/https | — |
+
+### 仍待确认
+
+- **生产 `.env` 必须有 `DOMAIN` 和 `PAY_DOMAIN`。** 本轮不能读取生产配置（权限限制），无法确认现值。
+  缺失或不一致时 `deploy.sh` 会在构建前中止，不会影响线上服务；按提示补上即可。
+- `pay` 站点依赖手工把 litepay 容器接入 caddy 所在网络，属运维约定，未改。
+- 限流仍为进程内内存（单实例前提）。
+- Caddyfile 本机未能用 caddy 实测（下载外部程序被权限拦截），由 CI 校验。
