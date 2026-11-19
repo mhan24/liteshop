@@ -30,7 +30,7 @@ export default async function AdminOrdersPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-serif text-xl font-semibold">订单</h1>
+      <h1 className="text-xl font-semibold">订单</h1>
       {rows.length === 0 ? <p className="text-sm text-muted">还没有订单。</p> : null}
 
       <ul className="space-y-4">
@@ -44,21 +44,21 @@ export default async function AdminOrdersPage() {
                   <div>
                     <CardTitle className="font-mono text-sm">{o.orderNo}</CardTitle>
                     <p className="text-xs text-muted">
-                      {o.email} · {formatMoney(o.totalCents)} · {o.createdAt.toLocaleString("zh-CN")}
+                      {o.email} · <span className="data">{formatMoney(o.totalCents)}</span> · {o.createdAt.toLocaleString("zh-CN")}
                     </p>
                   </div>
-                  <Badge tone={status.tone}>{status.label}</Badge>
+                  <Badge tone={status.tone} live={o.status === "pending" || o.status === "paid"}>{status.label}</Badge>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {o.note ? <p className="text-sm text-muted">买家备注：{o.note}</p> : null}
 
                   {o.status === "reconciling" ? (
                     <div className="flex flex-wrap gap-2">
-                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关已到账，发卡">
+                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关已到账，发卡" inline confirmText="确认已在网关后台核实这笔订单到账？确认后将立即发卡，无法撤回。">
                         <input type="hidden" name="orderNo" value={o.orderNo} />
                         <input type="hidden" name="asPaid" value="1" />
                       </AdminForm>
-                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关未建单，关闭">
+                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关未建单，关闭" variant="danger" inline confirmText="确认网关没有这笔交易？订单将关闭并释放卡密。">
                         <input type="hidden" name="orderNo" value={o.orderNo} />
                         <input type="hidden" name="asPaid" value="0" />
                       </AdminForm>
@@ -66,13 +66,13 @@ export default async function AdminOrdersPage() {
                   ) : null}
 
                   {o.status === "pending" ? (
-                    <AdminForm action={closeOrderAction} csrf={csrf} submitLabel="关闭订单">
+                    <AdminForm action={closeOrderAction} csrf={csrf} submitLabel="关闭订单" variant="danger" inline confirmText="关闭这笔待支付订单？卡密将退回库存。">
                       <input type="hidden" name="orderNo" value={o.orderNo} />
                     </AdminForm>
                   ) : null}
 
                   {o.status === "paid" ? (
-                    <AdminForm action={retryDeliveryAction} csrf={csrf} submitLabel="重试发卡">
+                    <AdminForm action={retryDeliveryAction} csrf={csrf} submitLabel="重试发卡" inline>
                       <input type="hidden" name="orderNo" value={o.orderNo} />
                     </AdminForm>
                   ) : null}
@@ -80,7 +80,7 @@ export default async function AdminOrdersPage() {
                   {delivery ? (
                     <details className="faq-item">
                       <summary className="summary-sm">已交付内容</summary>
-                      <pre className="mt-1 whitespace-pre-wrap break-all rounded-lg border border-line bg-bg p-3 text-xs">
+                      <pre className="data mt-1 whitespace-pre-wrap break-all rounded-sm border border-line bg-sunken p-3 text-xs text-fg">
                         {delivery.content}
                       </pre>
                     </details>

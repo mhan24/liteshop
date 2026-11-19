@@ -8,6 +8,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+## 界面规范
+
+改 UI 前先读根目录 `DESIGN.md`（深色科技风 Signal Dark）。只用 `src/app/globals.css` 里的令牌类名，
+不写十六进制颜色；一个视图一个信号青主按钮；钱、订单号、卡密等数据用 `data`（等宽）样式；
+危险操作用 `variant="danger"` 并加 `confirmText` 二次确认。
+
 ## 发布流程（必须遵守）
 
 **代码改动只推送到 GitHub，不要自动部署到生产环境。**

@@ -36,7 +36,7 @@ export function PayStatusActions({
       {paymentUrl ? (
         <a
           href={paymentUrl}
-          className="inline-flex h-10 w-full items-center justify-center rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
+          className="inline-flex h-10 w-full items-center justify-center rounded-sm bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
         >
           继续付款
         </a>
@@ -52,13 +52,13 @@ export function PayStatusActions({
       {resumeState?.ok && resumeState.data?.paymentUrl ? (
         <a
           href={resumeState.data.paymentUrl}
-          className="inline-flex h-10 w-full items-center justify-center rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
+          className="inline-flex h-10 w-full items-center justify-center rounded-sm bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
         >
           打开新的收银台
         </a>
       ) : null}
 
-      <details className="faq-item rounded-lg border border-line px-4">
+      <details className="faq-item rounded-sm border border-line px-4">
         <summary>收银台打不开，或想取消订单</summary>
         <div className="space-y-5 pb-4">
           <form action={resumeAction} className="space-y-3 border-t border-line pt-4">
@@ -108,7 +108,7 @@ function BuyerFields({ idPrefix }: { idPrefix: string }) {
           required
           autoComplete="off"
           placeholder="下单时显示的 8 位密码"
-          className="font-mono uppercase"
+          className="font-mono uppercase placeholder:font-sans placeholder:normal-case"
         />
       </div>
     </>

@@ -1,19 +1,8 @@
 import { cn } from "@/lib/cn";
 
-/*
- * 卡片：纯白面、1px #EAEAEA 边框、12px 圆角、无阴影。
- * 交互态阴影由调用方按需添加（如商品卡 hover）。
- */
+/* 卡片（DESIGN.md §4）：surface 底 + 1px 发丝线 + 10px 圆角，无阴影 */
 export function Card({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border border-line bg-surface",
-        className
-      )}
-      {...props}
-    />
-  );
+  return <div className={cn("rounded-md border border-line bg-surface", className)} {...props} />;
 }
 
 export function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
@@ -21,7 +10,7 @@ export function CardHeader({ className, ...props }: React.ComponentProps<"div">)
 }
 
 export function CardTitle({ className, ...props }: React.ComponentProps<"h3">) {
-  return <h3 className={cn("font-serif text-lg font-semibold tracking-tight", className)} {...props} />;
+  return <h3 className={cn("text-[15px] font-semibold tracking-tight", className)} {...props} />;
 }
 
 export function CardDescription({ className, ...props }: React.ComponentProps<"p">) {

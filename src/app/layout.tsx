@@ -28,10 +28,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-CN">
       <body>
-        {/* 无 JS 环境下不做入场隐藏，保证内容可见 */}
-        <noscript>
-          <style>{".reveal{opacity:1 !important;transform:none !important}"}</style>
-        </noscript>
         {children}
       </body>
     </html>

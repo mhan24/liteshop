@@ -15,7 +15,7 @@ export default async function AdminDashboard() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-serif text-xl font-semibold">概览</h1>
+      <h1 className="text-xl font-semibold">概览</h1>
       <div className="grid gap-4 sm:grid-cols-4">
         <StatCard label="订单总数" value={String(total)} />
         <StatCard label="待支付" value={String(counts["pending"] ?? 0)} />
@@ -25,7 +25,7 @@ export default async function AdminDashboard() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">最近订单</h2>
-        <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
+        <ul className="divide-y divide-line rounded-md border border-line bg-surface">
           {recent.length === 0 ? (
             <li className="p-4 text-sm text-muted">暂无订单</li>
           ) : (
@@ -36,7 +36,7 @@ export default async function AdminDashboard() {
                   <p className="truncate text-xs text-muted">{o.email}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span>{formatMoney(o.totalCents)}</span>
+                  <span><span className="data">{formatMoney(o.totalCents)}</span></span>
                   <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">
                     {o.status}
                   </span>
@@ -52,9 +52,9 @@ export default async function AdminDashboard() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-line bg-surface p-4">
+    <div className="rounded-md border border-line bg-surface p-4">
       <p className="text-xs text-muted">{label}</p>
-      <p className="mt-1 font-serif text-2xl font-semibold">{value}</p>
+      <p className="data mt-1 text-2xl font-semibold">{value}</p>
     </div>
   );
 }

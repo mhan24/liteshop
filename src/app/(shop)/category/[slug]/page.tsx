@@ -26,16 +26,16 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
   return (
     <div className="space-y-8">
       <header className="space-y-2 border-b border-line pb-6">
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">分类</p>
-        <h1 className="font-serif text-3xl font-semibold tracking-[-0.025em]">{category.name}</h1>
+        <p className="eyebrow">分类</p>
+        <h1 className="text-3xl font-semibold tracking-[-0.025em]">{category.name}</h1>
         {category.description ? (
           <p className="max-w-xl text-sm leading-6 text-muted">{category.description}</p>
         ) : null}
       </header>
 
       {items.length === 0 ? (
-        <div className="space-y-2 rounded-xl border border-line bg-surface px-6 py-16 text-center">
-          <p className="font-serif text-lg">这个分类还没有商品</p>
+        <div className="space-y-2 rounded-md border border-line bg-surface px-6 py-16 text-center">
+          <p className="text-lg">这个分类还没有商品</p>
           <p className="text-sm text-muted">
             先看看全部商品，
             <Link href="/" className="text-fg underline decoration-line underline-offset-4 hover:decoration-fg">

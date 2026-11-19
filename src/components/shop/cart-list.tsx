@@ -12,13 +12,13 @@ export function CartList() {
 
   if (items.length === 0) {
     return (
-      <div className="space-y-3 rounded-xl border border-line bg-surface px-6 py-16 text-center">
-        <p className="font-serif text-lg">购物车还是空的</p>
+      <div className="space-y-3 rounded-md border border-line bg-surface px-6 py-16 text-center">
+        <p className="text-lg">购物车还是空的</p>
         <p className="text-sm text-muted">先挑一件商品，再回来结算。</p>
         <p className="pt-2">
           <Link
             href="/"
-            className="inline-flex h-10 items-center rounded-md bg-accent px-5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
+            className="inline-flex h-10 items-center rounded-sm bg-accent px-5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
           >
             去看商品
           </Link>
@@ -31,7 +31,7 @@ export function CartList() {
 
   return (
     <div className="space-y-6">
-      <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
+      <ul className="divide-y divide-line overflow-hidden rounded-md border border-line bg-surface">
         {items.map((item) => (
           <li key={item.slug} className="flex flex-wrap items-center justify-between gap-4 p-5">
             <div className="min-w-0 flex-1">
@@ -39,8 +39,8 @@ export function CartList() {
                 {item.name}
               </Link>
               <p className="mt-1 font-mono text-xs text-muted">
-                {formatMoney(item.priceCents)} × {item.quantity} ={" "}
-                {formatMoney(item.priceCents * item.quantity)}
+                <span className="data">{formatMoney(item.priceCents)}</span> × {item.quantity} ={" "}
+                <span className="data">{formatMoney(item.priceCents * item.quantity)}</span>
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -67,11 +67,11 @@ export function CartList() {
         </Button>
         <div className="flex items-center gap-5">
           <span className="text-sm text-muted">
-            合计 <span className="font-serif text-lg font-semibold text-fg">{formatMoney(total)}</span>
+            合计 <span className="text-lg font-semibold text-fg"><span className="data">{formatMoney(total)}</span></span>
           </span>
           <Link
             href="/checkout"
-            className="inline-flex h-10 items-center justify-center rounded-md bg-accent px-6 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
+            className="inline-flex h-10 items-center justify-center rounded-sm bg-accent px-6 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
           >
             去结算
           </Link>

@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { queryOrderAction, type QuerySuccess } from "@/actions/shop";
 import { TurnstileWidget } from "./turnstile-widget";
 import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/ui/copy-button";
 import { Badge, Input, Label } from "@/components/ui/input";
 import { formatMoney } from "@/lib/money";
 import type { TurnstileClientConfig } from "@/server/settings";
@@ -38,7 +39,7 @@ export function OrderQueryClient({ human }: { human: TurnstileClientConfig }) {
 
   return (
     <div className="space-y-8">
-      <form action={formAction} className="space-y-5 rounded-xl border border-line bg-surface p-6 sm:p-8">
+      <form action={formAction} className="space-y-5 rounded-md border border-line bg-surface p-6 sm:p-8">
         <div className="space-y-1.5">
           <Label htmlFor="q-orderNo">订单号</Label>
           <Input id="q-orderNo" name="orderNo" required placeholder="LS 开头的订单号" className="font-mono" />
@@ -55,14 +56,14 @@ export function OrderQueryClient({ human }: { human: TurnstileClientConfig }) {
             required
             maxLength={8}
             placeholder="建单时显示的 8 位密码"
-            className="font-mono uppercase tracking-[0.2em]"
+            className="font-mono uppercase tracking-[0.2em] placeholder:font-sans placeholder:normal-case placeholder:tracking-normal"
           />
         </div>
 
         {state && !state.ok ? (
           <p
             role="alert"
-            className="rounded-lg border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg"
+            className="rounded-sm border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg"
           >
             {state.message}
           </p>
@@ -94,16 +95,16 @@ function QueryResult({ data }: { data: QuerySuccess }) {
   const status = statusMeta(order.status);
 
   return (
-    <section className="space-y-6 rounded-xl border border-line bg-surface p-6 sm:p-8">
+    <section className="space-y-6 rounded-md border border-line bg-surface p-6 sm:p-8">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
         <span className="font-mono text-sm">{order.orderNo}</span>
-        <Badge tone={status.tone}>{status.label}</Badge>
+        <Badge tone={status.tone} live={order.status === "pending" || order.status === "paid"}>{status.label}</Badge>
       </header>
 
       <dl className="space-y-2 text-sm">
         <div className="flex justify-between gap-4">
           <dt className="text-muted">金额</dt>
-          <dd className="font-semibold">{totalDisplay}</dd>
+          <dd className="data font-semibold">{totalDisplay}</dd>
         </div>
         <div className="flex justify-between gap-4">
           <dt className="text-muted">下单时间</dt>
@@ -117,13 +118,13 @@ function QueryResult({ data }: { data: QuerySuccess }) {
         ) : null}
       </dl>
 
-      <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line">
+      <ul className="divide-y divide-line overflow-hidden rounded-sm border border-line">
         {order.items.map((item) => (
           <li key={item.productName} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
             <span>
               {item.productName} × {item.quantity}
             </span>
-            <span className="text-muted">{formatMoney(item.lineTotalCents)}</span>
+            <span className="text-muted"><span className="data">{formatMoney(item.lineTotalCents)}</span></span>
           </li>
         ))}
       </ul>
@@ -131,30 +132,24 @@ function QueryResult({ data }: { data: QuerySuccess }) {
       {order.deliveryContent ? (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold">卡密内容</h3>
-          <pre className="select-all whitespace-pre-wrap break-all rounded-lg border border-line bg-bg p-4 font-mono text-sm leading-6">
+          <pre className="data select-all whitespace-pre-wrap break-all rounded-sm border border-line bg-sunken p-4 text-sm leading-7 text-fg">
             {order.deliveryContent}
           </pre>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void navigator.clipboard.writeText(order.deliveryContent ?? "")}
-          >
-            复制全部
-          </Button>
+          <CopyButton text={order.deliveryContent} label="复制全部卡密" />
         </div>
       ) : null}
 
       {order.status === "pending" && order.paymentUrl ? (
         <a
           href={order.paymentUrl}
-          className="inline-flex h-10 w-full items-center justify-center rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
+          className="inline-flex h-10 w-full items-center justify-center rounded-sm bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
         >
           继续付款
         </a>
       ) : null}
 
       {order.status === "closed" ? (
-        <p className="rounded-lg border border-line bg-surface-2 px-4 py-3 text-xs leading-5 text-muted">
+        <p className="rounded-sm border border-line bg-surface-2 px-4 py-3 text-xs leading-5 text-muted">
           订单已关闭，卡密已退回库存。需要的话重新下单即可。
         </p>
       ) : null}

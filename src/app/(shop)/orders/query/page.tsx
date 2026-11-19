@@ -16,8 +16,8 @@ export default async function OrderQueryPage() {
   return (
     <div className="mx-auto max-w-xl space-y-8">
       <header className="space-y-2 border-b border-line pb-6">
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">订单查询</p>
-        <h1 className="font-serif text-3xl font-semibold tracking-[-0.025em]">找回订单与卡密</h1>
+        <p className="eyebrow">订单查询</p>
+        <h1 className="text-3xl font-semibold tracking-[-0.025em]">找回订单与卡密</h1>
         <p className="text-sm leading-6 text-muted">
           三项都要填对：订单号、下单时用的邮箱、建单时显示的 8 位查单密码。缺一项都查不到。
         </p>

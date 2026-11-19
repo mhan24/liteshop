@@ -23,7 +23,7 @@ export default async function AdminSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-serif text-xl font-semibold">设置</h1>
+      <h1 className="text-xl font-semibold">设置</h1>
 
       <Card>
         <CardHeader>
@@ -218,7 +218,7 @@ export default async function AdminSettingsPage() {
               使用 TLS（465 端口）
             </label>
           </AdminForm>
-          <AdminForm action={sendTestEmailAction} csrf={csrf} submitLabel="发送测试邮件" className="max-w-sm">
+          <AdminForm action={sendTestEmailAction} csrf={csrf} submitLabel="发送测试邮件" variant="outline" className="max-w-sm">
             <div className="space-y-1.5">
               <Label htmlFor="test-to">测试收件邮箱</Label>
               <Input id="test-to" name="testTo" type="email" required />
@@ -290,7 +290,7 @@ export default async function AdminSettingsPage() {
           <CardTitle>管理员凭据</CardTitle>
         </CardHeader>
         <CardContent>
-          <AdminForm action={changeCredentialsAction} csrf={csrf} submitLabel="更新凭据" className="grid max-w-md gap-3">
+          <AdminForm action={changeCredentialsAction} csrf={csrf} submitLabel="更新凭据" confirmText="更新后所有已登录会话（包括当前）都会退出，确认继续？" className="grid max-w-md gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="cur-pass">当前密码</Label>
               <Input id="cur-pass" name="currentPassword" type="password" required autoComplete="current-password" />

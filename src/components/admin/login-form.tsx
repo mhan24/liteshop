@@ -17,7 +17,7 @@ export function LoginForm({ adminPath }: { adminPath: string }) {
   }, [state?.ok, router, adminPath]);
 
   return (
-    <form action={formAction} className="space-y-4 rounded-xl border border-line bg-surface p-6">
+    <form action={formAction} className="space-y-4 rounded-md border border-line bg-surface p-6">
       <div className="space-y-1.5">
         <Label htmlFor="login-user">用户名</Label>
         <Input id="login-user" name="username" required autoComplete="username" />

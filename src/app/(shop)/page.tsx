@@ -66,43 +66,67 @@ export default async function HomePage({
   ]);
   const activeCat = category ?? "";
 
-  return (
-    <div className="space-y-20">
-      <section className="relative px-2 pt-6 pb-2 sm:pt-10">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute left-1/2 top-0 h-72 w-[34rem] max-w-full -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(17,17,17,0.035),transparent)]"
-        />
-        <p className="text-xs uppercase tracking-[0.22em] text-muted">数字卡密 · 自动发货</p>
-        <h1 className="mt-5 max-w-2xl font-serif text-4xl font-semibold leading-[1.08] tracking-[-0.03em] sm:text-5xl">
-          付款确认后，卡密自动发到你的邮箱。
-        </h1>
-        <p className="mt-6 max-w-xl text-sm leading-7 text-muted">
-          下单时填好邮箱，系统在收到支付确认后立即分配卡密。之后凭订单号、邮箱和查单密码，可以再查到同一份内容。
-        </p>
+  const inStockCount = items.filter((p) => p.inStock).length;
 
-        <form action="/" className="mt-9 flex max-w-md gap-2">
-          <input
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="搜索商品名称"
-            aria-label="搜索商品"
-            className="h-11 flex-1 rounded-md border border-line bg-surface px-3.5 text-sm placeholder:text-muted/60 focus:border-fg"
-          />
-          {category ? <input type="hidden" name="category" value={category} /> : null}
-          <button
-            type="submit"
-            className="h-11 rounded-md bg-accent px-5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
-          >
-            搜索
-          </button>
-        </form>
+  return (
+    <div className="space-y-14 sm:space-y-20">
+      <section className="relative -mx-4 -mt-12 overflow-hidden px-4 pt-14 pb-4 sm:-mx-6 sm:-mt-16 sm:px-6 sm:pt-20">
+        <div aria-hidden className="hero-backdrop pointer-events-none absolute inset-0" />
+        <div className="relative max-w-2xl">
+          <p className="eyebrow inline-flex items-center gap-2">
+            <span className="live-dot text-accent" />
+            数字卡密 · 自动发货
+          </p>
+          <h1 className="mt-5 text-[32px] font-semibold leading-[1.1] tracking-[-0.02em] sm:text-[40px]">
+            付款确认后，
+            <br className="sm:hidden" />
+            卡密<span className="text-accent">自动</span>发到你的邮箱。
+          </h1>
+          <p className="mt-5 max-w-xl text-[15px] leading-7 text-muted">
+            下单时填好邮箱，系统在收到支付确认后立即分配卡密。之后凭订单号、邮箱和查单密码，可以再查到同一份内容。
+          </p>
+
+          <form action="/" className="mt-8 flex max-w-md gap-2" role="search">
+            <input
+              name="q"
+              defaultValue={q ?? ""}
+              placeholder="搜索商品名称"
+              aria-label="搜索商品"
+              className="h-11 flex-1 rounded-sm border border-line-strong bg-surface-2 px-3.5 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-accent focus:ring-[3px] focus:ring-accent/20"
+            />
+            {category ? <input type="hidden" name="category" value={category} /> : null}
+            <button
+              type="submit"
+              className="h-11 rounded-sm bg-accent px-5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
+            >
+              搜索
+            </button>
+          </form>
+
+          <dl className="mt-10 flex flex-wrap gap-x-8 gap-y-3 text-xs text-faint">
+            {[
+              ["在售", `${inStockCount}`],
+              ["付款", "USDT / USDC"],
+              ["发货", "支付确认即发"],
+            ].map(([k, v]) => (
+              <div key={k} className="flex items-baseline gap-2">
+                <dt>{k}</dt>
+                <dd className="data text-[13px] text-fg">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
       </section>
 
-      <section className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-4">
-          <h2 className="font-serif text-xl font-semibold tracking-[-0.01em]">全部商品</h2>
-          <p className="font-mono text-xs text-muted">{items.length} 件在售</p>
+      <section className="space-y-6" aria-labelledby="products-heading">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="space-y-1.5">
+            <p className="eyebrow">{"// 商品"}</p>
+            <h2 id="products-heading" className="text-lg font-semibold tracking-[-0.01em]">
+              全部商品
+            </h2>
+          </div>
+          <p className="data text-xs text-faint">{items.length} 件</p>
         </div>
 
         {cats.length > 0 ? (
@@ -124,15 +148,12 @@ export default async function HomePage({
         ) : null}
 
         {items.length === 0 ? (
-          <div className="space-y-2 rounded-xl border border-line bg-surface px-6 py-16 text-center">
-            <p className="font-serif text-lg">没有符合条件的商品</p>
+          <div className="space-y-2 rounded-md border border-dashed border-line-strong px-6 py-16 text-center">
+            <p className="text-base font-medium">没有符合条件的商品</p>
             <p className="text-sm text-muted">换个关键词，或者去掉分类筛选再看。</p>
             {q || category ? (
               <p className="pt-3">
-                <Link
-                  href="/"
-                  className="text-sm text-fg underline decoration-line underline-offset-4 hover:decoration-fg"
-                >
+                <Link href="/" className="text-sm text-accent underline-offset-4 hover:underline">
                   清除筛选条件
                 </Link>
               </p>
@@ -142,7 +163,7 @@ export default async function HomePage({
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((p, i) => (
               <li key={p.slug}>
-                <Reveal index={i % 6}>
+                <Reveal index={i % 6} className="h-full">
                   <ProductCard product={p} />
                 </Reveal>
               </li>
@@ -151,28 +172,32 @@ export default async function HomePage({
         )}
       </section>
 
-      <section className="space-y-8">
-        <div className="flex items-baseline justify-between gap-4 border-b border-line pb-4">
-          <h2 className="font-serif text-xl font-semibold tracking-[-0.01em]">购买流程</h2>
-          <span className="font-mono text-xs text-muted">三步</span>
+      <section className="space-y-6" aria-labelledby="steps-heading">
+        <div className="space-y-1.5">
+          <p className="eyebrow">{"// 流程"}</p>
+          <h2 id="steps-heading" className="text-lg font-semibold tracking-[-0.01em]">
+            三步拿到卡密
+          </h2>
         </div>
-        <ol className="grid gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3">
+        <ol className="grid gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-3">
           {STEPS.map((s, i) => (
-            <li key={s.title} className="space-y-3 bg-surface p-7">
-              <span className="font-mono text-xs text-muted">{String(i + 1).padStart(2, "0")}</span>
-              <h3 className="font-serif text-base font-semibold">{s.title}</h3>
+            <li key={s.title} className="space-y-3 bg-surface p-6 sm:p-7">
+              <span className="data text-xs text-accent">{String(i + 1).padStart(2, "0")}</span>
+              <h3 className="text-[15px] font-semibold">{s.title}</h3>
               <p className="text-sm leading-6 text-muted">{s.body}</p>
             </li>
           ))}
         </ol>
       </section>
 
-      <section className="space-y-2" id="faq">
-        <div className="flex items-baseline justify-between gap-4 border-b border-line pb-4">
-          <h2 className="font-serif text-xl font-semibold tracking-[-0.01em]">常见问题</h2>
-          <span className="font-mono text-xs text-muted">6 条</span>
+      <section className="grid gap-6 lg:grid-cols-[16rem_1fr] lg:gap-12" id="faq" aria-labelledby="faq-heading">
+        <div className="space-y-1.5">
+          <p className="eyebrow">{"// 常见问题"}</p>
+          <h2 id="faq-heading" className="text-lg font-semibold tracking-[-0.01em]">
+            付款前想知道的
+          </h2>
         </div>
-        <div className="divide-y divide-line">
+        <div className="divide-y divide-line border-y border-line">
           {FAQ.map((item) => (
             <details key={item.q} className="faq-item">
               <summary>{item.q}</summary>

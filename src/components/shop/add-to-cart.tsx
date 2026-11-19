@@ -59,7 +59,7 @@ export function AddToCart({
       </div>
       <Link
         href="/cart"
-        className="inline-flex h-10 w-full items-center justify-center rounded-md border border-line text-sm font-medium transition-colors hover:bg-surface-2 active:scale-[0.98]"
+        className="inline-flex h-10 w-full items-center justify-center rounded-sm border border-line text-sm font-medium transition-colors hover:bg-surface-2 active:scale-[0.98]"
       >
         去购物车结算
       </Link>

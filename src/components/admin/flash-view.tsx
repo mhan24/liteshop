@@ -7,7 +7,7 @@ export function Flash({ ok, err }: { ok?: string; err?: string }) {
     <p
       role="status"
       className={cn(
-        "rounded-lg border px-3 py-2 text-sm leading-6",
+        "rounded-sm border px-3 py-2 text-sm leading-6",
         err
           ? "border-tint-red-fg/25 bg-tint-red text-tint-red-fg"
           : "border-tint-green-fg/25 bg-tint-green text-tint-green-fg"

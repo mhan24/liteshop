@@ -17,9 +17,9 @@ export default async function MockPayPage({
   if (!orderNo || !ref) notFound();
 
   return (
-    <div className="mx-auto max-w-md space-y-5 rounded-xl border border-line bg-surface p-8">
-      <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">开发环境</p>
-      <h1 className="font-serif text-xl font-semibold tracking-[-0.01em]">模拟收银台</h1>
+    <div className="mx-auto max-w-md space-y-5 rounded-md border border-line bg-surface p-8">
+      <p className="eyebrow">开发环境</p>
+      <h1 className="text-xl font-semibold tracking-[-0.01em]">模拟收银台</h1>
       <p className="text-sm leading-6 text-muted">
         订单 <span className="font-mono">{orderNo}</span>。点下面的按钮会发送一条支付成功回调，用来验证从回调到发卡的整条链路。
       </p>
@@ -29,7 +29,7 @@ export default async function MockPayPage({
         <input type="hidden" name="status" value="2" />
         <button
           type="submit"
-          className="h-10 w-full rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
+          className="h-10 w-full rounded-sm bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
         >
           模拟支付成功
         </button>

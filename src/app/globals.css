@@ -1,65 +1,118 @@
 @import "tailwindcss";
 
 /*
- * 设计基调：暖调单色画布 + 炭黑主按钮 + 低饱和粉彩点缀。
- * - 画布 #F7F6F3，卡片纯白，1px #EAEAEA 边框，圆角最大 12px，无重阴影
- * - 主按钮炭黑 #111（不用大面积彩色），hover #333，按下 scale(0.98)
- * - 状态一律「粉彩底 + 同系深色文字」，颜色只承担语义
+ * 设计令牌：Signal Dark（规范见仓库根目录 DESIGN.md）。
+ * 页面只用这里的语义类名，不写十六进制颜色。
+ * 层级靠表面明度 + 1px 发丝线；唯一彩色是信号青（accent）。
  */
 @theme {
-  --color-bg: #f7f6f3;
-  --color-surface: #ffffff;
-  --color-surface-2: #f9f9f8;
-  --color-fg: #111111;
-  --color-muted: #787774;
-  --color-line: #eaeaea;
-  --color-accent: #111111;
-  --color-accent-hover: #333333;
-  --color-accent-fg: #ffffff;
-  --color-danger: #9f2f2d;
-  --color-success: #346538;
+  --color-bg: #0b0d0e;
+  --color-sunken: #08090a;
+  --color-surface: #111416;
+  --color-surface-2: #161a1d;
+  --color-surface-3: #1c2125;
+  --color-line: #22282c;
+  --color-line-strong: #30383d;
+  --color-fg: #e6e9ea;
+  --color-muted: #959fa5;
+  --color-faint: #5e686e;
 
-  --color-tint-red: #fdebec;
-  --color-tint-red-fg: #9f2f2d;
-  --color-tint-blue: #e1f3fe;
-  --color-tint-blue-fg: #1f6c9f;
-  --color-tint-green: #edf3ec;
-  --color-tint-green-fg: #346538;
-  --color-tint-yellow: #fbf3db;
-  --color-tint-yellow-fg: #956400;
+  --color-accent: #5eead4;
+  --color-accent-hover: #99f6e4;
+  --color-accent-fg: #042f2a;
 
-  --font-serif:
-    "Newsreader", ui-serif, Georgia, "Songti SC", "Noto Serif SC", SimSun, serif;
+  --color-danger: #f87171;
+  --color-success: #4ade80;
+
+  /* 状态色：10% 淡底 + 同系浅色文字（深色界面上的「粉彩」） */
+  --color-tint-red: rgb(248 113 113 / 0.1);
+  --color-tint-red-fg: #fca5a5;
+  --color-tint-blue: rgb(125 211 252 / 0.1);
+  --color-tint-blue-fg: #7dd3fc;
+  --color-tint-green: rgb(74 222 128 / 0.1);
+  --color-tint-green-fg: #86efac;
+  --color-tint-yellow: rgb(251 191 36 / 0.1);
+  --color-tint-yellow-fg: #fcd34d;
+
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+}
+
+:root {
+  color-scheme: dark;
+  /* 原生复选框、单选、进度条统一用信号青 */
+  accent-color: var(--color-accent);
 }
 
 body {
   background-color: var(--color-bg);
   color: var(--color-fg);
   font-family: var(--font-sans);
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.7;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background-color: #eaeaea;
-  color: #111111;
+  background-color: rgb(94 234 212 / 0.25);
+  color: var(--color-fg);
 }
 
 :focus-visible {
-  outline: 2px solid #111111;
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
+/* 数据（钱、号、码、量、时间）：等宽 + 等宽数字 */
+.data {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 区块眉题：// 全部商品 */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+/* 首页主视觉背景：极淡信号青径向光 + 细网格（全站唯一装饰） */
+.hero-backdrop {
+  background-image:
+    radial-gradient(ellipse 60% 55% at 50% 0%, rgb(94 234 212 / 0.08), transparent 70%),
+    linear-gradient(to right, rgb(255 255 255 / 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.025) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    40px 40px,
+    40px 40px;
+  mask-image: linear-gradient(to bottom, black 40%, transparent);
+}
+
+/* 「活」状态圆点：有货、待支付 */
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+  flex: none;
+}
+
 /*
- * 滚动入场：translateY(12px) + opacity，600ms 减速曲线；
- * --reveal-index 控制 80ms 交错步进。系统减少动效时直接呈现。
+ * 滚动入场（渐进增强，见 components/shop/reveal.tsx）：
+ * 只有被 JS 标记 data-armed 的元素才先隐藏，默认可见。
  */
-.reveal {
+.reveal[data-armed] {
   opacity: 0;
   transform: translateY(12px);
   transition:
@@ -67,22 +120,22 @@ body {
     transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
   transition-delay: calc(var(--reveal-index, 0) * 80ms);
 }
-.reveal.is-visible {
+.reveal[data-armed].is-visible {
   opacity: 1;
   transform: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .reveal {
+  .reveal[data-armed] {
     opacity: 1;
     transform: none;
     transition: none;
   }
+  * {
+    transition-duration: 0ms !important;
+  }
 }
 
-/*
- * 常见问题：去掉容器盒子，只用 1px 分隔线；
- * 开合用右上角的 + / −，不引入图标库。
- */
+/* 常见问题 / 折叠区：只用 1px 分隔线，开合用等宽 + / − */
 .faq-item > summary {
   display: flex;
   align-items: center;
@@ -93,6 +146,7 @@ body {
   padding: 1.125rem 0;
   font-size: 0.9375rem;
   font-weight: 500;
+  transition: color 150ms ease;
 }
 .faq-item > summary::-webkit-details-marker {
   display: none;
@@ -102,18 +156,19 @@ body {
   font-family: var(--font-mono);
   font-size: 1rem;
   line-height: 1;
-  color: var(--color-muted);
+  color: var(--color-faint);
   flex: none;
 }
 .faq-item[open] > summary::after {
   content: "−";
+  color: var(--color-accent);
 }
-/* 后台/次要位置用的紧凑开关 */
 .faq-item > summary.summary-sm {
   padding: 0.5rem 0;
   font-size: 0.75rem;
   color: var(--color-muted);
 }
+.faq-item > summary:hover,
 .faq-item > summary:hover::after {
   color: var(--color-fg);
 }
@@ -125,7 +180,7 @@ body {
   max-width: 46rem;
 }
 
-/* 分类筛选：静态链接，靠边框与底色区分选中态 */
+/* 分类筛选 chip */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -133,7 +188,6 @@ body {
   padding: 0 0.875rem;
   border: 1px solid var(--color-line);
   border-radius: 9999px;
-  background: transparent;
   font-size: 0.8125rem;
   color: var(--color-muted);
   transition:
@@ -143,10 +197,36 @@ body {
 }
 .chip:hover {
   color: var(--color-fg);
-  border-color: #dedcd8;
+  border-color: var(--color-line-strong);
 }
 .chip[data-active="true"] {
-  background: #111111;
-  border-color: #111111;
-  color: #ffffff;
+  background: rgb(94 234 212 / 0.1);
+  border-color: rgb(94 234 212 / 0.4);
+  color: var(--color-accent);
+}
+
+/* 后台表格 */
+.data-table {
+  width: 100%;
+  font-size: 0.8125rem;
+}
+.data-table thead th {
+  background: var(--color-surface-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+  text-align: left;
+  padding: 0.625rem 1rem;
+  white-space: nowrap;
+}
+.data-table tbody td {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--color-line);
+  vertical-align: top;
+}
+.data-table tbody tr:hover td {
+  background: var(--color-surface-3);
 }

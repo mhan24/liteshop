@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/cn";
 
 /**
- * 滚动入场：进入视口时为容器加上 .is-visible，
- * 配合 globals.css 的 .reveal 过渡（600ms + 80ms 交错步进）。
- * --reveal-index 只影响过渡延迟，不改变布局。
+ * 滚动入场（渐进增强）：内容默认可见，JS 未加载或加载慢时不会出现空白。
+ * 挂载时只给「仍在视口下方」的元素加 data-armed（隐藏待入场），
+ * 进入视口后加 .is-visible 过渡显示；首屏已可见的元素不做动画、不闪烁。
  */
 export function Reveal({
   children,
@@ -19,16 +19,16 @@ export function Reveal({
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    if (el.getBoundingClientRect().top < window.innerHeight) return; // 首屏：保持原样
+    el.dataset.armed = "";
     const observer = new IntersectionObserver(
       (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            el.classList.add("is-visible");
-            observer.disconnect();
-          }
+        if (entries.some((e) => e.isIntersecting)) {
+          el.classList.add("is-visible");
+          observer.disconnect();
         }
       },
       { threshold: 0.1, rootMargin: "0px 0px -40px 0px" }

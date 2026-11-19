@@ -51,8 +51,11 @@ export async function setSetting(key: string, value: string): Promise<void> {
     .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: new Date() } });
 }
 
+/** 非负整数设置；未设置或空串回落默认值（注意 Number(null) === 0，不能直接转换） */
 export async function getSettingNumber(key: string, fallback: number): Promise<number> {
-  const v = Number(await getSetting(key));
+  const raw = (await getSetting(key))?.trim();
+  if (!raw) return fallback;
+  const v = Number(raw);
   return Number.isFinite(v) && v >= 0 ? Math.trunc(v) : fallback;
 }
 

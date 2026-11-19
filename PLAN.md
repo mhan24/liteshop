@@ -87,7 +87,7 @@ AUTH_SECRET）/ `litepay_timeout_seconds`（120–86400）/ `litepay_currencies`
 - **middleware → proxy**：Next 16 新约定（src/proxy.ts），后台入口伪装逻辑等价迁移
 - **后台表单**：统一 `(prev, formData) => {ok,message}` + `useActionState` 内联反馈，无 GET 重定向
 - **支付**：单一 LitePay 适配器，替代 v2 的多实例渠道表；webhook 路径固定为 `/api/webhooks/litepay`
-- **UI**：编辑风格排版（暖调单色、1px 边框、极轻动效），文案按「说事实、不堆形容词」重写
+- **UI**：深色科技风（Signal Dark），规范见 DESIGN.md：近黑分层表面 + 1px 发丝线，唯一彩色为信号青，数据一律等宽；文案按「说事实、不堆形容词」
 
 ## 6. 迁移（0001_litepay_gateway.sql）
 

@@ -31,7 +31,7 @@ export default async function AdminProductsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-serif text-xl font-semibold">商品与分类</h1>
+      <h1 className="text-xl font-semibold">商品与分类</h1>
 
       <Card>
         <CardHeader>
@@ -66,12 +66,12 @@ export default async function AdminProductsPage() {
               {cats.map((c) => (
                 <li
                   key={c.id}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2 text-sm"
+                  className="flex items-center justify-between gap-3 rounded-sm border border-line px-3 py-2 text-sm"
                 >
                   <span>
                     {c.name} <span className="font-mono text-xs text-muted">/{c.slug}</span>
                   </span>
-                  <AdminForm action={deleteCategoryAction} csrf={csrf} submitLabel="删除">
+                  <AdminForm action={deleteCategoryAction} csrf={csrf} submitLabel="删除" variant="danger" inline confirmText="删除该分类？其下商品会保留，但变为「无分类」。">
                     <input type="hidden" name="id" value={c.id} />
                   </AdminForm>
                 </li>
@@ -99,7 +99,7 @@ export default async function AdminProductsPage() {
               <CardTitle className="text-base">
                 {p.name} <span className="font-mono text-xs text-muted">/{p.slug}</span>{" "}
                 <span className="text-xs font-normal text-muted">
-                  {formatMoney(p.priceCents)} · 库存 {p.stock} · {p.status === "on" ? "上架" : "下架"}
+                  <span className="data">{formatMoney(p.priceCents)}</span> · 库存 {p.stock} · {p.status === "on" ? "上架" : "下架"}
                 </span>
               </CardTitle>
             </CardHeader>
@@ -121,7 +121,7 @@ export default async function AdminProductsPage() {
                   categoryId: p.categoryId,
                 }}
               />
-              <AdminForm action={deleteProductAction} csrf={csrf} submitLabel="删除商品">
+              <AdminForm action={deleteProductAction} csrf={csrf} submitLabel="删除商品" variant="danger" inline confirmText="删除该商品及其全部未售卡密？此操作不可恢复。">
                 <input type="hidden" name="id" value={p.id} />
               </AdminForm>
             </CardContent>

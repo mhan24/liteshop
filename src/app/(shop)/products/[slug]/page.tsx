@@ -76,16 +76,16 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
       <div className="grid gap-12 lg:grid-cols-[1.25fr_1fr]">
         <section className="space-y-7">
           <header className="space-y-4">
-            <h1 className="font-serif text-3xl font-semibold leading-[1.12] tracking-[-0.025em] sm:text-4xl">
+            <h1 className="text-3xl font-semibold leading-[1.12] tracking-[-0.025em] sm:text-4xl">
               {product.name}
             </h1>
-            <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">
+            <p className="eyebrow">
               即时交付 · {product.inStock ? `库存 ${product.stock}` : "暂无库存"}
             </p>
           </header>
 
           {product.imageUrl ? (
-            <div className="overflow-hidden rounded-xl border border-line bg-surface-2">
+            <div className="overflow-hidden rounded-md border border-line bg-surface-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={product.imageUrl} alt={product.name} className="w-full object-cover" />
             </div>
@@ -98,7 +98,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
           )}
 
           <section className="space-y-4 border-t border-line pt-7">
-            <h2 className="font-serif text-lg font-semibold tracking-[-0.01em]">交付方式</h2>
+            <h2 className="text-lg font-semibold tracking-[-0.01em]">交付方式</h2>
             <ul className="space-y-2.5 text-sm leading-6 text-muted">
               <li>付款确认后自动发放卡密，不需要等人工处理。</li>
               <li>完成页直接显示内容，同一份内容发送到下单邮箱。</li>
@@ -109,10 +109,10 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
         </section>
 
         <aside className="lg:sticky lg:top-24 lg:self-start">
-          <div className="space-y-6 rounded-xl border border-line bg-surface p-7">
+          <div className="space-y-6 rounded-md border border-line bg-surface p-7">
             <div className="space-y-1.5">
-              <p className="font-serif text-3xl font-semibold tracking-[-0.02em]">
-                {formatMoney(product.priceCents)}
+              <p className="text-3xl font-semibold tracking-[-0.02em]">
+                <span className="data">{formatMoney(product.priceCents)}</span>
               </p>
               <p className="text-xs text-muted">
                 {product.inStock ? `当前可售 ${product.stock} 件` : "缺货，补货后即可下单"}

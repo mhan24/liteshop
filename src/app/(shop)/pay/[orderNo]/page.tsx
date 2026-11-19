@@ -30,8 +30,8 @@ export default async function PayPage({ params }: { params: Promise<{ orderNo: s
   return (
     <div className="mx-auto max-w-xl space-y-8">
       <header className="space-y-2 border-b border-line pb-6">
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">订单状态</p>
-        <h1 className="font-serif text-3xl font-semibold tracking-[-0.025em]">{status.label}</h1>
+        <p className="eyebrow">订单状态</p>
+        <h1 className="text-3xl font-semibold tracking-[-0.025em]">{status.label}</h1>
         <p className="text-sm leading-6 text-muted">
           {order.status === "pending"
             ? "页面每 5 秒刷新一次。付款被确认后会自动发卡。"
@@ -39,20 +39,20 @@ export default async function PayPage({ params }: { params: Promise<{ orderNo: s
         </p>
       </header>
 
-      <section className="space-y-6 rounded-xl border border-line bg-surface p-6 sm:p-8">
+      <section className="space-y-6 rounded-md border border-line bg-surface p-6 sm:p-8">
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm text-muted">状态</span>
-          <Badge tone={status.tone}>{status.label}</Badge>
+          <Badge tone={status.tone} live={order.status === "pending" || order.status === "paid"}>{status.label}</Badge>
         </div>
 
-        <dl className="divide-y divide-line rounded-lg border border-line text-sm">
+        <dl className="divide-y divide-line rounded-sm border border-line text-sm">
           <div className="flex items-center justify-between gap-4 px-4 py-3">
             <dt className="text-muted">订单号</dt>
             <dd className="font-mono">{order.orderNo}</dd>
           </div>
           <div className="flex items-center justify-between gap-4 px-4 py-3">
             <dt className="text-muted">金额</dt>
-            <dd className="font-serif text-lg font-semibold">{formatMoney(order.totalCents)}</dd>
+            <dd className="text-lg font-semibold"><span className="data">{formatMoney(order.totalCents)}</span></dd>
           </div>
           {order.expiresAt && order.status === "pending" ? (
             <div className="flex items-center justify-between gap-4 px-4 py-3">
@@ -62,25 +62,25 @@ export default async function PayPage({ params }: { params: Promise<{ orderNo: s
           ) : null}
         </dl>
 
-        <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line text-sm">
+        <ul className="divide-y divide-line overflow-hidden rounded-sm border border-line text-sm">
           {items.map((i) => (
             <li key={i.id} className="flex items-center justify-between gap-4 px-4 py-3">
               <span>
                 {i.productName} × {i.quantity}
               </span>
-              <span className="text-muted">{formatMoney(i.lineTotalCents)}</span>
+              <span className="text-muted"><span className="data">{formatMoney(i.lineTotalCents)}</span></span>
             </li>
           ))}
         </ul>
 
         {order.status === "completed" ? (
-          <p className="rounded-lg border border-tint-green-fg/25 bg-tint-green px-4 py-3 text-sm leading-6 text-tint-green-fg">
+          <p className="rounded-sm border border-tint-green-fg/25 bg-tint-green px-4 py-3 text-sm leading-6 text-tint-green-fg">
             卡密已发放，同一份内容也发送到下单邮箱。之后可在「订单查询」用订单号、邮箱和查单密码再次查看。
           </p>
         ) : null}
 
         {order.status === "reconciling" ? (
-          <p className="rounded-lg border border-tint-yellow-fg/25 bg-tint-yellow px-4 py-3 text-sm leading-6 text-tint-yellow-fg">
+          <p className="rounded-sm border border-tint-yellow-fg/25 bg-tint-yellow px-4 py-3 text-sm leading-6 text-tint-yellow-fg">
             收银台当时没有返回结果，订单被保留下来等核实。请不要重复付款；核实完成后这里会自动更新。
           </p>
         ) : null}

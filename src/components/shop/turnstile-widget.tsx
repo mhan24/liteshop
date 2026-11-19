@@ -157,7 +157,7 @@ export function TurnstileWidget({
 
   if (state === "error") {
     return (
-      <div className="rounded-lg border border-tint-red-fg/25 bg-tint-red px-3 py-2.5 text-sm text-tint-red-fg">
+      <div className="rounded-sm border border-tint-red-fg/25 bg-tint-red px-3 py-2.5 text-sm text-tint-red-fg">
         {errorText}
         <button
           type="button"

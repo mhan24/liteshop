@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { checkoutAction, type CheckoutSuccess } from "@/actions/shop";
 import { useCart } from "./cart";
 import { TurnstileWidget } from "./turnstile-widget";
 import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/ui/copy-button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { formatMoney } from "@/lib/money";
 import type { TurnstileClientConfig } from "@/server/settings";
@@ -23,6 +24,12 @@ export function CheckoutClient({
 }) {
   const { items, setQuantity, remove, clear } = useCart();
   const [state, formAction, pending] = useActionState(checkoutAction, null);
+
+  // 订单建好即清空购物车：商品已锁定在订单里，留着只会诱导重复下单
+  const created = state?.ok === true;
+  useEffect(() => {
+    if (created) clear();
+  }, [created, clear]);
   const [cfToken, setCfToken] = useState("");
   const [verifyKey, setVerifyKey] = useState(0);
 
@@ -40,59 +47,63 @@ export function CheckoutClient({
   if (state?.ok && state.data) {
     const d: CheckoutSuccess = state.data;
     return (
-      <div className="mx-auto max-w-xl space-y-6 rounded-xl border border-line bg-surface p-8">
+      <div className="mx-auto max-w-xl space-y-6 rounded-md border border-line bg-surface p-8">
         <div className="space-y-2">
-          <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">订单已创建</p>
-          <h2 className="font-serif text-2xl font-semibold tracking-[-0.02em]">{state.message}</h2>
+          <p className="eyebrow">订单已创建</p>
+          <h2 className="text-2xl font-semibold tracking-[-0.02em]">{state.message}</h2>
         </div>
 
-        <dl className="divide-y divide-line rounded-lg border border-line text-sm">
+        <dl className="divide-y divide-line rounded-sm border border-line text-sm">
           <div className="flex items-center justify-between gap-4 px-4 py-3">
             <dt className="text-muted">订单号</dt>
-            <dd className="font-mono">{d.orderNo}</dd>
+            <dd className="data select-all">{d.orderNo}</dd>
           </div>
           <div className="flex items-center justify-between gap-4 px-4 py-3">
             <dt className="text-muted">应付金额</dt>
-            <dd className="font-serif text-lg font-semibold">{d.totalDisplay}</dd>
+            <dd className="data text-lg font-semibold">{d.totalDisplay}</dd>
           </div>
         </dl>
 
-        <div className="rounded-lg border border-tint-yellow-fg/25 bg-tint-yellow p-4">
-          <p className="text-sm font-medium text-tint-yellow-fg">查单密码 · 只显示这一次</p>
-          <p className="mt-2 select-all font-mono text-2xl tracking-[0.3em] text-fg">{d.queryPassword}</p>
-          <p className="mt-2 text-xs leading-5 text-tint-yellow-fg">
+        <div className="space-y-3 rounded-sm border border-tint-yellow-fg/25 bg-tint-yellow p-4">
+          <p className="flex items-center gap-2 text-sm font-medium text-tint-yellow-fg">
+            <span aria-hidden className="live-dot" />
+            查单密码 · 只显示这一次
+          </p>
+          <p className="data select-all rounded-sm border border-line bg-sunken px-4 py-3 text-center text-2xl tracking-[0.3em] text-fg">
+            {d.queryPassword}
+          </p>
+          <p className="text-xs leading-5 text-tint-yellow-fg">
             和订单号一起保存。之后查询订单、找回卡密都要用到它，遗失只能联系客服核对。
           </p>
+          <CopyButton
+            text={`订单号：${d.orderNo}\n查单密码：${d.queryPassword}`}
+            label="复制订单号和查单密码"
+            className="w-full"
+          />
         </div>
 
         {d.paymentUrl ? (
           <a
             href={d.paymentUrl}
-            className="inline-flex h-10 w-full items-center justify-center rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
+            className="inline-flex h-10 w-full items-center justify-center rounded-sm bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
           >
             打开收银台付款
           </a>
         ) : (
-          <p className="rounded-lg border border-tint-yellow-fg/25 bg-tint-yellow px-4 py-3 text-xs leading-5 text-tint-yellow-fg">
+          <p className="rounded-sm border border-tint-yellow-fg/25 bg-tint-yellow px-4 py-3 text-xs leading-5 text-tint-yellow-fg">
             收银台响应超时，订单已保留待核实。请先不要重复下单，稍后到订单查询页确认状态。
           </p>
         )}
 
-        <button
-          type="button"
-          onClick={clear}
-          className="text-xs text-muted underline decoration-line underline-offset-4 hover:text-fg"
-        >
-          清空购物车
-        </button>
+        <p className="text-xs leading-5 text-faint">购物车已清空。付款完成前可以随时在「查订单」里找到这笔订单。</p>
       </div>
     );
   }
 
   if (items.length === 0) {
     return (
-      <div className="space-y-2 rounded-xl border border-line bg-surface px-6 py-16 text-center">
-        <p className="font-serif text-lg">购物车是空的</p>
+      <div className="space-y-2 rounded-md border border-line bg-surface px-6 py-16 text-center">
+        <p className="text-lg">购物车是空的</p>
         <p className="text-sm text-muted">
           先挑商品再结算，
           <Link href="/" className="text-fg underline decoration-line underline-offset-4 hover:decoration-fg">
@@ -115,13 +126,13 @@ export function CheckoutClient({
           value={JSON.stringify(items.map((i) => ({ slug: i.slug, quantity: i.quantity })))}
         />
 
-        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
+        <ul className="divide-y divide-line overflow-hidden rounded-md border border-line bg-surface">
           {items.map((item) => (
             <li key={item.slug} className="flex flex-wrap items-center justify-between gap-4 p-5">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{item.name}</p>
                 <p className="mt-1 font-mono text-xs text-muted">
-                  {formatMoney(item.priceCents)} × {item.quantity}
+                  <span className="data">{formatMoney(item.priceCents)}</span> × {item.quantity}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -142,7 +153,7 @@ export function CheckoutClient({
           ))}
         </ul>
 
-        <div className="space-y-5 rounded-xl border border-line bg-surface p-6">
+        <div className="space-y-5 rounded-md border border-line bg-surface p-6">
           <div className="space-y-1.5">
             <Label htmlFor="co-email">下单邮箱</Label>
             <Input id="co-email" name="email" type="email" required placeholder="you@example.com" />
@@ -163,7 +174,7 @@ export function CheckoutClient({
           {state && !state.ok ? (
             <p
               role="alert"
-              className="rounded-lg border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg"
+              className="rounded-sm border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg"
             >
               {state.message}
             </p>
@@ -181,7 +192,7 @@ export function CheckoutClient({
           ) : null}
 
           {!gatewayReady ? (
-            <p className="rounded-lg border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg">
+            <p className="rounded-sm border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg">
               支付网关尚未配置，暂时无法下单。请联系客服或稍后再试。
             </p>
           ) : null}
@@ -196,21 +207,21 @@ export function CheckoutClient({
       </form>
 
       <aside className="lg:sticky lg:top-24 lg:self-start">
-        <div className="space-y-4 rounded-xl border border-line bg-surface p-6">
-          <h2 className="font-serif text-lg font-semibold tracking-[-0.01em]">订单摘要</h2>
+        <div className="space-y-4 rounded-md border border-line bg-surface p-6">
+          <h2 className="text-lg font-semibold tracking-[-0.01em]">订单摘要</h2>
           <ul className="space-y-2 text-sm">
             {items.map((item) => (
               <li key={item.slug} className="flex justify-between gap-4">
                 <span className="min-w-0 truncate text-muted">
                   {item.name} × {item.quantity}
                 </span>
-                <span>{formatMoney(item.priceCents * item.quantity)}</span>
+                <span><span className="data">{formatMoney(item.priceCents * item.quantity)}</span></span>
               </li>
             ))}
           </ul>
           <div className="flex items-baseline justify-between border-t border-line pt-4">
             <span className="text-sm text-muted">应付金额</span>
-            <span className="font-serif text-xl font-semibold tracking-[-0.01em]">{formatMoney(total)}</span>
+            <span className="text-xl font-semibold tracking-[-0.01em]"><span className="data">{formatMoney(total)}</span></span>
           </div>
           <dl className="space-y-2 border-t border-line pt-4 text-xs text-muted">
             <div className="flex justify-between gap-4">
