@@ -1,8 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { deliveries, orderItems, orders, payments } from "@/db/schema";
 import { verifyQueryPassword } from "@/lib/query-password";
-import { desc } from "drizzle-orm";
 
 /**
  * 订单查询：邮箱 + 订单号 + 查单密码 三因子。
@@ -42,9 +41,8 @@ export async function queryOrder(
     .where(and(eq(orders.orderNo, no), eq(orders.email, mail)))
     .limit(1);
   const order = rows[0];
-  if (!order) return null;
-  const ok = await verifyQueryPassword(order.queryPasswordHash, password.trim().toUpperCase());
-  if (!ok) return null;
+  const ok = await verifyQueryPassword(order?.queryPasswordHash ?? null, password);
+  if (!order || !ok) return null;
 
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
   const deliveryRows = await db

@@ -171,8 +171,3 @@ export async function getTurnstileSecretKey(): Promise<string> {
 export async function isTurnstileFallbackEnabled(): Promise<boolean> {
   return (await getSetting(SETTING_KEYS.turnstileFallbackEnabled)) === "1";
 }
-
-export async function bumpAdminSessionVersion(): Promise<void> {
-  const v = await getAdminSessionVersion();
-  await setSetting(SETTING_KEYS.adminSessionVersion, String(v + 1));
-}

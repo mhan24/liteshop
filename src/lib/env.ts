@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeAdminPath } from "./admin-path";
 
 /**
  * 环境变量（启动时一次性解析，非法直接失败——配置错误宁可启动报错，
@@ -12,7 +13,12 @@ const schema = z.object({
   AUTH_SECRET: z.string().min(32, "AUTH_SECRET 至少 32 字符（openssl rand -hex 32）"),
   ADMIN_USER: z.string().min(1).default("admin"),
   ADMIN_PASSWORD_HASH: z.string().min(1).default(""),
-  ADMIN_PATH: z.string().regex(/^\/[a-z0-9-/]*$/i, "ADMIN_PATH 需为 / 开头路径").default("/admin"),
+  ADMIN_PATH: z
+    .string()
+    .regex(/^\/[a-z0-9-/]*$/i, "ADMIN_PATH 需为 / 开头路径")
+    .refine((v) => !/^\/(api|_next)(\/|$)/i.test(v), "ADMIN_PATH 不能占用 /api 或 /_next")
+    .default("/admin")
+    .transform(normalizeAdminPath),
 
   DATABASE_URL: z
     .string()
@@ -20,12 +26,17 @@ const schema = z.object({
 
   CRON_SECRET: z.string().default(""),
   PAYMENT_DRIVER: z.enum(["auto", "mock"]).default("auto"),
-});
+})
+  // mock 网关的「确认支付」对任何人开放：生产环境启用等于免费发卡，启动即失败
+  .refine((e) => !(e.NODE_ENV === "production" && e.PAYMENT_DRIVER === "mock"), {
+    message: "生产环境禁止 PAYMENT_DRIVER=mock",
+    path: ["PAYMENT_DRIVER"],
+  });
 
 export type Env = z.infer<typeof schema>;
 
-function parseEnv(): Env {
-  const parsed = schema.safeParse(process.env);
+export function parseEnv(source: Record<string, string | undefined> = process.env): Env {
+  const parsed = schema.safeParse(source);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `  ${i.path.join(".")}: ${i.message}`).join("\n");
     throw new Error(`环境变量校验失败：\n${issues}`);
@@ -34,11 +45,3 @@ function parseEnv(): Env {
 }
 
 export const env = parseEnv();
-
-/** 站点对外地址（去掉尾部斜杠与 query/hash） */
-export function siteUrl(): string {
-  const u = new URL(env.SITE_URL);
-  u.search = "";
-  u.hash = "";
-  return u.toString().replace(/\/+$/, "");
-}

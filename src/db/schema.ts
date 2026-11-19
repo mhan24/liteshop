@@ -183,8 +183,8 @@ export const payments = pgTable(
     /** 网关返回的应付加密货币数量快照（字符串原样保存，用于到账核对） */
     expectedAmount: text("expected_amount"),
     paymentUrl: text("payment_url"),
-    /** 延迟到账/重复到账标记（对账特例，不推进订单） */
-    anomaly: text("anomaly", { enum: ["late", "duplicate"] }),
+    /** 延迟到账标记（对账特例，不推进订单） */
+    anomaly: text("anomaly", { enum: ["late"] }),
     raw: jsonb("raw"),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),

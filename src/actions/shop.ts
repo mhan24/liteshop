@@ -140,7 +140,7 @@ export async function cancelOrderAction(
 ): Promise<ActionResult> {
   const limited = rateLimit(`cancel:${await clientIp()}`, 10, 10 * 60_000);
   if (!limited.ok) return { ok: false, message: "操作过于频繁，请稍后重试" };
-  return cancelPendingOrder(String(formData.get("orderNo") ?? ""), String(formData.get("email") ?? ""));
+  return cancelPendingOrder(...buyerCredentials(formData));
 }
 
 export async function resumePaymentAction(
@@ -149,7 +149,16 @@ export async function resumePaymentAction(
 ): Promise<ActionResult<{ paymentUrl: string | null }>> {
   const limited = rateLimit(`resume:${await clientIp()}`, 6, 10 * 60_000);
   if (!limited.ok) return { ok: false, message: "操作过于频繁，请稍后重试" };
-  return resumePayment(String(formData.get("orderNo") ?? ""), String(formData.get("email") ?? ""));
+  return resumePayment(...buyerCredentials(formData));
+}
+
+/** 订单号 + 邮箱 + 查单密码（取消 / 重新支付与查询同为三因子） */
+function buyerCredentials(formData: FormData): [string, string, string] {
+  return [
+    String(formData.get("orderNo") ?? ""),
+    String(formData.get("email") ?? ""),
+    String(formData.get("password") ?? ""),
+  ];
 }
 
 /** mock 收银台确认支付（仅 PAYMENT_DRIVER=mock；生产环境直接返回） */

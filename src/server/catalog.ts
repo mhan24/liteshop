@@ -156,14 +156,67 @@ export async function releaseStock(tx: Tx, orderId: string): Promise<void> {
   );
 }
 
-/** 支付确认：reserved → sold（返回交付内容行） */
-export async function sellReservedCards(
+/**
+ * 支付确认后的发卡：全有或全无。
+ *
+ * 1. 按商品统计订单已锁定的卡；不足的部分（例如后台删了被锁的卡）从 available
+ *    补锁（`FOR UPDATE SKIP LOCKED`）——补货后「重试发卡」因此能成功；
+ * 2. 任一商品仍不足 → 不卖任何一张（已补锁的卡留在本单名下，等下次重试），返回 null；
+ * 3. 全部齐备 → reserved → sold，返回交付行。
+ *
+ * 绝不出现「部分卡已标 sold 却没写进交付记录」的丢卡状态。
+ */
+export async function sellOrderCards(
   tx: Tx,
-  orderId: string
-): Promise<Array<{ id: number; content: string; productId: number | null }>> {
-  return tx
-    .update(cards)
-    .set({ status: "sold", soldAt: new Date() })
-    .where(and(eq(cards.reservedOrderId, orderId), eq(cards.status, "reserved")))
-    .returning({ id: cards.id, content: cards.content, productId: cards.productId });
+  orderId: string,
+  items: Array<{ productId: number | null; quantity: number }>
+): Promise<Array<{ id: number; content: string; productId: number }> | null> {
+  const need = new Map<number, number>();
+  for (const i of items) {
+    if (i.productId === null) return null; // 商品已被删除，无法从库存补卡，交人工处理
+    need.set(i.productId, (need.get(i.productId) ?? 0) + i.quantity);
+  }
+
+  for (const [productId, quantity] of need) {
+    const held = await tx
+      .select({ c: sql<number>`count(*)::int` })
+      .from(cards)
+      .where(and(eq(cards.reservedOrderId, orderId), eq(cards.productId, productId), eq(cards.status, "reserved")));
+    const shortfall = quantity - Number(held[0]?.c ?? 0);
+    if (shortfall <= 0) continue;
+    const claimed = await tx.execute(
+      sql`WITH picked AS (
+            SELECT id FROM cards
+            WHERE product_id = ${productId} AND status = 'available'
+            ORDER BY id
+            LIMIT ${shortfall}
+            FOR UPDATE SKIP LOCKED
+          )
+          UPDATE cards
+          SET status = 'reserved', reserved_order_id = ${orderId}
+          WHERE id IN (SELECT id FROM picked)
+          RETURNING id`
+    );
+    if (claimed.rows.length < shortfall) return null;
+  }
+
+  const sold: Array<{ id: number; content: string; productId: number }> = [];
+  for (const [productId, quantity] of need) {
+    const rows = await tx.execute<{ id: number; content: string; product_id: number }>(
+      sql`WITH picked AS (
+            SELECT id FROM cards
+            WHERE reserved_order_id = ${orderId} AND product_id = ${productId} AND status = 'reserved'
+            ORDER BY id
+            LIMIT ${quantity}
+            FOR UPDATE
+          )
+          UPDATE cards SET status = 'sold', sold_at = now()
+          WHERE id IN (SELECT id FROM picked)
+          RETURNING id, content, product_id`
+    );
+    for (const r of rows.rows) sold.push({ id: r.id, content: r.content, productId: r.product_id });
+  }
+  // 多锁的卡（理论上不会出现）退回库存，避免长期占用
+  await releaseStock(tx, orderId);
+  return sold.sort((a, b) => a.id - b.id);
 }

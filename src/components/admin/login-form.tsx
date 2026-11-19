@@ -13,7 +13,7 @@ export function LoginForm({ adminPath }: { adminPath: string }) {
   const router = useRouter();
 
   useEffect(() => {
-    if (state?.ok) router.replace(adminPath === "/admin" ? "/admin" : adminPath);
+    if (state?.ok) router.replace(adminPath);
   }, [state?.ok, router, adminPath]);
 
   return (

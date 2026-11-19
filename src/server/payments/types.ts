@@ -1,5 +1,3 @@
-import { minorToNumber } from "@/lib/money";
-
 /**
  * 支付适配器接口。站点只接一个网关（LitePay），mock 仅用于开发与测试。
  *
@@ -70,8 +68,4 @@ export interface PaymentAdapter {
   verifyNotify(gateway: GatewayRuntime, rawBody: string): NotifyVerification;
   /** 商户侧主动关单时通知网关撤销未到账交易（best-effort） */
   cancelPayment?(gateway: GatewayRuntime, providerRef: string): Promise<{ ok: boolean; message: string }>;
-}
-
-export function fiatAmountForGateway(amountCents: number): number {
-  return minorToNumber(amountCents);
 }

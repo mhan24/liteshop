@@ -27,12 +27,3 @@ export function normalizeHttpUrl(raw: string | undefined | null): string | null 
   if (/^169\.254\./.test(host)) return null;
   return url.toString();
 }
-
-/** 规范化为无路径的 origin（网关地址只填域名） */
-export function normalizeOrigin(raw: string | undefined | null): string | null {
-  const safe = normalizeHttpUrl(raw);
-  if (!safe) return null;
-  const url = new URL(safe);
-  if (url.search || url.hash) return null;
-  return url.origin;
-}

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Flash } from "@/components/admin/flash-view";
 
-/** 待支付页：状态轮询 + 重新发起支付 / 取消订单（都要下单邮箱） */
+/** 待支付页：状态轮询 + 重新发起支付 / 取消订单（都要下单邮箱 + 查单密码） */
 export function PayStatusActions({
   orderNo,
   status,
@@ -64,12 +64,9 @@ export function PayStatusActions({
           <form action={resumeAction} className="space-y-3 border-t border-line pt-4">
             <input type="hidden" name="orderNo" value={orderNo} />
             <p className="text-xs leading-5 text-muted">
-              收银台过期或没打开时，确认邮箱后可重新建一笔支付。旧交易会被作废，不会重复扣款。
+              收银台过期或没打开时，验证邮箱与查单密码后可重新建一笔支付。旧交易会被作废，请不要再向旧交易付款。
             </p>
-            <div className="space-y-1.5">
-              <Label htmlFor="pay-email">下单邮箱</Label>
-              <Input id="pay-email" name="email" type="email" required placeholder="you@example.com" />
-            </div>
+            <BuyerFields idPrefix="pay" />
             <Button type="submit" variant="outline" disabled={resumePending} className="w-full">
               {resumePending ? "处理中…" : "重新发起支付"}
             </Button>
@@ -77,10 +74,7 @@ export function PayStatusActions({
 
           <form action={cancelAction} className="space-y-3 border-t border-line pt-4">
             <input type="hidden" name="orderNo" value={orderNo} />
-            <div className="space-y-1.5">
-              <Label htmlFor="cancel-email">下单邮箱</Label>
-              <Input id="cancel-email" name="email" type="email" required placeholder="you@example.com" />
-            </div>
+            <BuyerFields idPrefix="cancel" />
             <Button type="submit" variant="danger" disabled={cancelPending} className="w-full">
               {cancelPending ? "处理中…" : "取消订单"}
             </Button>
@@ -96,5 +90,27 @@ export function PayStatusActions({
         </div>
       </details>
     </div>
+  );
+}
+
+function BuyerFields({ idPrefix }: { idPrefix: string }) {
+  return (
+    <>
+      <div className="space-y-1.5">
+        <Label htmlFor={`${idPrefix}-email`}>下单邮箱</Label>
+        <Input id={`${idPrefix}-email`} name="email" type="email" required placeholder="you@example.com" />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={`${idPrefix}-password`}>查单密码</Label>
+        <Input
+          id={`${idPrefix}-password`}
+          name="password"
+          required
+          autoComplete="off"
+          placeholder="下单时显示的 8 位密码"
+          className="font-mono uppercase"
+        />
+      </div>
+    </>
   );
 }

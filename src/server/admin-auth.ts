@@ -2,7 +2,7 @@ import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import { cookies, headers } from "next/headers";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { admins } from "@/db/schema";
+import { admins, auditLogs } from "@/db/schema";
 import { env } from "@/lib/env";
 import { rateLimit, clientIpFromHeaders } from "@/lib/rate-limit";
 import { getAdminSessionVersion, setSetting, SETTING_KEYS } from "./settings";
@@ -185,7 +185,6 @@ export async function assertCsrf(value: FormDataEntryValue | null): Promise<void
 /* ===== 审计 ===== */
 
 export async function audit(action: string, detail: string, actor: string): Promise<void> {
-  const { auditLogs } = await import("@/db/schema");
   const ip = clientIpFromHeaders(await headers());
   await db.insert(auditLogs).values({ actor, action, detail: detail.slice(0, 500), ip });
 }

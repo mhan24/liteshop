@@ -61,8 +61,8 @@ describe("管理员鉴权", () => {
     const t1 = await csrfToken();
     const t2 = await csrfToken();
     expect(t1).toBe(t2);
-    const { bumpAdminSessionVersion } = await import("@/server/settings");
-    await bumpAdminSessionVersion();
+    const { revokeAllSessions } = await import("@/server/admin-auth");
+    await revokeAllSessions();
     const t3 = await csrfToken();
     expect(t3).not.toBe(t1);
   });

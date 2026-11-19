@@ -44,7 +44,7 @@ docker run -d --name liteshop-pg-test \
   -e POSTGRES_PASSWORD=liteshop-test -e POSTGRES_DB=liteshop_test \
   -p 54330:5432 postgres:18-alpine
 
-npm test        # 66 用例：金额/签名/适配器单元 + 下单/回调幂等/并发发卡/过期清扫/鉴权集成
+npm test        # 80 用例：金额/签名/适配器/入口伪装单元 + 下单/回调幂等/并发发卡/补货重发/过期清扫/鉴权集成
 npx tsc --noEmit
 npm run lint
 ```
@@ -92,4 +92,4 @@ ssh root@<host> 'rm -rf /opt/liteshop-build && mkdir -p /opt/liteshop-build \
 | 回调 | 验签（MD5/常量时间比较）→ 金额核对 → `payments(channel, provider_ref)` 唯一幂等 → 发卡 |
 | 未知结果 | 网关超时/5xx → reconciling，绝不释放库存（网关可能已建单） |
 
-详细设计见 [PLAN.md](./PLAN.md)。
+详细设计见 [PLAN.md](./PLAN.md)，审计记录见 [AUDIT.md](./AUDIT.md)。

@@ -60,21 +60,24 @@ describe("订单查询与生命周期", () => {
     expect(payRows[0]!.status).toBe("expired");
   });
 
-  it("买家取消：双因子校验 + 卡密退回库存", async () => {
+  it("买家取消：三因子校验 + 卡密退回库存", async () => {
     await seedAutoProduct("c1", 2);
     const r = await createOrder({ email: "buyer@test.dev", items: [{ slug: "c1", quantity: 1 }] });
     const order = (await db.select().from(orders).where(eq(orders.orderNo, r.orderNo)))[0]!;
 
-    expect((await cancelPendingOrder(r.orderNo, "wrong@test.dev")).ok).toBe(false);
+    expect((await cancelPendingOrder(r.orderNo, "wrong@test.dev", r.queryPassword)).ok).toBe(false);
+    // 回归：仅凭订单号 + 邮箱（没有查单密码）不能取消他人订单
+    expect((await cancelPendingOrder(r.orderNo, "buyer@test.dev", "")).ok).toBe(false);
+    expect((await cancelPendingOrder(r.orderNo, "buyer@test.dev", "2AAAAAAA")).ok).toBe(false);
     expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("pending");
 
-    expect((await cancelPendingOrder(r.orderNo, "buyer@test.dev")).ok).toBe(true);
+    expect((await cancelPendingOrder(r.orderNo, "Buyer@Test.dev", r.queryPassword.toLowerCase())).ok).toBe(true);
     expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("closed");
     const cardRows = await db.select().from(cards).where(eq(cards.reservedOrderId, order.id));
     expect(cardRows.every((c) => c.status === "available")).toBe(true);
 
     // 二次取消：状态机拒绝
-    expect((await cancelPendingOrder(r.orderNo, "buyer@test.dev")).ok).toBe(false);
+    expect((await cancelPendingOrder(r.orderNo, "buyer@test.dev", r.queryPassword)).ok).toBe(false);
   });
 
   it("reconciling 订单：确认未建单 → 关闭并释放卡密", async () => {

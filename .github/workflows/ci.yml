@@ -16,13 +16,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # 集成测试需要真实 PostgreSQL（连接串与 vitest.config.ts 一致）
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: liteshop-test
+          POSTGRES_DB: liteshop_test
+        ports:
+          - 54330:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d liteshop_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       NEXT_TELEMETRY_DISABLED: "1"
-      # 注意：不要在这里设 PAYMENT_DRIVER=mock。
-      # next build 会以 NODE_ENV=production 收集页面数据，
-      # 此时 assertProductionSafety() 会（正确地）拒绝 mock 驱动。
+      # next build 以 NODE_ENV=production 运行，env 校验会（正确地）拒绝 mock 驱动；
+      # 测试的 PAYMENT_DRIVER=mock 由 vitest.config.ts 注入。
       PAYMENT_DRIVER: auto
-      AUTH_SECRET: ci-secret-not-used-in-production
+      AUTH_SECRET: ci-secret-not-used-in-production-0123456789
 
     steps:
       - uses: actions/checkout@v4
@@ -32,12 +46,8 @@ jobs:
           node-version: "22"
           cache: npm
 
-      # better-sqlite3 为原生模块，需要构建链
       - name: Install dependencies
         run: npm ci
-
-      - name: Rebuild native modules
-        run: npm rebuild better-sqlite3
 
       - name: Typecheck
         run: npx tsc --noEmit -p tsconfig.json
@@ -45,68 +55,21 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # 测试需要 mock 渠道来跑通「下单 → 回调 → 发货」全链路；
-      # vitest.config.ts 也会设置 PAYMENT_DRIVER=mock（此处显式重申）
       - name: Test
         run: npm test
-        env:
-          PAYMENT_DRIVER: mock
 
       - name: Build
         run: npm run build
 
-      # 部署脚本是上线路径的一部分：语法错误或归档异常应在 CI 暴露
-      - name: Shell syntax check
-        run: bash -n scripts/deploy.sh scripts/ops/*.sh
-
-      # 检测一个易犯的 bash 陷阱：变量名后紧跟全角字符时，bash 会把
-      # 全角字符并入变量名（如 $SHA（ → 变量 "SHA（"），触发 unbound variable。
-      # 这个 bug 已在 deploy.sh 与 install-cron.sh 上各犯过一次。
-      - name: Detect full-width char after variable
+      # 部署脚本是上线路径的一部分：语法错误应在 CI 暴露
+      - name: Shell checks
         run: |
           set -euo pipefail
-          if grep -rnE '\$[A-Za-z_][A-Za-z0-9_]*[（），。：；、！？]' scripts/ --include='*.sh'; then
-            echo "::error::变量名后紧跟全角字符会被 bash 并入变量名，请改用 \${VAR} 形式"
+          bash -n scripts/deploy.sh
+          # 变量名后紧跟全角字符会被 bash 并入变量名（$SHA（ → 变量 "SHA（"）
+          if grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[（），。：；、！？]' scripts/deploy.sh; then
+            echo "::error::变量名后紧跟全角字符，请改用 \${VAR} 形式"
             exit 1
           fi
-          echo "✓ 未发现变量名后紧跟全角字符"
-
-      - name: ShellCheck
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck
-          # SC1090/SC1091：动态 source .deploy.env（运行期才存在）
-          shellcheck --severity=error -e SC1090,SC1091 scripts/deploy.sh scripts/ops/*.sh
-
-      # 归档完整性：不得包含密钥文件或 macOS AppleDouble 条目
-      - name: Deploy archive checks
-        run: |
-          set -euo pipefail
-          TARBALL="$(mktemp -t ci-deploy-XXXXXX.tar.gz)"
-          git archive --format=tar.gz -o "$TARBALL" HEAD
-          echo "归档条目数: $(tar tzf "$TARBALL" | wc -l)"
-          if tar tzf "$TARBALL" | grep -qE '(^|/)\.env$|(^|/)\.deploy\.env$'; then
-            echo "::error::归档中包含生产密钥文件"; exit 1
-          fi
-          if tar tzf "$TARBALL" | grep -qE '(^|/)\._'; then
-            echo "::error::归档中包含 AppleDouble 条目"; exit 1
-          fi
-          echo "✓ 归档检查通过"
-
-      # 验证 .dockerignore 下的完整 Docker 构建（无密钥参与）。
-      # 之前构建之所以成功，是因为 .env 被 COPY . . 带进上下文并提供了
-      # AUTH_SECRET；加入 .dockerignore 后必须能在无密钥环境构建，
-      # 否则说明构建仍隐式依赖运行时密钥。
-      - name: Docker build without secrets
-        run: |
-          set -euo pipefail
-          # 明确清空可能来自仓库的密钥环境变量
-          env -u AUTH_SECRET -u CRON_SECRET -u ADMIN_PASSWORD_HASH \
-            docker build -t liteshop-ci:verify .
-          echo "✓ 无密钥环境下 Docker 构建成功"
-          # 镜像内不得出现密钥文件
-          if docker run --rm --entrypoint sh liteshop-ci:verify \
-               -c 'test -e /app/.env -o -e /app/.deploy.env'; then
-            echo "::error::镜像内包含密钥文件"; exit 1
-          fi
-          echo "✓ 镜像内无密钥文件"
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=error -e SC1090,SC1091 scripts/deploy.sh

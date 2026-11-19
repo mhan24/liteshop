@@ -69,7 +69,7 @@ services:
     env_file: .env
     entrypoint: >
       sh -c 'while true; do
-        curl -fsS -X POST "http://app:3000/api/cron/maintenance?key=$${CRON_SECRET}" || echo "[cron] maintenance failed";
+        curl -fsS -X POST -H "Authorization: Bearer $${CRON_SECRET}" http://app:3000/api/cron/maintenance >/dev/null || echo "[cron] maintenance failed";
         sleep 60;
       done'
     depends_on:

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { admins, categories, cards, products } from "@/db/schema";
@@ -31,7 +31,6 @@ import {
   MIN_TIMEOUT_SECONDS,
 } from "@/server/payments/litepay";
 import {
-  bumpAdminSessionVersion,
   getSetting,
   SETTING_KEYS,
   setSetting,
@@ -228,20 +227,24 @@ export async function updateProductAction(
     if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
     const input = parseProductForm(formData);
     if (!input) return { ok: false, message: "商品字段不合法" };
-    await db
-      .update(products)
-      .set({
-        name: input.name,
-        slug: input.slug,
-        description: input.description,
-        priceCents: input.priceMinor,
-        status: input.status,
-        imageUrl: input.imageUrl ?? null,
-        seoDescription: input.seoDescription ?? null,
-        categoryId: input.categoryId,
-        updatedAt: new Date(),
-      })
-      .where(eq(products.id, id));
+    try {
+      await db
+        .update(products)
+        .set({
+          name: input.name,
+          slug: input.slug,
+          description: input.description,
+          priceCents: input.priceMinor,
+          status: input.status,
+          imageUrl: input.imageUrl ?? null,
+          seoDescription: input.seoDescription ?? null,
+          categoryId: input.categoryId,
+          updatedAt: new Date(),
+        })
+        .where(eq(products.id, id));
+    } catch {
+      return { ok: false, message: "商品保存失败（slug 可能已被其它商品使用）" };
+    }
     await audit("product.update", input.slug, session.username);
     revalidateStorefront();
     return { ok: true, message: "商品已保存" };
@@ -257,6 +260,13 @@ export async function deleteProductAction(
     if (csrfErr) return csrfErr;
     const id = Number(formData.get("id"));
     if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
+    // 有卡被订单锁定时不能删：级联删卡会让这些订单付款后无卡可发
+    const held = await db
+      .select({ id: cards.id })
+      .from(cards)
+      .where(and(eq(cards.productId, id), eq(cards.status, "reserved")))
+      .limit(1);
+    if (held[0]) return { ok: false, message: "该商品有卡密被未完成订单锁定，请先下架，待订单结束后再删除" };
     await db.delete(products).where(eq(products.id, id));
     await audit("product.delete", String(id), session.username);
     revalidateStorefront();
@@ -283,17 +293,20 @@ export async function importCardsAction(
       return { ok: false, message: "请选择商品并粘贴卡密（每行一条）" };
     }
     if (lines.length > 10_000) return { ok: false, message: "单次最多导入 10000 条" };
-    try {
-      await db
-        .insert(cards)
-        .values(lines.map((content) => ({ productId, content })))
-        .onConflictDoNothing();
-    } catch {
-      return { ok: false, message: "导入失败" };
-    }
-    await audit("cards.import", `${productId} x${lines.length}`, session.username);
+    const product = await db.select({ id: products.id }).from(products).where(eq(products.id, productId)).limit(1);
+    if (!product[0]) return { ok: false, message: "商品不存在" };
+    const inserted = await db
+      .insert(cards)
+      .values(lines.map((content) => ({ productId, content })))
+      .onConflictDoNothing()
+      .returning({ id: cards.id });
+    const skipped = lines.length - inserted.length;
+    await audit("cards.import", `${productId} x${inserted.length}`, session.username);
     revalidateStorefront();
-    return { ok: true, message: `已导入 ${lines.length} 条（重复内容自动跳过）` };
+    return {
+      ok: true,
+      message: skipped > 0 ? `已导入 ${inserted.length} 条，跳过重复 ${skipped} 条` : `已导入 ${inserted.length} 条`,
+    };
   });
 }
 
@@ -306,7 +319,12 @@ export async function deleteCardAction(
     if (csrfErr) return csrfErr;
     const id = Number(formData.get("id"));
     if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
-    await db.delete(cards).where(eq(cards.id, id));
+    // 只允许删除未售未锁的卡：reserved 属于待付订单，sold 是交付凭据
+    const deleted = await db
+      .delete(cards)
+      .where(and(eq(cards.id, id), eq(cards.status, "available")))
+      .returning({ id: cards.id });
+    if (!deleted[0]) return { ok: false, message: "只能删除可售状态的卡密（已锁定或已售出的不可删除）" };
     await audit("cards.delete", String(id), session.username);
     revalidateStorefront();
     return { ok: true, message: "卡密已删除" };
@@ -563,7 +581,6 @@ export async function changeCredentialsAction(
       })
       .where(eq(admins.id, admin.id));
     await revokeAllSessions();
-    await bumpAdminSessionVersion();
     await clearSessionCookie();
     await audit("admin.credentials", newUsername || admin.username, admin.username);
     return { ok: true, message: "凭据已更新，请重新登录" };

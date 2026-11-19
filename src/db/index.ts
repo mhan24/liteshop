@@ -22,6 +22,5 @@ export const pool =
 
 if (process.env.NODE_ENV !== "production") globalForDb.__liteshopPool = pool;
 
-export type Database = ReturnType<typeof drizzle<typeof schema>>;
 export const db = drizzle(pool, { schema });
 export { schema };

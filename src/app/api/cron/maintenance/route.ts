@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { sweepExpired } from "@/server/orders";
 import { flushDeliveryEmails } from "@/server/mail";
 import { db } from "@/db";
@@ -15,12 +16,10 @@ export const dynamic = "force-dynamic";
  * - 回调日志保留 30 天
  */
 export async function POST(request: Request) {
-  if (!env.CRON_SECRET) return new Response("forbidden", { status: 403 });
-  const url = new URL(request.url);
-  if (url.searchParams.get("key") !== env.CRON_SECRET) {
+  if (!isAuthorized(request.headers.get("authorization"))) {
     return new Response("forbidden", { status: 403 });
   }
-  if (!rateLimit(`cron:${url.searchParams.get("key")}`, 10, 60_000).ok) {
+  if (!rateLimit("cron", 10, 60_000).ok) {
     return new Response("too many", { status: 429 });
   }
 
@@ -35,4 +34,12 @@ export async function POST(request: Request) {
     emailSent: mail.sent,
     emailFailed: mail.failed,
   });
+}
+
+/** Authorization: Bearer <CRON_SECRET>（不走 query：密钥会进访问日志）；常量时间比较 */
+function isAuthorized(header: string | null): boolean {
+  if (!env.CRON_SECRET || !header?.startsWith("Bearer ")) return false;
+  const given = createHash("sha256").update(header.slice(7)).digest();
+  const expected = createHash("sha256").update(env.CRON_SECRET).digest();
+  return timingSafeEqual(given, expected);
 }

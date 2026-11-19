@@ -10,12 +10,13 @@ import {
   products,
 } from "@/db/schema";
 import { generateOrderNo } from "@/lib/order-no";
-import { generateQueryPassword, hashQueryPassword } from "@/lib/query-password";
+import { generateQueryPassword, hashQueryPassword, verifyQueryPassword } from "@/lib/query-password";
 import { sha256Hex } from "@/lib/litepay-sign";
 import { toMinorUnits } from "@/lib/money";
-import { releaseStock, reserveStock, sellReservedCards } from "./catalog";
+import { releaseStock, reserveStock, sellOrderCards } from "./catalog";
+import type { Tx } from "./db-tx";
 import { getActiveGateway, getAdapter, getGatewayByType, webhookPath } from "./payments";
-import type { GatewayType, NotifyPayload } from "./payments/types";
+import type { CreateOutcome, GatewayType, NotifyPayload } from "./payments/types";
 import { getSiteUrl } from "./settings";
 
 /**
@@ -55,8 +56,6 @@ export function assertTransition(from: string, to: string): void {
   }
 }
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
 /* ================= 下单 ================= */
 
 export interface CheckoutItemInput {
@@ -86,9 +85,15 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   if (!EMAIL_RE.test(email) || email.length > 200) {
     throw new OrderError("INVALID_INPUT", "请输入有效的联系邮箱");
   }
-  const items = input.items
-    .map((i) => ({ slug: i.slug.trim(), quantity: Math.trunc(i.quantity) }))
-    .filter((i) => i.slug !== "" && i.quantity > 0);
+  // 同一 slug 合并为一行（否则同一商品会分两次锁卡、两段交付）
+  const merged = new Map<string, number>();
+  for (const i of input.items) {
+    const slug = i.slug.trim();
+    const quantity = Math.trunc(i.quantity);
+    if (slug === "" || !(quantity > 0)) continue;
+    merged.set(slug, (merged.get(slug) ?? 0) + quantity);
+  }
+  const items = [...merged].map(([slug, quantity]) => ({ slug, quantity }));
   if (items.length === 0 || items.length > 20) {
     throw new OrderError("INVALID_INPUT", "购物车为空或商品种类过多");
   }
@@ -179,7 +184,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   });
 
   if (outcome.kind === "rejected") {
-    await closeOrderInternal(created.orderId, created.orderNo, "rejected");
+    await closeOrderInternal(created.orderId, created.orderNo, outcome.message);
     throw new OrderError("PAYMENT_FAILED", `支付网关建单失败: ${outcome.message}`);
   }
   if (outcome.kind === "unknown") {
@@ -226,17 +231,24 @@ interface PendingItemRow {
   quantity: number;
 }
 
-/** 为订单发起一次支付尝试（新建订单或重新支付共用） */
+type AttemptOutcome =
+  | { kind: "created"; payment: { paymentUrl: string | null; expiresAt: Date | null } }
+  | { kind: "rejected"; message: string }
+  | { kind: "unknown"; message: string };
+
+/**
+ * 为订单发起一次支付尝试（新建订单或重新支付共用）。
+ *
+ * 异常安全：pending 支付记录落库之后的任何异常（网关适配器抛错、回填失败）都按
+ * unknown 处理——网关可能已建单，订单必须进入 reconciling，而不是停在
+ * 「pending + 无有效期」这种清扫永远扫不到、卡密永久占用的状态。
+ */
 async function startPaymentAttempt(input: {
   orderId: string;
   orderNo: string;
   amountCents: number;
   subject: string;
-}): Promise<
-  | { kind: "created"; payment: { paymentUrl: string | null; expiresAt: Date | null } }
-  | { kind: "rejected"; message: string }
-  | { kind: "unknown"; message: string }
-> {
+}): Promise<AttemptOutcome> {
   const gateway = await getActiveGateway();
   if (!gateway) {
     // 校验与调用之间网关被停用：按「明确拒绝」处理，让上层关单并退回卡密
@@ -244,72 +256,129 @@ async function startPaymentAttempt(input: {
   }
   const adapter = getAdapter(gateway.type);
   const base = await getSiteUrl();
-  const notifyUrl = `${base}${webhookPath(gateway.type)}`;
-  const redirectUrl = `${base}/pay/${input.orderNo}`;
 
-  // 先落一条 pending 支付记录（作废旧尝试），让「unknown」也有归属
-  await db.transaction(async (tx) => {
-    await tx
+  // 先落一条 pending 支付记录（作废旧尝试），让「unknown」也有归属。
+  // 订单行锁 + 状态复核：并发的「重新支付」/回调/关单不会与本次尝试交错。
+  const attempt = await db.transaction(async (tx) => {
+    const rows = await tx.select().from(orders).where(eq(orders.id, input.orderId)).limit(1).for("update");
+    if (rows[0]?.status !== "pending") return null;
+    const superseded = await tx
       .update(payments)
       .set({ isCurrent: false, status: "expired", updatedAt: new Date() })
-      .where(and(eq(payments.orderId, input.orderId), eq(payments.isCurrent, true)));
-    await tx.insert(payments).values({
-      orderId: input.orderId,
-      channel: gateway.type,
-      status: "pending",
-      isCurrent: true,
-      amountCents: input.amountCents,
-    });
-  });
-
-  const outcome = await adapter.createPayment(gateway.runtime, {
-    orderNo: input.orderNo,
-    amountCents: input.amountCents,
-    subject: input.subject,
-    notifyUrl,
-    redirectUrl,
-  });
-
-  if (outcome.kind === "created") {
-    await db
-      .update(payments)
-      .set({
-        providerRef: outcome.payment.providerRef,
-        paymentUrl: outcome.payment.paymentUrl,
-        expectedAmount: outcome.payment.expectedAmount,
-        expiresAt: outcome.payment.expiresAt,
-        raw: (outcome.payment.raw ?? null) as never,
-        updatedAt: new Date(),
+      .where(and(eq(payments.orderId, input.orderId), eq(payments.isCurrent, true)))
+      .returning({ channel: payments.channel, providerRef: payments.providerRef });
+    const inserted = await tx
+      .insert(payments)
+      .values({
+        orderId: input.orderId,
+        channel: gateway.type,
+        status: "pending",
+        isCurrent: true,
+        amountCents: input.amountCents,
       })
-      .where(and(eq(payments.orderId, input.orderId), eq(payments.isCurrent, true)));
-    // 订单回填有效期（事务内二次校验状态，避免与并发回调竞争）
-    await db.transaction(async (tx) => {
-      const rows = await tx
-        .select()
-        .from(orders)
-        .where(eq(orders.id, input.orderId))
-        .limit(1)
-        .for("update");
-      const order = rows[0];
-      if (!order || (order.status !== "pending" && order.status !== "reconciling")) return;
-      if (order.status === "pending") {
-        await tx
-          .update(orders)
-          .set({ expiresAt: outcome.payment.expiresAt, updatedAt: new Date() })
-          .where(eq(orders.id, input.orderId));
-      }
-    });
-    return {
-      kind: "created",
-      payment: { paymentUrl: outcome.payment.paymentUrl, expiresAt: outcome.payment.expiresAt },
-    };
+      .returning({ id: payments.id });
+    return { paymentId: inserted[0]!.id, superseded };
+  });
+  if (!attempt) return { kind: "rejected", message: "订单已不在待支付状态" };
+  // 旧交易通知网关撤销（best-effort）；若买家仍向旧交易付款，回调会记为 late 人工核对
+  for (const o of attempt.superseded) {
+    if (o.providerRef) cancelAtGateway(o.channel, o.providerRef, "supersede");
   }
 
-  await db
-    .update(payments)
-    .set({ status: "failed", updatedAt: new Date() })
-    .where(and(eq(payments.orderId, input.orderId), eq(payments.isCurrent, true)));
+  let outcome: CreateOutcome;
+  try {
+    outcome = await adapter.createPayment(gateway.runtime, {
+      orderNo: input.orderNo,
+      amountCents: input.amountCents,
+      subject: input.subject,
+      notifyUrl: `${base}${webhookPath(gateway.type)}`,
+      redirectUrl: `${base}/pay/${input.orderNo}`,
+    });
+  } catch (err) {
+    outcome = { kind: "unknown", message: `网关调用异常: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  if (outcome.kind === "created") {
+    const created = outcome.payment;
+    try {
+      await db.transaction(async (tx) => {
+        // 锁顺序与建尝试时一致：先订单行，再支付行（避免 40P01 死锁）
+        const rows = await tx
+          .select()
+          .from(orders)
+          .where(eq(orders.id, input.orderId))
+          .limit(1)
+          .for("update");
+        // 按 id 回填本次尝试：并发「重新支付」可能已把它作废，绝不能写到更新的尝试上
+        const updated = await tx
+          .update(payments)
+          .set({
+            providerRef: created.providerRef,
+            paymentUrl: created.paymentUrl,
+            expectedAmount: created.expectedAmount,
+            expiresAt: created.expiresAt,
+            raw: (created.raw ?? null) as never,
+            updatedAt: new Date(),
+          })
+          .where(eq(payments.id, attempt.paymentId))
+          .returning({ isCurrent: payments.isCurrent });
+        if (rows[0]?.status === "pending" && updated[0]?.isCurrent) {
+          await tx
+            .update(orders)
+            .set({ expiresAt: created.expiresAt, updatedAt: new Date() })
+            .where(eq(orders.id, input.orderId));
+        }
+      });
+    } catch (err) {
+      console.error("[payment] 网关已建单但回填失败，转对账", err);
+      return { kind: "unknown", message: "网关已建单但本地记录失败" };
+    }
+    return { kind: "created", payment: { paymentUrl: created.paymentUrl, expiresAt: created.expiresAt } };
+  }
+
+  // rejected：本次尝试作废；unknown：保持 pending（网关可能已建单，等回调认领或人工核对）
+  if (outcome.kind === "rejected") {
+    await db
+      .update(payments)
+      .set({ status: "failed", updatedAt: new Date() })
+      .where(and(eq(payments.id, attempt.paymentId), eq(payments.status, "pending")));
+  }
   return outcome;
+}
+
+/** 通知网关撤销未到账交易（best-effort，不阻塞调用方） */
+function cancelAtGateway(channel: GatewayType, providerRef: string, tag: string): void {
+  const adapter = getAdapter(channel);
+  if (!adapter.cancelPayment) return;
+  void getGatewayByType(channel)
+    .then((gateway) => adapter.cancelPayment!(gateway, providerRef))
+    .then((r) => console.log(`[cancel:${tag}] ${channel} ${providerRef} ok=${r.ok} ${r.message}`))
+    .catch((err) => console.warn(`[cancel:${tag}] ${channel} ${providerRef} failed`, err));
+}
+
+/**
+ * 关闭 pending 订单（事务内，调用方已持有订单行锁）：订单 closed、当前支付作废、释放卡密。
+ * 返回需要通知网关撤销的交易（无则 null）。
+ */
+async function closePendingInTx(
+  tx: Tx,
+  order: { id: string; status: string }
+): Promise<{ channel: GatewayType; providerRef: string } | null> {
+  assertTransition(order.status, "closed");
+  await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
+  const expired = await tx
+    .update(payments)
+    .set({ status: "expired", updatedAt: new Date() })
+    .where(and(eq(payments.orderId, order.id), eq(payments.isCurrent, true), eq(payments.status, "pending")))
+    .returning({ channel: payments.channel, providerRef: payments.providerRef });
+  await releaseStock(tx, order.id);
+  const ref = expired[0];
+  return ref?.providerRef ? { channel: ref.channel, providerRef: ref.providerRef } : null;
+}
+
+async function lockOrderByNo(tx: Tx, orderNo: string) {
+  const rows = await tx.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1).for("update");
+  return rows[0] ?? null;
 }
 
 /** 明确拒绝：补偿关单并释放卡密 */
@@ -318,9 +387,7 @@ async function closeOrderInternal(orderId: string, orderNo: string, reason: stri
     const rows = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for("update");
     const order = rows[0];
     if (!order || order.status !== "pending") return;
-    assertTransition(order.status, "closed");
-    await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
-    await releaseStock(tx, order.id);
+    await closePendingInTx(tx, order);
     await tx.insert(notifyLogs).values({
       channel: "internal",
       orderNo,
@@ -339,21 +406,14 @@ export interface WebhookResult {
   message: string;
 }
 
-/** 验签失败聚合计数（内存，不落库——防未认证请求写满磁盘） */
-const rejectedNotify = new Map<string, number>();
-export function rejectedNotifyStats(): Record<string, number> {
-  return Object.fromEntries(rejectedNotify);
-}
-
 export async function handlePaymentWebhook(channel: GatewayType, rawBody: string): Promise<WebhookResult> {
   const gateway = await getGatewayByType(channel);
   const adapter = getAdapter(channel);
   const verification = adapter.verifyNotify(gateway, rawBody);
 
   if (!verification.ok || !verification.payload) {
-    const hour = Math.floor(Date.now() / 3600_000);
-    const key = `${channel}|${hour}`;
-    rejectedNotify.set(key, (rejectedNotify.get(key) ?? 0) + 1);
+    // 未认证请求不落库（防写满磁盘），只留一行日志
+    console.warn(`[webhook] ${channel} 拒绝: ${verification.error ?? "验签失败"}`);
     return { respond: "success", handled: false, message: verification.error ?? "验签失败" };
   }
   const payload = verification.payload;
@@ -419,7 +479,7 @@ async function processWebhook(
     return { respond: "success", handled: false, message: "订单不存在" };
   }
 
-  // 定位支付记录：优先 (channel, providerRef)；reconciling 订单允许按当前尝试认领
+  // 定位支付记录：优先 (channel, providerRef)
   const paymentRows = await tx
     .select()
     .from(payments)
@@ -427,7 +487,8 @@ async function processWebhook(
     .limit(1);
   let payment = paymentRows[0];
 
-  if (!payment && order.status === "reconciling") {
+  // 当前尝试缺 providerRef = 建单响应丢失；验签通过的回调可以认领它
+  if (!payment && (order.status === "reconciling" || order.status === "pending")) {
     const currentRows = await tx
       .select()
       .from(payments)
@@ -526,18 +587,14 @@ export async function deliverOrder(tx: Tx, orderId: string): Promise<boolean> {
   if (order.status !== "paid") return false;
 
   const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
-  const expectedCount = items.reduce((acc, i) => acc + i.quantity, 0);
-  const sold = await sellReservedCards(tx, orderId);
-  if (sold.length < expectedCount) return false;
+  const sold = await sellOrderCards(tx, orderId, items);
+  if (!sold) return false;
 
-  const content = buildDeliveryContent(items, sold);
-  const existing = await tx.select().from(deliveries).where(eq(deliveries.orderId, orderId)).limit(1);
-  if (existing[0]) {
-    const merged = [existing[0].content, content].filter(Boolean).join("\n\n");
-    await tx.update(deliveries).set({ content: merged }).where(eq(deliveries.id, existing[0].id));
-  } else {
-    await tx.insert(deliveries).values({ orderId, content, cardIds: sold.map((c) => c.id) });
-  }
+  await tx.insert(deliveries).values({
+    orderId,
+    content: buildDeliveryContent(items, sold),
+    cardIds: sold.map((c) => c.id),
+  });
 
   assertTransition(order.status, "completed");
   await tx
@@ -549,23 +606,22 @@ export async function deliverOrder(tx: Tx, orderId: string): Promise<boolean> {
 
 function buildDeliveryContent(
   items: Array<{ productId: number | null; productName: string; quantity: number }>,
-  sold: Array<{ id: number; content: string; productId: number | null }>
+  sold: Array<{ id: number; content: string; productId: number }>
 ): string {
   const byProduct = new Map<number, string[]>();
   for (const c of sold) {
-    if (c.productId === null) continue;
     const list = byProduct.get(c.productId) ?? [];
     list.push(c.content);
     byProduct.set(c.productId, list);
   }
-  const sections: string[] = [];
-  for (const item of items) {
-    if (item.productId === null) continue;
-    const contents = byProduct.get(item.productId) ?? [];
-    if (contents.length === 0) continue;
-    sections.push(`【${item.productName}】\n${contents.join("\n")}`);
-  }
-  return sections.filter(Boolean).join("\n\n");
+  // 同一商品出现在多行明细时按数量依次切分，避免同一张卡在多段重复出现
+  return items
+    .flatMap((item) => {
+      if (item.productId === null) return [];
+      const contents = (byProduct.get(item.productId) ?? []).splice(0, item.quantity);
+      return contents.length ? [`【${item.productName}】\n${contents.join("\n")}`] : [];
+    })
+    .join("\n\n");
 }
 
 /* ================= 过期清扫 ================= */
@@ -574,105 +630,72 @@ export interface SweepResult {
   closedOrders: string[];
 }
 
-/** 关闭过期 pending 订单并释放卡密；同步作废过期支付记录 */
+/** 关闭过期 pending 订单并释放卡密；同步作废过期支付记录并通知网关撤销 */
 export async function sweepExpired(limit = 200): Promise<SweepResult> {
   const cancels: Array<{ channel: GatewayType; providerRef: string }> = [];
   const closed = await db.transaction(async (tx) => {
-    const now = new Date();
     const candidates = await tx
       .select()
       .from(orders)
-      .where(and(eq(orders.status, "pending"), isNotNull(orders.expiresAt), lt(orders.expiresAt, now)))
+      .where(and(eq(orders.status, "pending"), isNotNull(orders.expiresAt), lt(orders.expiresAt, new Date())))
       .limit(limit)
       .for("update", { skipLocked: true });
-    const closedNos: string[] = [];
     for (const order of candidates) {
-      assertTransition(order.status, "closed");
-      await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
-      const current = await tx
-        .select()
-        .from(payments)
-        .where(and(eq(payments.orderId, order.id), eq(payments.isCurrent, true)))
-        .limit(1);
-      if (current[0]) {
-        await tx
-          .update(payments)
-          .set({ status: "expired", updatedAt: new Date() })
-          .where(eq(payments.id, current[0].id));
-        if (current[0].providerRef) {
-          cancels.push({ channel: current[0].channel, providerRef: current[0].providerRef });
-        }
-      }
-      await releaseStock(tx, order.id);
-      closedNos.push(order.orderNo);
+      const ref = await closePendingInTx(tx, order);
+      if (ref) cancels.push(ref);
     }
-    return closedNos;
+    return candidates.map((o) => o.orderNo);
   });
-  for (const c of cancels) {
-    const gateway = await getGatewayByType(c.channel);
-    void getAdapter(c.channel)
-      .cancelPayment?.(gateway, c.providerRef)
-      .then((r) => console.log(`[sweep-cancel] ${c.channel} ${c.providerRef} ok=${r.ok} ${r.message}`))
-      .catch((err) => console.warn("[sweep-cancel] failed", err));
-  }
+  for (const c of cancels) cancelAtGateway(c.channel, c.providerRef, "sweep");
   return { closedOrders: closed };
 }
 
 /* ================= 买家操作 ================= */
 
-/** 买家取消 pending 订单（订单号 + 邮箱双因子）；同步通知网关撤销 */
-export async function cancelPendingOrder(
-  orderNo: string,
-  email: string
-): Promise<{ ok: boolean; message: string }> {
+/**
+ * 买家侧敏感操作的身份校验：订单号 + 邮箱 + 查单密码三因子（与订单查询同一口径）。
+ * 订单号会出现在收银台回跳地址里，邮箱也可能被他人知道——两者都不足以授权改动订单。
+ */
+async function authenticateBuyer(orderNo: string, email: string, password: string) {
   const no = orderNo.trim();
   const mail = email.trim().toLowerCase();
-  if (!no || !mail) return { ok: false, message: "请提供订单号与下单邮箱" };
-  const cancelRef: { channel: GatewayType; providerRef: string } | null = await db.transaction(
-    async (tx) => {
-      const rows = await tx.select().from(orders).where(eq(orders.orderNo, no)).limit(1).for("update");
-      const order = rows[0];
-      if (!order) return null;
-      if (order.email.trim().toLowerCase() !== mail) return null;
-      if (order.status !== "pending") return null;
-      assertTransition(order.status, "closed");
-      await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
-      const current = await tx
-        .select()
-        .from(payments)
-        .where(and(eq(payments.orderId, order.id), eq(payments.isCurrent, true)))
-        .limit(1);
-      if (current[0]) {
-        await tx
-          .update(payments)
-          .set({ status: "expired", updatedAt: new Date() })
-          .where(eq(payments.id, current[0].id));
-      }
-      await releaseStock(tx, order.id);
-      if (current[0]?.providerRef) {
-        return { channel: current[0].channel, providerRef: current[0].providerRef };
-      }
-      return null;
-    }
-  );
-  if (!cancelRef) return { ok: false, message: "订单不存在、邮箱不匹配或状态不可取消" };
-  const gateway = await getGatewayByType(cancelRef.channel);
-  void getAdapter(cancelRef.channel)
-    .cancelPayment?.(gateway, cancelRef.providerRef)
-    .then((r) => console.log(`[buyer-cancel] ${cancelRef.providerRef} ok=${r.ok} ${r.message}`))
-    .catch(() => undefined);
+  if (!no || !mail || !password.trim()) return null;
+  const rows = await db
+    .select()
+    .from(orders)
+    .where(and(eq(orders.orderNo, no), eq(orders.email, mail)))
+    .limit(1);
+  const order = rows[0];
+  const ok = await verifyQueryPassword(order?.queryPasswordHash ?? null, password);
+  return order && ok ? order : null;
+}
+
+/** 买家取消 pending 订单；同步通知网关撤销 */
+export async function cancelPendingOrder(
+  orderNo: string,
+  email: string,
+  password: string
+): Promise<{ ok: boolean; message: string }> {
+  const order = await authenticateBuyer(orderNo, email, password);
+  if (!order) return { ok: false, message: "订单不存在，或邮箱 / 查单密码不正确" };
+  const result = await db.transaction(async (tx) => {
+    const locked = await lockOrderByNo(tx, order.orderNo);
+    if (locked?.status !== "pending") return { closed: false as const };
+    return { closed: true as const, ref: await closePendingInTx(tx, locked) };
+  });
+  if (!result.closed) return { ok: false, message: "订单当前状态不可取消" };
+  if (result.ref) cancelAtGateway(result.ref.channel, result.ref.providerRef, "buyer");
   return { ok: true, message: "订单已取消，占用的卡密已退回库存" };
 }
 
-/** 待支付订单重新发起支付（旧尝试作废） */
+/** 待支付订单重新发起支付（旧尝试作废并通知网关撤销） */
 export async function resumePayment(
   orderNo: string,
-  email: string
-): Promise<{ ok: boolean; message: string; paymentUrl?: string | null }> {
-  const mail = email.trim().toLowerCase();
-  const rows = await db.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1);
-  const order = rows[0];
-  if (!order || order.email !== mail) return { ok: false, message: "订单不存在或邮箱不匹配" };
+  email: string,
+  password: string
+): Promise<{ ok: boolean; message: string; data?: { paymentUrl: string | null } }> {
+  const order = await authenticateBuyer(orderNo, email, password);
+  if (!order) return { ok: false, message: "订单不存在，或邮箱 / 查单密码不正确" };
   if (order.status !== "pending") return { ok: false, message: "订单不在待支付状态" };
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
   if (items.length === 0) return { ok: false, message: "订单缺少商品明细" };
@@ -683,10 +706,10 @@ export async function resumePayment(
     subject: items.map((i) => i.productName).join(" + "),
   });
   if (outcome.kind === "created") {
-    return { ok: true, message: "已创建新的支付", paymentUrl: outcome.payment.paymentUrl };
+    return { ok: true, message: "已创建新的支付", data: { paymentUrl: outcome.payment.paymentUrl } };
   }
   if (outcome.kind === "rejected") {
-    await closeOrderInternal(order.id, order.orderNo, "rejected");
+    await closeOrderInternal(order.id, order.orderNo, outcome.message);
     return { ok: false, message: `支付网关建单失败: ${outcome.message}` };
   }
   await markReconciling(order.id);
@@ -700,8 +723,7 @@ export async function adminCloseOrder(
   actor: string
 ): Promise<{ ok: boolean; message: string }> {
   const result = await db.transaction(async (tx) => {
-    const rows = await tx.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1).for("update");
-    const order = rows[0];
+    const order = await lockOrderByNo(tx, orderNo);
     if (!order) return { ok: false as const, message: "订单不存在", ref: null };
     if (order.status === "reconciling") {
       return { ok: false as const, message: "待对账订单请先在网关后台核对，再执行此操作", ref: null };
@@ -709,33 +731,11 @@ export async function adminCloseOrder(
     if (order.status !== "pending") {
       return { ok: false as const, message: `订单状态 ${order.status} 不能关闭`, ref: null };
     }
-    assertTransition(order.status, "closed");
-    await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
-    const current = await tx
-      .select()
-      .from(payments)
-      .where(and(eq(payments.orderId, order.id), eq(payments.isCurrent, true)))
-      .limit(1);
-    if (current[0]) {
-      await tx
-        .update(payments)
-        .set({ status: "expired", updatedAt: new Date() })
-        .where(eq(payments.id, current[0].id));
-    }
-    await releaseStock(tx, order.id);
+    const ref = await closePendingInTx(tx, order);
     await tx.insert(auditLogs).values({ actor, action: "order.close", detail: orderNo });
-    const ref = current[0]?.providerRef
-      ? { channel: current[0].channel, providerRef: current[0].providerRef }
-      : null;
     return { ok: true as const, message: "订单已关闭，卡密已退回库存", ref };
   });
-  if (result.ok && result.ref) {
-    const ref = result.ref;
-    const gateway = await getGatewayByType(ref.channel);
-    void getAdapter(ref.channel)
-      .cancelPayment?.(gateway, ref.providerRef)
-      .catch(() => undefined);
-  }
+  if (result.ref) cancelAtGateway(result.ref.channel, result.ref.providerRef, "admin");
   return { ok: result.ok, message: result.message };
 }
 
@@ -841,11 +841,6 @@ export async function markDeliveryEmailFailed(deliveryId: number, error: string)
     .update(deliveries)
     .set({ emailAttempts: sql`${deliveries.emailAttempts} + 1`, emailError: error.slice(0, 500) })
     .where(eq(deliveries.id, deliveryId));
-}
-
-/** 后台最近订单 */
-export async function listRecentOrders(limit = 50) {
-  return db.select().from(orders).orderBy(desc(orders.createdAt)).limit(limit);
 }
 
 /** 按订单号取订单与明细（后台与查询页共用） */

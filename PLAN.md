@@ -79,7 +79,8 @@ AUTH_SECRET）/ `litepay_timeout_seconds`（120–86400）/ `litepay_currencies`
 
 ### 查询（server/order-query.ts）
 
-邮箱 + 订单号 + 查单密码三因子；Argon2id 验证；action 层 IP+邮箱限流。仅凭邮箱不可访问。
+邮箱 + 订单号 + 查单密码三因子；Argon2id 验证（不匹配时对 dummy 哈希同等开销校验）；action 层 IP+邮箱限流。
+买家取消订单、重新发起支付同样要求三因子。仅凭邮箱或订单号不可访问、不可改动订单。
 
 ## 5. 与其他实现的差异
 
@@ -103,5 +104,5 @@ AUTH_SECRET）/ `litepay_timeout_seconds`（120–86400）/ `litepay_currencies`
 
 - 不支持秒杀/高并发场景（单实例 + 行级锁，符合业务规模）
 - 邮件失败重试上限 5 次（cron 每 60s），超出需人工介入
-- 卡密不足时订单停在 `paid`，后台补卡后「重试发卡」
+- 卡密不足时订单停在 `paid`（一张不卖，全有或全无），后台补卡后「重试发卡」会从可售库存补锁缺口
 - 未做自动化浏览器 E2E；服务层全路径由集成测试覆盖

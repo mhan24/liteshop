@@ -8,7 +8,7 @@ export default function AdminLoginPage() {
   return (
     <div className="mx-auto max-w-sm space-y-6 py-16">
       <h1 className="text-center font-serif text-2xl font-semibold tracking-tight">管理登录</h1>
-      <LoginForm adminPath={env.ADMIN_PATH.replace(/\/+$/, "")} />
+      <LoginForm adminPath={env.ADMIN_PATH} />
     </div>
   );
 }

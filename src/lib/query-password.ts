@@ -28,15 +28,24 @@ export async function hashQueryPassword(plain: string): Promise<string> {
   return hash(plain, ARGON2_OPTS);
 }
 
-/** 常量时间失败：无论输入格式如何都执行一次验证开销，避免按耗时枚举 */
-export async function verifyQueryPassword(hashStr: string, plain: string): Promise<boolean> {
-  if (!/^[2-9A-Z]{8}$/.test(plain)) {
-    // 仍执行一次 dummy 校验，抹平时间差
-    await verify(hashStr, "2AAAAAAA").catch(() => false);
-    return false;
-  }
+let dummyHash: Promise<string> | null = null;
+/** 订单不存在时用于抹平耗时的哈希（进程内惰性生成一次） */
+function getDummyHash(): Promise<string> {
+  return (dummyHash ??= hash("not-a-real-query-password", ARGON2_OPTS));
+}
+
+/**
+ * 校验查单密码。hashStr 为 null（订单不存在/邮箱不符）时仍执行一次同等开销的
+ * Argon2 校验再返回 false——否则「订单号 + 邮箱」是否匹配可以按响应耗时枚举。
+ * 输入大小写与首尾空白不敏感。
+ */
+export async function verifyQueryPassword(hashStr: string | null, input: string): Promise<boolean> {
+  const plain = input.trim().toUpperCase();
+  const target = hashStr ?? (await getDummyHash());
+  const wellFormed = /^[2-9A-Z]{8}$/.test(plain);
   try {
-    return await verify(hashStr, plain);
+    const ok = await verify(target, wellFormed ? plain : "2AAAAAAA");
+    return ok && wellFormed && hashStr !== null;
   } catch {
     return false;
   }

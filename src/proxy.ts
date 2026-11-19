@@ -1,24 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { normalizeAdminPath, resolveAdminRoute } from "@/lib/admin-path";
 
-/**
- * 后台入口伪装：仅允许通过 ADMIN_PATH（默认 /admin）访问后台；
- * 其它请求原样放行。直接访问 /admin（当 ADMIN_PATH 改为其它值时）返回 404，
- * 防止扫描器发现后台入口。
- */
+/** 后台入口伪装（规则见 lib/admin-path） */
 export function proxy(request: NextRequest) {
-  const adminPath = (process.env.ADMIN_PATH ?? "/admin").replace(/\/+$/, "") || "/admin";
-  const { pathname } = request.nextUrl;
-
-  const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
-  if (!isAdminRoute) return NextResponse.next();
-
-  if (adminPath !== "/admin" && (pathname === adminPath || pathname.startsWith(`${adminPath}/`))) {
-    return NextResponse.rewrite(new URL(pathname.slice(adminPath.length) || "/admin", request.url));
-  }
-  if (adminPath === "/admin") return NextResponse.next();
-  return new NextResponse("not found", { status: 404 });
+  const decision = resolveAdminRoute(request.nextUrl.pathname, normalizeAdminPath(process.env.ADMIN_PATH));
+  if (decision.kind === "pass") return NextResponse.next();
+  if (decision.kind === "not-found") return new NextResponse("not found", { status: 404 });
+  const url = request.nextUrl.clone();
+  url.pathname = decision.to;
+  return NextResponse.rewrite(url);
 }
 
 export const config = {
-  matcher: ["/admin", "/admin/:path*", "/manage", "/manage/:path*", "/console", "/console/:path*"],
+  // ADMIN_PATH 是运行时配置，matcher 必须静态：覆盖全部页面路由，只排除 API 与静态资源
+  matcher: ["/((?!api/|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)"],
 };

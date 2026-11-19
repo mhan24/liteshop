@@ -6,14 +6,14 @@ import { logoutAction } from "@/actions/admin";
 /** 后台布局守卫：未登录一律跳登录页（/admin/login，经 ADMIN_PATH 伪装） */
 export default async function AdminPanelLayout({ children }: { children: React.ReactNode }) {
   const session = await getAdminSession();
-  if (!session) redirect(`${env.ADMIN_PATH.replace(/\/+$/, "")}/login`);
+  if (!session) redirect(`${env.ADMIN_PATH}/login`);
 
   async function logout() {
     "use server";
     await logoutAction();
   }
 
-  const base = env.ADMIN_PATH.replace(/\/+$/, "");
+  const base = env.ADMIN_PATH;
   const nav = [
     [base, "概览"],
     [`${base}/orders`, "订单"],

@@ -1,6 +1,6 @@
 import { normalizeHttpUrl } from "@/lib/http-url";
 import { litepaySign, parseJsonObject, safeEqualHex } from "@/lib/litepay-sign";
-import { SITE_CURRENCY, toMinorUnits } from "@/lib/money";
+import { minorToNumber, SITE_CURRENCY, toMinorUnits } from "@/lib/money";
 import { decryptSecret, isEncryptedSecret } from "@/lib/secret-box";
 import { getSetting, SETTING_KEYS } from "@/server/settings";
 import type {
@@ -10,7 +10,6 @@ import type {
   NotifyVerification,
   PaymentAdapter,
 } from "./types";
-import { fiatAmountForGateway } from "./types";
 
 /**
  * LitePay 收银台适配器（BEpusdt 兼容 JSON 接口，mhan24/litepay）。
@@ -31,8 +30,6 @@ import { fiatAmountForGateway } from "./types";
  */
 
 export const LITEPAY_CHANNEL = "litepay" as const;
-/** 网关回调本店的固定地址（site_url 之后的部分） */
-export const LITEPAY_WEBHOOK_PATH = "/api/webhooks/litepay";
 
 export const MIN_TIMEOUT_SECONDS = 120;
 export const MAX_TIMEOUT_SECONDS = 86_400;
@@ -147,7 +144,7 @@ export const litepayAdapter: PaymentAdapter = {
       order_id: input.orderNo,
       notify_url: input.notifyUrl,
       redirect_url: input.redirectUrl,
-      amount: fiatAmountForGateway(input.amountCents),
+      amount: minorToNumber(input.amountCents),
       fiat: SITE_CURRENCY,
       name: input.subject,
       timeout: normalizeTimeout(gateway.timeoutSeconds),
