@@ -14,7 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
       default: `${siteName} · 数字卡密商店`,
       template: `%s · ${siteName}`,
     },
-    description: "数字卡密商店：付款确认后卡密自动发放，并发送到下单邮箱；凭订单号、邮箱与查单密码可再次查看。",
+    description: "数字卡密商店，付款确认后自动发卡并同步发送至下单邮箱，随时凭订单号、邮箱和查单密码查询。",
     metadataBase: new URL(process.env.SITE_URL ?? "http://localhost:3000"),
     openGraph: {
       type: "website",

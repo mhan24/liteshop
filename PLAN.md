@@ -10,7 +10,7 @@
 
 - 商品（分类、搜索、库存实时展示）、购物车、游客下单（无需注册）
 - 单一支付网关：LitePay 收银台（BEpusdt 兼容 JSON 接口），USDT / USDC 付款
-- 交付：支付确认后数据库事务内原子发卡，页面即时展示 + 邮件同步
+- 交付：支付确认后在数据库事务内原子发卡，同步发送邮件，并可在「订单查询」页凭三因子查看
 - 订单查询：订单号 + 下单邮箱 + 每单独立查单密码，三因子
 - 管理后台：商品/分类/卡密/订单/站点设置/支付网关配置、审计日志、登录限速、入口伪装
 - SEO：商品页 ISR + JSON-LD、sitemap、robots、canonical / OG；订单、支付、后台全部 noindex
@@ -26,15 +26,15 @@
 
 | 模块 | 选型 | 版本 |
 |---|---|---|
-| 框架 | Next.js App Router（standalone 输出） | 16.4.0 |
-| UI | React 19 + Tailwind CSS v4（无 UI 运行时依赖） | react 19.3.0 |
+| 框架 | Next.js App Router（standalone 输出） | 16.4.6 |
+| UI | React 19 + Tailwind CSS v4（无 UI 运行时依赖） | react 19.3.1 |
 | 语言 | TypeScript strict + noUncheckedIndexedAccess | 5.x |
 | ORM / DB | Drizzle ORM + node-postgres | 0.45.4 / PostgreSQL 18 |
 | 校验 | Zod | 4.x |
 | 密码 | @node-rs/argon2（查单密码）；node:crypto scrypt（管理员密码） | |
 | 邮件 | nodemailer | 10.x |
 | 测试 | Vitest（单元 + 集成 + 并发） | 5.x |
-| 部署 | Docker Compose：app + db + caddy + backup + cron | |
+| 部署 | Docker Compose：app + db + caddy + backup + offsite + cron | |
 
 ## 3. 数据模型（src/db/schema.ts）
 

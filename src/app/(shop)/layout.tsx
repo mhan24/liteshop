@@ -33,7 +33,7 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
               </Link>
               <CartLink />
               <Link href="/orders/query" className="transition-colors hover:text-fg">
-                查订单
+                订单查询
               </Link>
             </nav>
           </div>

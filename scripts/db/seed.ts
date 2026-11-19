@@ -34,7 +34,7 @@ async function main() {
     if (catRows.length === 0) {
       catRows = await db
         .insert(categories)
-        .values({ slug: "demo", name: "演示分类", description: "种子数据演示", sortOrder: 0 })
+        .values({ slug: "demo", name: "演示分类", description: "用于本地开发与功能演示的商品分类。", sortOrder: 0 })
         .returning();
     }
     const category = catRows[0]!;
@@ -53,7 +53,7 @@ async function main() {
             categoryId: category.id,
             slug: dp.slug,
             name: dp.name,
-            description: "演示商品：付款确认后自动发放卡密。",
+            description: "本地演示商品，付款确认后自动发放测试卡密。",
             priceCents: dp.priceCents,
             status: "on",
           })

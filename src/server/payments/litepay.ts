@@ -117,7 +117,7 @@ export const litepayAdapter: PaymentAdapter = {
 
   async createPayment(gateway, input: CreatePaymentInput): Promise<CreateOutcome> {
     if (!gateway.apiBase || !gateway.token) {
-      return { kind: "rejected", message: "LitePay 未配置网关地址或接口令牌" };
+      return { kind: "rejected", message: "LitePay 网关地址或接口令牌未配置" };
     }
     if (input.amountCents < MIN_AMOUNT_CENTS || input.amountCents > MAX_AMOUNT_CENTS) {
       return {
@@ -150,7 +150,7 @@ export const litepayAdapter: PaymentAdapter = {
     } catch (err) {
       return {
         kind: "unknown",
-        message: `创建订单请求失败: ${err instanceof Error ? err.message : String(err)}`,
+        message: `创建订单请求失败：${err instanceof Error ? err.message : String(err)}`,
       };
     }
 
@@ -160,7 +160,7 @@ export const litepayAdapter: PaymentAdapter = {
       const ambiguous = res.status >= 500 || res.status === 408 || res.status === 429;
       return {
         kind: ambiguous ? "unknown" : "rejected",
-        message: `创建订单 HTTP ${res.status}: ${text.slice(0, 200)}`,
+        message: `创建订单失败（HTTP ${res.status}）：${text.slice(0, 200)}`,
       };
     }
 
@@ -183,12 +183,12 @@ export const litepayAdapter: PaymentAdapter = {
     if (!tradeId || !rawUrl) {
       return {
         kind: "unknown",
-        message: `创建订单响应不完整: ${parsed.message ?? JSON.stringify(parsed).slice(0, 200)}`,
+        message: `创建订单响应不完整：${parsed.message ?? JSON.stringify(parsed).slice(0, 200)}`,
       };
     }
     const paymentUrl = normalizeHttpUrl(rawUrl);
     if (!paymentUrl) {
-      return { kind: "unknown", message: "收银台地址协议或格式不安全，订单保留待对账" };
+      return { kind: "unknown", message: "收银台地址协议或格式不安全，订单保留待核实" };
     }
     // expiration_time 是「剩余秒数」而非 Unix 时间戳
     const expSeconds =
@@ -260,11 +260,11 @@ export const litepayAdapter: PaymentAdapter = {
       if (res.ok && typeof json?.status_code === "number" && json.status_code < 400) {
         return { ok: true, message: "网关已受理撤销" };
       }
-      return { ok: false, message: `网关未受理撤销: HTTP ${res.status} ${json?.message ?? ""}`.trim() };
+      return { ok: false, message: `网关未受理撤销：HTTP ${res.status} ${json?.message ?? ""}`.trim() };
     } catch (err) {
       return {
         ok: false,
-        message: `撤销请求失败: ${err instanceof Error ? err.message : String(err)}`,
+        message: `撤销请求失败：${err instanceof Error ? err.message : String(err)}`,
       };
     }
   },

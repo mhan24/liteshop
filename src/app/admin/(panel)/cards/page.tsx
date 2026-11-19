@@ -38,7 +38,7 @@ export default async function AdminCardsPage() {
         </CardHeader>
         <CardContent>
           {productRows.length === 0 ? (
-            <p className="text-sm text-muted">还没有商品，先去「商品」创建。</p>
+            <p className="text-sm text-muted">暂无商品，请先前往「商品」页创建。</p>
           ) : (
             <AdminForm action={importCardsAction} csrf={csrf} submitLabel="导入" className="space-y-3">
               <div className="space-y-1.5">
@@ -70,7 +70,7 @@ export default async function AdminCardsPage() {
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-sm font-semibold">各商品库存</h2>
           <span className="text-xs text-faint">
-            可售低于 <span className="data text-muted">{threshold}</span> 张标为待补货（阈值在「设置」中修改）
+            可售低于 <span className="data text-muted">{threshold}</span> 张时标记为待补货（可在「设置」中调整阈值）
           </span>
         </div>
         <div className="overflow-x-auto rounded-md border border-line bg-surface">
@@ -117,7 +117,7 @@ export default async function AdminCardsPage() {
         <h2 className="text-sm font-semibold">最近 100 条卡密</h2>
         <ul className="divide-y divide-line rounded-md border border-line bg-surface">
           {recent.length === 0 ? (
-            <li className="p-4 text-sm text-muted">还没有卡密。</li>
+            <li className="p-4 text-sm text-muted">暂无卡密</li>
           ) : (
             recent.map((c) => (
               <li key={c.id} className="flex items-center justify-between gap-3 p-3 text-sm">
@@ -129,7 +129,7 @@ export default async function AdminCardsPage() {
                   </p>
                 </div>
                 {c.status === "available" ? (
-                  <AdminForm action={deleteCardAction} csrf={csrf} submitLabel="删除" variant="danger" inline confirmText="删除这张卡密？">
+                  <AdminForm action={deleteCardAction} csrf={csrf} submitLabel="删除" variant="danger" inline confirmText="确认删除这条可售卡密？此操作不可恢复。">
                     <input type="hidden" name="id" value={c.id} />
                   </AdminForm>
                 ) : null}

@@ -28,7 +28,7 @@ export function AddToCart({
         <Button type="button" disabled className="w-full">
           暂时缺货
         </Button>
-        <p className="text-xs leading-5 text-muted">卡密用完会立即显示缺货，补货后即可下单。</p>
+        <p className="text-xs leading-5 text-muted">当前库存已售罄，补货后即可恢复下单。</p>
       </div>
     );
   }

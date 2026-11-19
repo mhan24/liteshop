@@ -12,7 +12,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (!category) return { title: "分类不存在" };
   return {
     title: category.name,
-    description: category.description || `${category.name} 分类下的卡密商品`,
+    description: category.description || `${category.name} 分类下的数字卡密商品`,
     alternates: { canonical: `/category/${category.slug}` },
   };
 }
@@ -35,9 +35,9 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
 
       {items.length === 0 ? (
         <div className="space-y-2 rounded-md border border-line bg-surface px-6 py-16 text-center">
-          <p className="text-lg">这个分类还没有商品</p>
+          <p className="text-lg">该分类暂无商品</p>
           <p className="text-sm text-muted">
-            先看看全部商品，
+            可以先浏览全部商品，
             <Link href="/" className="text-fg underline decoration-line underline-offset-4 hover:decoration-fg">
               返回首页
             </Link>

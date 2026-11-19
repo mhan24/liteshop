@@ -84,7 +84,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
   const email = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(email) || email.length > 200) {
-    throw new OrderError("INVALID_INPUT", "请输入有效的联系邮箱");
+    throw new OrderError("INVALID_INPUT", "请输入有效的下单邮箱");
   }
   // 同一 slug 合并为一行（否则同一商品会分两次锁卡、两段交付）
   const merged = new Map<string, number>();
@@ -96,14 +96,14 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   }
   const items = [...merged].map(([slug, quantity]) => ({ slug, quantity }));
   if (items.length === 0 || items.length > 20) {
-    throw new OrderError("INVALID_INPUT", "购物车为空或商品种类过多");
+    throw new OrderError("INVALID_INPUT", "购物车为空或商品种类超过上限（最多 20 种）");
   }
   if (items.some((i) => i.quantity < 1 || i.quantity > 99)) {
-    throw new OrderError("INVALID_INPUT", "单件商品数量需在 1-99 之间");
+    throw new OrderError("INVALID_INPUT", "单件商品购买数量需在 1–99 之间");
   }
   // 网关没配置就不要建单：否则会留下占着卡密却无法付款的僵尸订单
   if (!(await getActiveGateway())) {
-    throw new OrderError("NO_PAYMENT_CHANNEL", "支付网关未配置或已停用，请稍后再试或联系客服");
+    throw new OrderError("NO_PAYMENT_CHANNEL", "收款通道暂不可用，请稍后再试或联系客服");
   }
   const note = input.note?.trim().slice(0, 500) ?? "";
   // 事务外读配置：事务内不得再向连接池借连接（见 notifyLowStockCrossings）
@@ -186,7 +186,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
   if (outcome.kind === "rejected") {
     await closeOrderInternal(created.orderId, created.orderNo, outcome.message);
-    throw new OrderError("PAYMENT_FAILED", `支付网关建单失败: ${outcome.message}`);
+    throw new OrderError("PAYMENT_FAILED", `创建支付失败：${outcome.message}`);
   }
   if (outcome.kind === "unknown") {
     await markReconciling(created.orderId, outcome.message);
@@ -684,7 +684,7 @@ export async function cancelPendingOrder(
   password: string
 ): Promise<{ ok: boolean; message: string }> {
   const order = await authenticateBuyer(orderNo, email, password);
-  if (!order) return { ok: false, message: "订单不存在，或邮箱 / 查单密码不正确" };
+  if (!order) return { ok: false, message: "订单不存在，或下单邮箱与查单密码不匹配" };
   const result = await db.transaction(async (tx) => {
     const locked = await lockOrderByNo(tx, order.orderNo);
     if (locked?.status !== "pending") return { closed: false as const };
@@ -702,7 +702,7 @@ export async function resumePayment(
   password: string
 ): Promise<{ ok: boolean; message: string; data?: { paymentUrl: string | null } }> {
   const order = await authenticateBuyer(orderNo, email, password);
-  if (!order) return { ok: false, message: "订单不存在，或邮箱 / 查单密码不正确" };
+  if (!order) return { ok: false, message: "订单不存在，或下单邮箱与查单密码不匹配" };
   if (order.status !== "pending") return { ok: false, message: "订单不在待支付状态" };
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
   if (items.length === 0) return { ok: false, message: "订单缺少商品明细" };
@@ -713,14 +713,14 @@ export async function resumePayment(
     subject: items.map((i) => i.productName).join(" + "),
   });
   if (outcome.kind === "created") {
-    return { ok: true, message: "已创建新的支付", data: { paymentUrl: outcome.payment.paymentUrl } };
+    return { ok: true, message: "已生成新的支付链接", data: { paymentUrl: outcome.payment.paymentUrl } };
   }
   if (outcome.kind === "rejected") {
     await closeOrderInternal(order.id, order.orderNo, outcome.message);
-    return { ok: false, message: `支付网关建单失败: ${outcome.message}` };
+    return { ok: false, message: `创建支付失败：${outcome.message}` };
   }
   await markReconciling(order.id, outcome.message);
-  return { ok: false, message: "支付网关响应超时，订单已保留待对账" };
+  return { ok: false, message: "收银台响应超时，订单已保留待核实，请勿重复付款" };
 }
 
 /* ================= 管理员操作 ================= */
@@ -733,10 +733,10 @@ export async function adminCloseOrder(
     const order = await lockOrderByNo(tx, orderNo);
     if (!order) return { ok: false as const, message: "订单不存在", ref: null };
     if (order.status === "reconciling") {
-      return { ok: false as const, message: "待对账订单请先在网关后台核对，再执行此操作", ref: null };
+      return { ok: false as const, message: "待核实订单请先在网关后台核对到账情况，再执行操作", ref: null };
     }
     if (order.status !== "pending") {
-      return { ok: false as const, message: `订单状态 ${order.status} 不能关闭`, ref: null };
+      return { ok: false as const, message: "订单当前状态不可关闭", ref: null };
     }
     const ref = await closePendingInTx(tx, order);
     await tx.insert(auditLogs).values({ actor, action: "order.close", detail: orderNo });
@@ -755,12 +755,12 @@ export async function resolveReconcilingAsNotCreated(
     const rows = await tx.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1).for("update");
     const order = rows[0];
     if (!order) return { ok: false, message: "订单不存在" };
-    if (order.status !== "reconciling") return { ok: false, message: `订单状态 ${order.status} 无需此操作` };
+    if (order.status !== "reconciling") return { ok: false, message: "当前订单状态无需核实" };
     assertTransition(order.status, "closed");
     await tx.update(orders).set({ status: "closed", updatedAt: new Date() }).where(eq(orders.id, order.id));
     await releaseStock(tx, order.id);
     await tx.insert(auditLogs).values({ actor, action: "order.reconcile_close", detail: orderNo });
-    return { ok: true, message: "已确认网关未建单，订单关闭并释放卡密" };
+    return { ok: true, message: "已确认网关无此交易，订单已关闭并退回卡密" };
   });
 }
 
@@ -773,7 +773,7 @@ export async function resolveReconcilingAsPaid(
     const rows = await tx.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1).for("update");
     const order = rows[0];
     if (!order) return { ok: false, message: "订单不存在" };
-    if (order.status !== "reconciling") return { ok: false, message: `订单状态 ${order.status} 无需此操作` };
+    if (order.status !== "reconciling") return { ok: false, message: "当前订单状态无需核实" };
     assertTransition(order.status, "paid");
     await tx
       .update(orders)
@@ -795,7 +795,7 @@ export async function resolveReconcilingAsPaid(
     if (!done) await notifyPaidUndelivered(tx, orderNo);
     return done
       ? { ok: true, message: "已确认到账并发放卡密" }
-      : { ok: true, message: "已确认到账，但卡密不足，请补货后重试发放" };
+      : { ok: true, message: "已确认到账，但可用卡密不足，请补货后点击「重试发卡」" };
   });
 }
 
@@ -805,12 +805,12 @@ export async function retryDelivery(orderNo: string, actor: string): Promise<{ o
     const rows = await tx.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1).for("update");
     const order = rows[0];
     if (!order) return { ok: false, message: "订单不存在" };
-    if (order.status !== "paid") return { ok: false, message: `订单状态 ${order.status} 无需重试发卡` };
+    if (order.status !== "paid") return { ok: false, message: "当前订单状态无需重试发卡" };
     const done = await deliverOrder(tx, order.id);
     await tx.insert(auditLogs).values({ actor, action: "order.retry_delivery", detail: orderNo });
     return done
-      ? { ok: true, message: "卡密已发放，订单完成" }
-      : { ok: false, message: "卡密数量不足，请先导入卡密再重试" };
+      ? { ok: true, message: "卡密已发放，订单已完成" }
+      : { ok: false, message: "可用卡密不足，请先导入卡密再重试" };
   });
 }
 

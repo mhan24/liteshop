@@ -67,13 +67,13 @@ export function CheckoutClient({
         <div className="space-y-3 rounded-sm border border-tint-yellow-fg/25 bg-tint-yellow p-4">
           <p className="flex items-center gap-2 text-sm font-medium text-tint-yellow-fg">
             <span aria-hidden className="live-dot" />
-            查单密码 · 只显示这一次
+            查单密码 · 仅显示一次
           </p>
           <p className="data select-all rounded-sm border border-line bg-sunken px-4 py-3 text-center text-2xl tracking-[0.3em] text-fg">
             {d.queryPassword}
           </p>
           <p className="text-xs leading-5 text-tint-yellow-fg">
-            和订单号一起保存。之后查询订单、找回卡密都要用到它，遗失只能联系客服核对。
+            请连同订单号一并保存。后续查询订单与查看卡密均需使用，遗失后仅能联系客服核对。
           </p>
           <CopyButton
             text={`订单号：${d.orderNo}\n查单密码：${d.queryPassword}`}
@@ -87,15 +87,15 @@ export function CheckoutClient({
             href={d.paymentUrl}
             className="inline-flex h-10 w-full items-center justify-center rounded-sm bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
           >
-            打开收银台付款
+            前往收银台付款
           </a>
         ) : (
           <p className="rounded-sm border border-tint-yellow-fg/25 bg-tint-yellow px-4 py-3 text-xs leading-5 text-tint-yellow-fg">
-            收银台响应超时，订单已保留待核实。请先不要重复下单，稍后到订单查询页确认状态。
+            收银台响应超时，订单已保留并等待核实。请勿重复下单，稍后可在「订单查询」查看最新状态。
           </p>
         )}
 
-        <p className="text-xs leading-5 text-faint">购物车已清空。付款完成前可以随时在「查订单」里找到这笔订单。</p>
+        <p className="text-xs leading-5 text-faint">购物车已清空。后续可随时在「订单查询」查看订单状态与卡密。</p>
       </div>
     );
   }
@@ -103,9 +103,9 @@ export function CheckoutClient({
   if (items.length === 0) {
     return (
       <div className="space-y-2 rounded-md border border-line bg-surface px-6 py-16 text-center">
-        <p className="text-lg">购物车是空的</p>
+        <p className="text-lg">购物车为空</p>
         <p className="text-sm text-muted">
-          先挑商品再结算，
+          请先挑选商品，再前往结算，
           <Link href="/" className="text-fg underline decoration-line underline-offset-4 hover:decoration-fg">
             返回商品列表
           </Link>
@@ -157,7 +157,7 @@ export function CheckoutClient({
           <div className="space-y-1.5">
             <Label htmlFor="co-email">下单邮箱</Label>
             <Input id="co-email" name="email" type="email" required placeholder="you@example.com" />
-            <p className="text-xs leading-5 text-muted">卡密会同时发到这个邮箱，请填写常用地址。</p>
+            <p className="text-xs leading-5 text-muted">卡密将自动发送到此邮箱，请确保填写准确。</p>
           </div>
 
           <div className="space-y-1.5">
@@ -167,7 +167,7 @@ export function CheckoutClient({
               name="note"
               maxLength={500}
               rows={2}
-              placeholder="需要补充的说明写在这里"
+              placeholder="如有需要补充的信息可填在此处"
             />
           </div>
 
@@ -186,14 +186,14 @@ export function CheckoutClient({
               <TurnstileWidget key={verifyKey} siteKey={human.siteKey} onToken={setCfToken} />
               <input type="hidden" name="cfToken" value={cfToken} />
               {human.fallback ? (
-                <p className="text-xs text-muted">验证组件加载失败时仍可提交，下单频率限制仍然生效。</p>
+                <p className="text-xs text-muted">如验证组件加载失败，仍可直接提交（下单频率限制保持生效）。</p>
               ) : null}
             </div>
           ) : null}
 
           {!gatewayReady ? (
             <p className="rounded-sm border border-tint-red-fg/25 bg-tint-red px-3 py-2 text-sm text-tint-red-fg">
-              支付网关尚未配置，暂时无法下单。请联系客服或稍后再试。
+              收款通道尚未就绪，暂时无法下单，请联系客服或稍后再试。
             </p>
           ) : null}
 
@@ -201,7 +201,7 @@ export function CheckoutClient({
             {pending ? "正在创建订单…" : `提交订单 · ${formatMoney(total)}`}
           </Button>
           <p className="text-center text-xs leading-5 text-muted">
-            提交后跳转 LitePay 收银台，可用 USDT / USDC 付款。数字商品一经发放不支持退款。
+            提交后会生成订单号与查单密码，保存后前往 LitePay 收银台付款（支持 USDT / USDC）。数字商品一经发放不支持退款。
           </p>
         </div>
       </form>

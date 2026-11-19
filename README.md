@@ -2,17 +2,17 @@
 
 Next.js 16 (App Router) · React 19 · TypeScript Strict · Tailwind CSS v4 · Drizzle ORM · PostgreSQL · Docker Compose + Caddy
 
-只卖数字卡密：游客下单 → LitePay 收银台付款 → 事务内原子发卡 → 页面展示 + 邮件同步 → 凭订单号/邮箱/查单密码查询。没有买家账户。
+只卖数字卡密：游客下单 → LitePay 收银台付款 → 事务内原子发卡 → 同步发送邮件，并可在「订单查询」凭订单号、邮箱和查单密码随时查看。没有买家账户。
 
 ## 功能
 
-- **商城**：分类与搜索、商品详情（库存实时）、购物车、游客下单
-- **支付**：单一 LitePay 网关（BEpusdt 兼容接口），验签、金额核对、回调幂等、超时对账（reconciling）、延迟到账人工核对
-- **交付**：支付确认后事务内原子发卡（`FOR UPDATE SKIP LOCKED`，一卡不两卖），交付邮件自动发送并重试
-- **订单查询**：每单独立查单密码（Argon2id），订单号 + 邮箱 + 密码三因子，限流防爆破
-- **后台**：Session 认证（scrypt + HMAC 会话 + CSRF）、商品/分类/卡密/订单/站点设置/支付网关、审计日志
-- **SEO**：商品页 ISR + JSON-LD、sitemap、robots、canonical / OG；订单、支付、后台全部 noindex
-- **安全**：服务端金额计算、网关令牌 / SMTP 密码 / Turnstile Secret 均 AES-GCM 加密存储、CSP + HSTS、登录/下单/查询限流、后台入口伪装（ADMIN_PATH）
+- **商城**：分类与搜索、商品详情（实时库存）、购物车、游客下单
+- **支付**：单一 LitePay 网关（兼容 BEpusdt 接口），支持验签、金额核对、回调幂等、超时待核实（reconciling）与延迟到账人工核对
+- **交付**：支付确认后在事务内原子发卡（`FOR UPDATE SKIP LOCKED`，避免一卡多发），交付邮件自动发送并支持重试
+- **订单查询**：每单独立查单密码（Argon2id），订单号 + 邮箱 + 密码三因子校验，并带限流防爆破
+- **后台**：Session 认证（scrypt + HMAC 会话 + CSRF）、商品/分类/卡密/订单/站点设置/支付网关配置及审计日志
+- **SEO**：商品页 ISR + JSON-LD、sitemap、robots、canonical / OG；订单、支付、后台页面全部 noindex
+- **安全**：服务端计算金额、网关令牌 / SMTP 密码 / Turnstile Secret / Telegram Bot Token 均经 AES-GCM 加密存储、CSP + HSTS、登录/下单/查询限流、后台入口伪装（ADMIN_PATH）
 
 ## 快速开始（开发）
 
@@ -34,7 +34,7 @@ npm run db:seed        # 创建管理员 admin/admin12345 + 演示商品（仅�
 npm run dev            # http://localhost:3000（后台 /admin）
 ```
 
-本地把 `PAYMENT_DRIVER` 设为 `mock` 即可不接真实网关：模拟收银台在 `/pay/mock`，点一下就能跑通「下单 → 回调 → 发卡」全链路。
+本地将 `PAYMENT_DRIVER` 设为 `mock` 即可不接真实网关：模拟收银台位于 `/pay/mock`，点击按钮即可验证「下单 → 回调 → 发卡」全链路。
 
 ## 测试
 
@@ -56,41 +56,40 @@ cp .env.example .env
 # 填写：SITE_URL / DOMAIN / PAY_DOMAIN / AUTH_SECRET / ADMIN_PASSWORD_HASH（npm run hash-password -- <密码>）/ POSTGRES_PASSWORD / CRON_SECRET
 
 docker compose up -d --build
-# app 容器启动前自动执行数据库迁移（含破坏性的 0001）；Caddy 自动签发 HTTPS
+# app 容器启动前自动执行数据库迁移；Caddy 自动签发 HTTPS
 # 数据库备份：backup 服务每日 pg_dump 至 ./backups（保留 14 份）
 ```
 
-上线后在后台「设置 · 支付网关」填 LitePay 的网关地址与接口令牌，并把
-`https://<站点>/api/webhooks/litepay` 填到网关的商店设置里。
+上线后在后台「设置 · 支付网关」填写 LitePay 网关地址与接口令牌，并将
+`https://<站点>/api/webhooks/litepay` 填到网关后台的商店设置中。
 
 ### 日常部署
 
-镜像由 CI 构建：推送到 `main` 后，测试全部通过才会在 arm64 机器上构建镜像，推到
-`ghcr.io/mhan24/liteshop:<提交号>`。部署脚本只负责让服务器拉取并切换，本机不需要 Docker：
+镜像由 CI 构建：推送到 `main` 后，测试全部通过才会在 arm64 机器上构建镜像，并推送至
+`ghcr.io/mhan24/liteshop:<提交号>`。部署脚本负责让服务器拉取镜像并切换，本机不需要 Docker：
 
 ```bash
-scripts/deploy.sh             # 部署 origin/main 最新提交（CI 镜像需已构建完）
+scripts/deploy.sh             # 部署 origin/main 最新提交（需等 CI 镜像构建完成）
 scripts/deploy.sh <提交号>     # 部署指定版本；回滚也用它
 HATOBA_HOST=ORACLE scripts/deploy.sh   # 远程命令改经 Hatoba 执行（凭据留在 Hatoba，不用本机 SSH 密钥）
 ```
 
-脚本会依次：确认镜像存在 → 校验服务器 `.env` 指纹与 `DOMAIN` → 暂存目录校验新编排 →
-备份数据库 → 拉镜像 → 切换并滚动更新 → 健康检查 → 复核 `.env` 指纹未变。
+脚本会依次执行：确认镜像存在 → 校验服务器 `.env` 指纹与 `DOMAIN` → 在暂存目录校验新编排 →
+备份数据库 → 拉取镜像 → 切换并滚动更新 → 健康检查 → 复核 `.env` 指纹未变。
 
 注意：回滚镜像不包含数据库回滚。含破坏性迁移的版本（如 0002 配置表重构）回滚时，
-还要同时恢复部署前的 `backups/pre-deploy-*.dump`。
+还需同时恢复部署前的 `backups/pre-deploy-*.dump`。
 
 ### 备份
 
-- `backup`：每天备份到 `./backups`（保留 14 份），每份做完整性检查；每周日完整恢复到临时库、
-  核对订单/卡密数量（恢复演练）。最近一次结果见 `backups/status.json`。
-- `offsite`：每天把备份**加密**上传到异地存储（R2 / S3 / B2 / SFTP 等，rclone 支持的都行），远端保留 30 天。
-  配置：把 `.env.offsite.example` 复制为服务器上的 `/opt/liteshop/.env.offsite` 并填写；未配置时只打印提醒。
+- `backup`：每天备份至 `./backups`（保留 14 份），每份做完整性检查；每周日完整恢复到临时库并核对订单与卡密数量（恢复演练）。最近一次结果见 `backups/status.json`。
+- `offsite`：每天将备份**加密**上传到异地存储（支持 R2 / S3 / B2 / SFTP 等 rclone 兼容后端），远端保留 30 天。
+  配置方式：将 `.env.offsite.example` 复制为服务器上的 `/opt/liteshop/.env.offsite` 并填写；未配置时仅打印提醒。
 
 ### 运营通知
 
-后台「设置 · 运营通知」填 Telegram Bot Token 与 Chat ID 后，订单待核实、延迟到账、
-付款后卡密不足、库存跌破阈值或售罄时会推送消息。
+在后台「设置 · 运营通知」填写 Telegram Bot Token 与 Chat ID 后，订单待核实、延迟到账、
+付款后卡密不足、库存低于阈值或售罄时会推送通知。
 
 架构：`app`（Next standalone，非 root）+ `db`（PostgreSQL 18，仅内网）+ `caddy`（边缘 TLS）+
 `backup` + `offsite` + `cron`（每分钟：过期清扫 / 邮件重投 / 通知投递 / 日志清理）。

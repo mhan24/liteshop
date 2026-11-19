@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const product = await getProductBySlug(slug);
   if (!product) return { title: "商品不存在" };
-  const description = product.description.slice(0, 150) || "卡密商品，付款确认后自动发放。";
+  const description = product.description.slice(0, 150) || "数字卡密商品，付款确认后自动发放。";
   return {
     title: product.name,
     description,
@@ -80,7 +80,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
               {product.name}
             </h1>
             <p className="eyebrow">
-              即时交付 · {product.inStock ? `库存 ${product.stock}` : "暂无库存"}
+              自动发货 · {product.inStock ? `库存 ${product.stock}` : "暂时缺货"}
             </p>
           </header>
 
@@ -94,16 +94,15 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
           {product.description ? (
             <div className="whitespace-pre-wrap text-sm leading-7 text-muted">{product.description}</div>
           ) : (
-            <p className="text-sm leading-7 text-muted">该商品暂未填写介绍，下单后按页面价格交付对应数量的卡密。</p>
+            <p className="text-sm leading-7 text-muted">该商品暂无详细介绍，付款确认后将按购买数量自动发放卡密。</p>
           )}
 
           <section className="space-y-4 border-t border-line pt-7">
             <h2 className="text-lg font-semibold tracking-[-0.01em]">交付方式</h2>
             <ul className="space-y-2.5 text-sm leading-6 text-muted">
-              <li>付款确认后自动发放卡密，不需要等人工处理。</li>
-              <li>完成页直接显示内容，同一份内容发送到下单邮箱。</li>
-              <li>订单与卡密可用订单号、下单邮箱和查单密码在「订单查询」再次查看。</li>
-              <li>数字商品一经发出无法收回，非质量问题不支持退款。</li>
+              <li>付款确认后自动发卡，无需人工处理。</li>
+              <li>卡密自动发送到下单邮箱，也可凭订单号、邮箱和查单密码在「订单查询」查看。</li>
+              <li>数字商品一经发出无法收回，非商品质量问题不支持退款。</li>
             </ul>
           </section>
         </section>
@@ -115,7 +114,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
                 <span className="data">{formatMoney(product.priceCents)}</span>
               </p>
               <p className="text-xs text-muted">
-                {product.inStock ? `当前可售 ${product.stock} 件` : "缺货，补货后即可下单"}
+                {product.inStock ? `当前可售 ${product.stock} 件` : "暂时缺货，补货后可下单"}
               </p>
             </div>
 
@@ -127,8 +126,8 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             />
 
             <div className="space-y-3 border-t border-line pt-5 text-xs leading-5 text-muted">
-              <p>支持 USDT / USDC 付款，走 LitePay 收银台，订单以美元计价。</p>
-              <p>下单后会显示一次查单密码，请连同订单号一起保存。</p>
+              <p>通过 LitePay 收银台支持 USDT / USDC 付款，订单以美元（USD）计价。</p>
+              <p>查单密码仅在下单后显示一次，请连同订单号一并保存。</p>
             </div>
           </div>
         </aside>

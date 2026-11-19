@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { env } from "@/lib/env";
 import { LoginForm } from "@/components/admin/login-form";
 
-export const metadata: Metadata = { title: "管理登录", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: "管理后台登录", robots: { index: false, follow: false } };
 
 export default function AdminLoginPage() {
   return (
@@ -13,7 +13,7 @@ export default function AdminLoginPage() {
           <span aria-hidden className="data mx-auto grid size-9 place-items-center rounded-sm border border-accent/40 bg-accent/10 text-sm text-accent">
             A
           </span>
-          <h1 className="text-xl font-semibold tracking-tight">管理登录</h1>
+          <h1 className="text-xl font-semibold tracking-tight">管理后台登录</h1>
           <p className="text-[13px] text-faint">连续失败 5 次将锁定 15 分钟</p>
         </div>
         <LoginForm adminPath={env.ADMIN_PATH} />

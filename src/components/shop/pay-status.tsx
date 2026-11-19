@@ -54,17 +54,17 @@ export function PayStatusActions({
           href={resumeState.data.paymentUrl}
           className="inline-flex h-10 w-full items-center justify-center rounded-sm bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
         >
-          打开新的收银台
+          前往新收银台付款
         </a>
       ) : null}
 
       <details className="faq-item rounded-sm border border-line px-4">
-        <summary>收银台打不开，或想取消订单</summary>
+        <summary>遇到支付问题或取消订单</summary>
         <div className="space-y-5 pb-4">
           <form action={resumeAction} className="space-y-3 border-t border-line pt-4">
             <input type="hidden" name="orderNo" value={orderNo} />
             <p className="text-xs leading-5 text-muted">
-              收银台过期或没打开时，验证邮箱与查单密码后可重新建一笔支付。旧交易会被作废，请不要再向旧交易付款。
+              如果收银台打不开或已过期，验证下单邮箱与查单密码后可重新发起支付。旧支付链接将同时作废，请勿再向旧交易付款。
             </p>
             <BuyerFields idPrefix="pay" />
             <Button type="submit" variant="outline" disabled={resumePending} className="w-full">
@@ -107,7 +107,7 @@ function BuyerFields({ idPrefix }: { idPrefix: string }) {
           name="password"
           required
           autoComplete="off"
-          placeholder="下单时显示的 8 位密码"
+          placeholder="下单后显示的 8 位密码"
           className="font-mono uppercase placeholder:font-sans placeholder:normal-case"
         />
       </div>

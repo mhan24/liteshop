@@ -49,7 +49,7 @@ export default async function AdminProductsPage() {
               <Input id="cat-name" name="name" required />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="cat-slug">Slug（可选）</Label>
+              <Label htmlFor="cat-slug">URL 标识（可选）</Label>
               <Input id="cat-slug" name="slug" placeholder="留空自动生成" />
             </div>
             <div className="space-y-1.5">
@@ -57,7 +57,7 @@ export default async function AdminProductsPage() {
               <Input id="cat-sort" name="sortOrder" type="number" defaultValue={0} min={0} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="cat-desc">描述</Label>
+              <Label htmlFor="cat-desc">分类说明</Label>
               <Input id="cat-desc" name="description" />
             </div>
           </AdminForm>
@@ -71,7 +71,7 @@ export default async function AdminProductsPage() {
                   <span>
                     {c.name} <span className="font-mono text-xs text-muted">/{c.slug}</span>
                   </span>
-                  <AdminForm action={deleteCategoryAction} csrf={csrf} submitLabel="删除" variant="danger" inline confirmText="删除该分类？其下商品会保留，但变为「无分类」。">
+                  <AdminForm action={deleteCategoryAction} csrf={csrf} submitLabel="删除" variant="danger" inline confirmText="确认删除该分类？分类下的商品会保留，并变为「无分类」。">
                     <input type="hidden" name="id" value={c.id} />
                   </AdminForm>
                 </li>
@@ -92,7 +92,7 @@ export default async function AdminProductsPage() {
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">全部商品</h2>
-        {items.length === 0 ? <p className="text-sm text-muted">还没有商品。</p> : null}
+        {items.length === 0 ? <p className="text-sm text-muted">暂无商品</p> : null}
         {items.map((p) => (
           <Card key={p.id}>
             <CardHeader>
@@ -121,7 +121,7 @@ export default async function AdminProductsPage() {
                   categoryId: p.categoryId,
                 }}
               />
-              <AdminForm action={deleteProductAction} csrf={csrf} submitLabel="删除商品" variant="danger" inline confirmText="删除该商品及其全部未售卡密？此操作不可恢复。">
+              <AdminForm action={deleteProductAction} csrf={csrf} submitLabel="删除商品" variant="danger" inline confirmText="确认删除该商品及其全部关联卡密？已完成订单的交付记录不受影响，此操作不可恢复。">
                 <input type="hidden" name="id" value={p.id} />
               </AdminForm>
             </CardContent>
@@ -163,8 +163,8 @@ function ProductFields<S extends { ok: boolean; message: string }>({
         <Input name="name" required defaultValue={initial?.name} />
       </div>
       <div className="space-y-1.5">
-        <Label>Slug（URL）</Label>
-        <Input name="slug" required pattern="[a-z0-9][a-z0-9-]+" defaultValue={initial?.slug} />
+        <Label>URL 标识（Slug）</Label>
+        <Input name="slug" required pattern="[a-z0-9][a-z0-9-]+" placeholder="仅小写字母、数字和短横线" defaultValue={initial?.slug} />
       </div>
       <div className="space-y-1.5">
         <Label>价格（美分，100 = $1.00）</Label>
@@ -189,16 +189,16 @@ function ProductFields<S extends { ok: boolean; message: string }>({
         </Select>
       </div>
       <div className="space-y-1.5">
-        <Label>图片 URL（可选）</Label>
+        <Label>图片链接（可选）</Label>
         <Input name="imageUrl" type="url" defaultValue={initial?.imageUrl} />
       </div>
       <div className="space-y-1.5 sm:col-span-2">
-        <Label>描述</Label>
+        <Label>商品介绍</Label>
         <Textarea name="description" rows={3} defaultValue={initial?.description} />
       </div>
       <div className="space-y-1.5 sm:col-span-2">
-        <Label>SEO 描述（可选，≤300 字）</Label>
-        <Input name="seoDescription" maxLength={300} defaultValue={initial?.seoDescription} />
+        <Label>SEO 简介（可选，≤300 字）</Label>
+        <Input name="seoDescription" maxLength={300} placeholder="留空默认截取商品介绍" defaultValue={initial?.seoDescription} />
       </div>
     </AdminForm>
   );

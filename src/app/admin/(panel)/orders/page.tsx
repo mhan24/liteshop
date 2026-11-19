@@ -30,8 +30,8 @@ export default async function AdminOrdersPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">订单</h1>
-      {rows.length === 0 ? <p className="text-sm text-muted">还没有订单。</p> : null}
+      <h1 className="text-xl font-semibold">订单管理</h1>
+      {rows.length === 0 ? <p className="text-sm text-muted">暂无订单</p> : null}
 
       <ul className="space-y-4">
         {rows.map((o) => {
@@ -54,11 +54,11 @@ export default async function AdminOrdersPage() {
 
                   {o.status === "reconciling" ? (
                     <div className="flex flex-wrap gap-2">
-                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关已到账，发卡" inline confirmText="确认已在网关后台核实这笔订单到账？确认后将立即发卡，无法撤回。">
+                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关已到账，发卡" inline confirmText="确认已在网关后台核实该订单到账？确认后将立即发卡，无法撤回。">
                         <input type="hidden" name="orderNo" value={o.orderNo} />
                         <input type="hidden" name="asPaid" value="1" />
                       </AdminForm>
-                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关未建单，关闭" variant="danger" inline confirmText="确认网关没有这笔交易？订单将关闭并释放卡密。">
+                      <AdminForm action={resolveReconcilingAction} csrf={csrf} submitLabel="网关无此交易，关闭" variant="danger" inline confirmText="确认网关无此交易？订单将关闭，占用的卡密会退回库存。">
                         <input type="hidden" name="orderNo" value={o.orderNo} />
                         <input type="hidden" name="asPaid" value="0" />
                       </AdminForm>
@@ -66,7 +66,7 @@ export default async function AdminOrdersPage() {
                   ) : null}
 
                   {o.status === "pending" ? (
-                    <AdminForm action={closeOrderAction} csrf={csrf} submitLabel="关闭订单" variant="danger" inline confirmText="关闭这笔待支付订单？卡密将退回库存。">
+                    <AdminForm action={closeOrderAction} csrf={csrf} submitLabel="关闭订单" variant="danger" inline confirmText="确认关闭该待支付订单？占用的卡密将退回库存，订单不可恢复。">
                       <input type="hidden" name="orderNo" value={o.orderNo} />
                     </AdminForm>
                   ) : null}

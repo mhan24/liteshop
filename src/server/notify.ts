@@ -26,7 +26,7 @@ export function notifyReconciling(executor: Db, orderNo: string, totalCents: num
   return enqueue(
     executor,
     "order_reconciling",
-    `⚠️ 订单待核实\n订单 ${orderNo}（${formatMoney(totalCents)}）\n网关建单结果未知：${reason}\n请到网关后台核对后，在「订单」页确认到账或关闭。`
+    `⚠️ 订单待核实\n订单号：${orderNo}（${formatMoney(totalCents)}）\n原因：${reason}\n请在网关后台核对后，前往后台「订单」页确认到账或关闭。`
   );
 }
 
@@ -34,7 +34,7 @@ export function notifyLatePayment(executor: Db, orderNo: string, providerRef: st
   return enqueue(
     executor,
     "payment_late",
-    `⚠️ 延迟到账\n订单 ${orderNo} 已关闭或已由其它交易完成，又收到交易 ${providerRef} 的付款（${amount} USD）。\n请人工核对后退款或补发。`
+    `⚠️ 订单延迟到账\n订单号：${orderNo}（已关闭或已由其他交易完成）\n新到账交易：${providerRef}（${amount} USD）\n请人工核对后安排退款或补发。`
   );
 }
 
@@ -42,7 +42,7 @@ export function notifyPaidUndelivered(executor: Db, orderNo: string) {
   return enqueue(
     executor,
     "paid_undelivered",
-    `🚨 已付款但卡密不足\n订单 ${orderNo} 已确认付款，库存不够发卡。\n请导入卡密后在「订单」页点「重试发卡」。`
+    `🚨 已付款但库存不足\n订单号：${orderNo} 已确认收款，但可用卡密不足。\n请导入卡密后，在后台「订单」页点击「重试发卡」。`
   );
 }
 
@@ -76,8 +76,8 @@ export async function notifyLowStockCrossings(
         tx,
         "stock_low",
         soldOut
-          ? `📦 已售罄：${r.name}\n可售卡密为 0，前台显示缺货。请到「卡密」页导入。`
-          : `📦 库存偏低：${r.name}\n可售剩 ${after} 张（提醒阈值 ${lowStockThreshold}）。`
+          ? `📦 商品已售罄：${r.name}\n可售卡密为 0，前台已显示缺货，请前往后台「卡密」页补货。`
+          : `📦 库存偏低：${r.name}\n当前可售仅剩 ${after} 张（预警阈值 ${lowStockThreshold}）。`
       );
     }
   }
@@ -156,5 +156,5 @@ export async function sendTestNotification(): Promise<TelegramResult> {
   const target = await telegramTarget();
   if (!target) return { ok: false, error: "请先启用并填写 Bot Token 与 Chat ID" };
   const siteName = (await getConfig()).siteName || "liteshop";
-  return sendTelegram(target.token, target.chatId, `✅ ${siteName} 运营通知测试\n收到这条说明配置正确。`);
+  return sendTelegram(target.token, target.chatId, `✅ ${siteName} 运营通知测试\n收到这条消息说明 Telegram 通知配置正常。`);
 }

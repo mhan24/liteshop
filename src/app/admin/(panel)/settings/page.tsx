@@ -24,7 +24,7 @@ export default async function AdminSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">设置</h1>
+      <h1 className="text-xl font-semibold">系统设置</h1>
 
       <Card>
         <CardHeader>
@@ -42,7 +42,7 @@ export default async function AdminSettingsPage() {
               <Input id="s-name" name="siteName" defaultValue={c.siteName} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="s-url">站点地址（canonical / 支付回调用）</Label>
+              <Label htmlFor="s-url">站点地址（用于规范链接与支付回调）</Label>
               <Input
                 id="s-url"
                 name="siteUrl"
@@ -72,7 +72,7 @@ export default async function AdminSettingsPage() {
               />
             </div>
             <p className="text-xs leading-5 text-muted sm:col-span-2">
-              全部商品以美元（USD）计价，收银台按 USD 建单，不再提供币种切换。
+              全站商品统一以美元（USD）计价，收银台按 USD 收款。
             </p>
           </AdminForm>
         </CardContent>
@@ -87,14 +87,14 @@ export default async function AdminSettingsPage() {
             </Badge>
           </CardTitle>
           <CardDescription>
-            BEpusdt 兼容收银台。接口令牌加密后存库，页面不回显；回调地址固定为{" "}
+            兼容 BEpusdt 协议的收银台。接口令牌加密存储且不在页面回显，回调路径固定为{" "}
             <code className="font-mono text-xs">{webhookPath("litepay")}</code>。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <AdminForm action={saveLitepayAction} csrf={csrf} submitLabel="保存网关配置" className="grid max-w-xl gap-4 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="lp-api">网关地址（只填域名与端口）</Label>
+              <Label htmlFor="lp-api">网关地址（仅填协议、域名与端口）</Label>
               <Input
                 id="lp-api"
                 name="litepayApiBase"
@@ -103,7 +103,7 @@ export default async function AdminSettingsPage() {
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="lp-token">接口令牌（后台「接入」页生成）</Label>
+              <Label htmlFor="lp-token">接口令牌（在 LitePay 后台「接入」页获取）</Label>
               <Input
                 id="lp-token"
                 name="litepayToken"
@@ -152,7 +152,7 @@ export default async function AdminSettingsPage() {
             </label>
             <p className="text-xs leading-5 text-muted sm:col-span-2">
               回调地址：<span className="font-mono">{webhookUrl}</span>
-              。请把该地址与本站地址一并填进网关后台的商店设置，令牌两处必须一致。
+              。请将此地址与本站地址一并填写到 LitePay 后台的商店设置中，并确保两端令牌一致。
             </p>
           </AdminForm>
         </CardContent>
@@ -176,7 +176,7 @@ export default async function AdminSettingsPage() {
                 defaultChecked={c.smtpEnabled}
                 className="size-4"
               />
-              启用邮件通知（卡密同时发到买家邮箱）
+              启用交付邮件（发卡后自动发送至买家邮箱）
             </label>
             <div className="space-y-1.5">
               <Label htmlFor="smtp-host">SMTP 服务器</Label>
@@ -191,7 +191,7 @@ export default async function AdminSettingsPage() {
               <Input id="smtp-user" name="smtpUser" defaultValue={c.smtpUser} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="smtp-pass">密码（留空保持不变）</Label>
+              <Label htmlFor="smtp-pass">密码</Label>
               <Input
                 id="smtp-pass"
                 name="smtpPass"
@@ -259,15 +259,13 @@ export default async function AdminSettingsPage() {
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="ts-secret">
-                Secret Key {c.turnstileSecretEnc !== "" ? "（已配置：留空保持不变）" : ""}
-              </Label>
+              <Label htmlFor="ts-secret">Secret Key</Label>
               <Input
                 id="ts-secret"
                 name="tsSecretKey"
                 type="password"
                 autoComplete="off"
-                placeholder={c.turnstileSecretEnc !== "" ? "留空保持不变，输入 __CLEAR__ 清除" : ""}
+                placeholder={c.turnstileSecretEnc !== "" ? "已保存，留空保持不变（输入 __CLEAR__ 清除）" : "未设置"}
               />
             </div>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
@@ -280,7 +278,7 @@ export default async function AdminSettingsPage() {
               降级开关：验证组件加载失败时仍允许提交（由频率限制兜底）
             </label>
             <p className="text-xs leading-5 text-muted sm:col-span-2">
-              在 Cloudflare 控制台创建 Turnstile Widget 后填两把 Key，并把本站域名加入该 Site Key 的允许列表。
+              在 Cloudflare 控制台创建 Turnstile Widget 后填入 Site Key 与 Secret Key，并将本站域名加入允许列表。
             </p>
           </AdminForm>
         </CardContent>
@@ -297,8 +295,8 @@ export default async function AdminSettingsPage() {
             )}
           </CardTitle>
           <CardDescription>
-            订单待核实、延迟到账、付款后卡密不足、库存跌破阈值或售罄时推送消息。先在 Telegram 找 @BotFather 创建机器人拿到 Token，
-            再把机器人拉进群（或直接私聊它），用 @userinfobot 等工具查到 Chat ID。
+            当出现订单待核实、延迟到账、已付款但卡密不足、库存低于阈值或售罄时推送通知。请在 Telegram 联系 @BotFather 创建机器人获取 Token，
+            将机器人拉入群组或直接私聊，再通过 @userinfobot 等工具获取 Chat ID。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -314,7 +312,7 @@ export default async function AdminSettingsPage() {
                 name="tgToken"
                 type="password"
                 autoComplete="off"
-                placeholder={c.telegramBotTokenEnc ? "已保存，留空保持不变（输入 __CLEAR__ 清除）" : "123456:ABC-DEF…"}
+                placeholder={c.telegramBotTokenEnc ? "已保存，留空保持不变（输入 __CLEAR__ 清除）" : "未设置（格式如 123456:ABC-DEF…）"}
               />
             </div>
             <div className="space-y-1.5">
@@ -323,7 +321,7 @@ export default async function AdminSettingsPage() {
             </div>
           </AdminForm>
           <AdminForm action={sendTestNotificationAction} csrf={csrf} submitLabel="发送测试消息" variant="outline">
-            <p className="text-xs text-muted">先保存设置，再点这里确认能收到。</p>
+            <p className="text-xs text-muted">请先保存上方设置，再发送测试消息验证接收是否正常。</p>
           </AdminForm>
         </CardContent>
       </Card>
@@ -333,7 +331,7 @@ export default async function AdminSettingsPage() {
           <CardTitle>管理员凭据</CardTitle>
         </CardHeader>
         <CardContent>
-          <AdminForm action={changeCredentialsAction} csrf={csrf} submitLabel="更新凭据" confirmText="更新后所有已登录会话（包括当前）都会退出，确认继续？" className="grid max-w-md gap-3">
+          <AdminForm action={changeCredentialsAction} csrf={csrf} submitLabel="更新凭据" confirmText="更新后所有已登录会话（包括当前会话）都将失效并需要重新登录，确认继续？" className="grid max-w-md gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="cur-pass">当前密码</Label>
               <Input id="cur-pass" name="currentPassword" type="password" required autoComplete="current-password" />
@@ -346,7 +344,7 @@ export default async function AdminSettingsPage() {
               <Label htmlFor="new-pass">新密码（可选，≥8 位）</Label>
               <Input id="new-pass" name="newPassword" type="password" autoComplete="new-password" />
             </div>
-            <p className="text-xs text-muted">保存后所有会话失效，需要重新登录。</p>
+            <p className="text-xs text-muted">更新后所有会话将失效，需要重新登录。</p>
           </AdminForm>
         </CardContent>
       </Card>

@@ -40,7 +40,7 @@ export default async function AdminPanelLayout({ children }: { children: React.R
             <span className="data hidden sm:inline">{session.username}</span>
             <form action={logout}>
               <button type="submit" className="text-sm text-muted transition-colors hover:text-tint-red-fg">
-                退出
+                退出登录
               </button>
             </form>
           </div>

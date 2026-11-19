@@ -77,7 +77,7 @@ export async function loginAction(
   const password = String(formData.get("password") ?? "");
   if (!username || !password) return { ok: false, message: "请输入用户名与密码" };
   const session = await loginAdmin(username, password);
-  if (!session) return { ok: false, message: "用户名或密码错误（连续失败将锁定 15 分钟）" };
+  if (!session) return { ok: false, message: "用户名或密码错误（连续失败 5 次将锁定 15 分钟）" };
   await createSessionCookie(session.username);
   await audit("admin.login", username, username);
   return { ok: true, message: "登录成功" };
@@ -113,7 +113,7 @@ export async function createCategoryAction(
       description: String(formData.get("description") ?? ""),
       sortOrder: formData.get("sortOrder") ?? 0,
     });
-    if (!parsed.success) return { ok: false, message: "分类名称必填，slug 需为小写字母数字短横线" };
+    if (!parsed.success) return { ok: false, message: "请填写分类名称；URL 标识仅支持小写字母、数字和短横线" };
     const slug =
       parsed.data.slug ??
       (parsed.data.name
@@ -129,7 +129,7 @@ export async function createCategoryAction(
         sortOrder: parsed.data.sortOrder,
       });
     } catch {
-      return { ok: false, message: "分类创建失败（slug 可能已存在）" };
+      return { ok: false, message: "分类创建失败，该 URL 标识可能已存在" };
     }
     await audit("category.create", slug, session.username);
     revalidateStorefront();
@@ -149,7 +149,7 @@ export async function deleteCategoryAction(
     await db.delete(categories).where(eq(categories.id, id));
     await audit("category.delete", String(id), session.username);
     revalidateStorefront();
-    return { ok: true, message: "分类已删除（商品保留，分类置空）" };
+    return { ok: true, message: "分类已删除，其下商品已保留并设为无分类" };
   });
 }
 
@@ -194,7 +194,7 @@ export async function createProductAction(
     const csrfErr = await checkCsrf(formData);
     if (csrfErr) return csrfErr;
     const input = parseProductForm(formData);
-    if (!input) return { ok: false, message: "商品字段不合法：名称、slug、价格（美分）必填" };
+    if (!input) return { ok: false, message: "商品信息不合法：请检查名称、URL 标识、价格（美分）及图片链接" };
     try {
       await db.insert(products).values({
         name: input.name,
@@ -207,7 +207,7 @@ export async function createProductAction(
         categoryId: input.categoryId,
       });
     } catch {
-      return { ok: false, message: "商品创建失败（slug 可能已存在）" };
+      return { ok: false, message: "商品创建失败，该 URL 标识可能已存在" };
     }
     await audit("product.create", input.slug, session.username);
     revalidateStorefront();
@@ -225,7 +225,7 @@ export async function updateProductAction(
     const id = Number(formData.get("id"));
     if (!Number.isInteger(id)) return { ok: false, message: "参数错误" };
     const input = parseProductForm(formData);
-    if (!input) return { ok: false, message: "商品字段不合法" };
+    if (!input) return { ok: false, message: "商品信息不合法，请检查各字段格式" };
     try {
       await db
         .update(products)
@@ -242,7 +242,7 @@ export async function updateProductAction(
         })
         .where(eq(products.id, id));
     } catch {
-      return { ok: false, message: "商品保存失败（slug 可能已被其它商品使用）" };
+      return { ok: false, message: "商品保存失败，该 URL 标识可能已被其他商品使用" };
     }
     await audit("product.update", input.slug, session.username);
     revalidateStorefront();
@@ -265,11 +265,11 @@ export async function deleteProductAction(
       .from(cards)
       .where(and(eq(cards.productId, id), eq(cards.status, "reserved")))
       .limit(1);
-    if (held[0]) return { ok: false, message: "该商品有卡密被未完成订单锁定，请先下架，待订单结束后再删除" };
+    if (held[0]) return { ok: false, message: "该商品仍有卡密被未完成订单锁定，请先下架，待订单结束后再删除" };
     await db.delete(products).where(eq(products.id, id));
     await audit("product.delete", String(id), session.username);
     revalidateStorefront();
-    return { ok: true, message: "商品及卡密已删除" };
+    return { ok: true, message: "商品及关联卡密已删除" };
   });
 }
 
@@ -323,7 +323,7 @@ export async function deleteCardAction(
       .delete(cards)
       .where(and(eq(cards.id, id), eq(cards.status, "available")))
       .returning({ id: cards.id });
-    if (!deleted[0]) return { ok: false, message: "只能删除可售状态的卡密（已锁定或已售出的不可删除）" };
+    if (!deleted[0]) return { ok: false, message: "仅可删除可售状态的卡密，已锁定或已售出的不可删除" };
     await audit("cards.delete", String(id), session.username);
     revalidateStorefront();
     return { ok: true, message: "卡密已删除" };
@@ -397,13 +397,13 @@ export async function saveLitepayAction(
     const reselect = String(formData.get("litepayReselect") ?? "") === "on";
 
     const apiBase = apiBaseRaw === "" ? "" : normalizeHttpUrl(apiBaseRaw);
-    if (apiBase === null) return { ok: false, message: "网关地址不合法（只接受 http/https 域名）" };
+    if (apiBase === null) return { ok: false, message: "网关地址不合法，仅支持 http:// 或 https:// 域名" };
     if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < MIN_TIMEOUT_SECONDS || timeoutSeconds > MAX_TIMEOUT_SECONDS) {
-      return { ok: false, message: `订单有效期需为 ${MIN_TIMEOUT_SECONDS}–${MAX_TIMEOUT_SECONDS} 之间的整数秒` };
+      return { ok: false, message: `订单有效期需为 ${MIN_TIMEOUT_SECONDS}–${MAX_TIMEOUT_SECONDS} 秒之间的整数` };
     }
     const tokenEnc = nextSecret(submitted, (await getConfig()).litepayTokenEnc);
     if (enabled && (!apiBase || !tokenEnc)) {
-      return { ok: false, message: "启用网关前请填写网关地址与接口令牌（令牌留空表示沿用已保存值）" };
+      return { ok: false, message: "启用网关前请填写网关地址与接口令牌（已保存的令牌留空即可沿用）" };
     }
 
     await updateConfig({
@@ -439,7 +439,7 @@ export async function saveSiteSettingsAction(
 
     // 先全部校验，再一次性写入：不会出现「站点名已改、地址校验失败」的半保存状态
     if (siteUrl && !normalizeHttpUrl(siteUrl)) return { ok: false, message: "站点地址需为 http:// 或 https:// 开头的有效地址" };
-    if (supportUrl && !normalizeHttpUrl(supportUrl)) return { ok: false, message: "客服地址需为 http/https 链接" };
+    if (supportUrl && !normalizeHttpUrl(supportUrl)) return { ok: false, message: "客服地址需为 http:// 或 https:// 链接" };
     if (!Number.isInteger(threshold) || threshold < 0 || threshold > 100_000) {
       return { ok: false, message: "低库存提醒阈值需为非负整数" };
     }
@@ -499,11 +499,11 @@ export async function saveSmtpAction(
     const from = String(formData.get("smtpFrom") ?? "").trim();
     const user = String(formData.get("smtpUser") ?? "").trim();
     const pass = String(formData.get("smtpPass") ?? "").trim();
-    if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, message: "端口非法" };
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, message: "SMTP 端口无效，需为 1–65535 之间的整数" };
     if (enabled) {
       if (!host) return { ok: false, message: "启用邮件通知需填写 SMTP 服务器地址" };
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) && !/^[^@\s]+<[^@\s]+>$/.test(from)) {
-        return { ok: false, message: "发件人格式无效" };
+        return { ok: false, message: "发件人邮箱格式无效" };
       }
     }
     await updateConfig({
@@ -538,7 +538,7 @@ export async function saveTelegramAction(
     if (enabled && (!tokenEnc || !chatId)) return { ok: false, message: "启用通知需填写 Bot Token 与 Chat ID" };
     await updateConfig({ telegramEnabled: enabled, telegramBotTokenEnc: tokenEnc, telegramChatId: chatId });
     await audit("settings.telegram", `enabled=${enabled}`, session.username);
-    return { ok: true, message: enabled ? "通知设置已保存，可以发一条测试消息确认" : "通知设置已保存（当前停用）" };
+    return { ok: true, message: enabled ? "通知设置已保存，可发送测试消息验证" : "通知设置已保存（当前停用）" };
   });
 }
 

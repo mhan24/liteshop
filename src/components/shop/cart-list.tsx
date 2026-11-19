@@ -13,14 +13,14 @@ export function CartList() {
   if (items.length === 0) {
     return (
       <div className="space-y-3 rounded-md border border-line bg-surface px-6 py-16 text-center">
-        <p className="text-lg">购物车还是空的</p>
-        <p className="text-sm text-muted">先挑一件商品，再回来结算。</p>
+        <p className="text-lg">购物车为空</p>
+        <p className="text-sm text-muted">挑选商品加入购物车后，即可在此结算。</p>
         <p className="pt-2">
           <Link
             href="/"
             className="inline-flex h-10 items-center rounded-sm bg-accent px-5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
           >
-            去看商品
+            浏览商品
           </Link>
         </p>
       </div>
@@ -63,7 +63,7 @@ export function CartList() {
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <Button type="button" variant="ghost" onClick={clear}>
-          清空
+          清空购物车
         </Button>
         <div className="flex items-center gap-5">
           <span className="text-sm text-muted">
@@ -77,7 +77,7 @@ export function CartList() {
           </Link>
         </div>
       </div>
-      <p className="text-xs leading-5 text-muted">实际应付金额在结算页按商品当前价格重新计算。</p>
+      <p className="text-xs leading-5 text-muted">提交订单时将按商品当前价格重新计算应付金额。</p>
     </div>
   );
 }

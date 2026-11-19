@@ -55,7 +55,7 @@ export function OrderQueryClient({ human }: { human: TurnstileClientConfig }) {
             name="password"
             required
             maxLength={8}
-            placeholder="建单时显示的 8 位密码"
+            placeholder="下单后显示的 8 位密码"
             className="font-mono uppercase tracking-[0.2em] placeholder:font-sans placeholder:normal-case placeholder:tracking-normal"
           />
         </div>
@@ -75,7 +75,7 @@ export function OrderQueryClient({ human }: { human: TurnstileClientConfig }) {
             <TurnstileWidget key={verifyKey} siteKey={human.siteKey} onToken={setCfToken} />
             <input type="hidden" name="cfToken" value={cfToken} />
             {human.fallback ? (
-              <p className="text-xs text-muted">验证组件加载失败时仍可查询，查询频率限制仍然生效。</p>
+              <p className="text-xs text-muted">如验证组件加载失败，仍可直接查询（查询频率限制保持生效）。</p>
             ) : null}
           </div>
         ) : null}
@@ -150,7 +150,7 @@ function QueryResult({ data }: { data: QuerySuccess }) {
 
       {order.status === "closed" ? (
         <p className="rounded-sm border border-line bg-surface-2 px-4 py-3 text-xs leading-5 text-muted">
-          订单已关闭，卡密已退回库存。需要的话重新下单即可。
+          订单已关闭，占用的卡密已退回库存。如需购买，请重新下单。
         </p>
       ) : null}
     </section>

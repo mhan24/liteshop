@@ -22,7 +22,7 @@ const SOLVE_TIMEOUT_MS = 15_000;
 const ERROR_HINTS: Record<string, string> = {
   "110200": "域名未加入该 Site Key 的允许列表，请到 Cloudflare Turnstile 设置检查主机名",
   "300xxx": "人机验证执行出错，请重试",
-  "600000": "人机验证挑战失败，请重试",
+  "600000": "人机验证未通过，请重试",
 };
 
 /**
@@ -80,7 +80,7 @@ export function TurnstileWidget({
       if (cancelled || !ref.current) return;
       if (!window.turnstile) {
         // 脚本"加载完成"但 API 未定义：内容被劫持/响应为空
-        fail("人机验证服务响应异常，请重试（或更换网络环境）");
+        fail("人机验证响应异常，请重试或更换网络环境");
         return;
       }
       if (widgetIdRef.current !== null) return;
@@ -129,7 +129,7 @@ export function TurnstileWidget({
           window.turnstile?.remove(widgetIdRef.current);
           widgetIdRef.current = null;
         }
-        fail("人机验证服务无响应，请重试；多次失败可联系客服或更换网络");
+        fail("人机验证超时无响应，请重试；多次失败请更换网络或联系客服");
       }
     }, 1000);
 

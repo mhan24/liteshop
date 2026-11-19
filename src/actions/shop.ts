@@ -68,7 +68,7 @@ export async function checkoutAction(
       items: JSON.parse(String(formData.get("items") ?? "[]")),
     });
   } catch {
-    return { ok: false, message: "请检查填写内容（邮箱格式 / 商品数量）" };
+    return { ok: false, message: "请检查填写的邮箱格式与商品数量" };
   }
 
   // 人机验证（后台开启后生效；token 一次性，只在此校验一次）
@@ -84,8 +84,8 @@ export async function checkoutAction(
     return {
       ok: true,
       message: result.reconciling
-        ? "收银台响应超时，订单已保留待核实，请稍后在订单查询页查看"
-        : "订单已创建，请继续完成付款",
+        ? "订单已保留，等待核实"
+        : "订单已创建，请先保存查单密码",
       data: {
         orderNo: result.orderNo,
         queryPassword: result.queryPassword,
@@ -118,7 +118,7 @@ export async function queryOrderAction(
   const orderNo = String(formData.get("orderNo") ?? "");
   const password = String(formData.get("password") ?? "");
   if (!orderNo.trim() || !password.trim()) {
-    return { ok: false, message: "请填写订单号、邮箱与查单密码" };
+    return { ok: false, message: "请完整填写订单号、下单邮箱和查单密码" };
   }
 
   // 人机验证（后台开启后生效）：查询入口可被撞库枚举，与下单同样设防
@@ -126,7 +126,7 @@ export async function queryOrderAction(
   if (humanError) return { ok: false, message: humanError };
 
   const view = await queryOrder(email, orderNo, password);
-  if (!view) return { ok: false, message: "订单不存在，或邮箱 / 查单密码不正确" };
+  if (!view) return { ok: false, message: "订单不存在，或下单邮箱与查单密码不匹配" };
   return {
     ok: true,
     message: "查询成功",
