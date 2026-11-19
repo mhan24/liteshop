@@ -49,13 +49,16 @@ export function notifyPaidUndelivered(executor: Db, orderNo: string) {
 /**
  * 低库存：只在可售数「跌破阈值」或「售罄」的那一次通知（对比本次锁卡前后的数量），
  * 不会每卖一单都提醒。须在锁卡的同一事务内、锁卡之后调用。
+ *
+ * lowStockThreshold 由调用方在**事务开始前**读好传入：事务里再去读配置会额外借一个连接，
+ * 并发下单占满连接池时会互相等待直至超时（连接池死锁）。
  */
 export async function notifyLowStockCrossings(
   tx: Tx,
-  reserved: Array<{ productId: number; quantity: number }>
+  reserved: Array<{ productId: number; quantity: number }>,
+  lowStockThreshold: number
 ): Promise<void> {
   if (reserved.length === 0) return;
-  const { lowStockThreshold } = await getConfig();
   const ids = reserved.map((r) => r.productId);
   const rows = await tx
     .select({ id: products.id, name: products.name, n: sql<number>`count(${cards.id})::int` })

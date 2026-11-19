@@ -20,6 +20,12 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: react-dom
         update-types: [version-update:semver-major]
+      # Node 类型定义跟随运行时的 LTS 大版本（当前 Node 24），否则可能用上运行时没有的 API
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      # TypeScript 7 待 typescript-eslint 支持后再升（2026-11 尚不支持，见 PR #9 的 CI）
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
     directory: /

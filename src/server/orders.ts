@@ -17,7 +17,7 @@ import { releaseStock, reserveStock, sellOrderCards } from "./catalog";
 import type { Tx } from "./db-tx";
 import { getActiveGateway, getAdapter, getGatewayByType, webhookPath } from "./payments";
 import type { CreateOutcome, GatewayType, NotifyPayload } from "./payments/types";
-import { getSiteUrl } from "./settings";
+import { getConfig, getSiteUrl } from "./settings";
 import { notifyLatePayment, notifyLowStockCrossings, notifyPaidUndelivered, notifyReconciling } from "./notify";
 
 /**
@@ -106,6 +106,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     throw new OrderError("NO_PAYMENT_CHANNEL", "支付网关未配置或已停用，请稍后再试或联系客服");
   }
   const note = input.note?.trim().slice(0, 500) ?? "";
+  // 事务外读配置：事务内不得再向连接池借连接（见 notifyLowStockCrossings）
+  const { lowStockThreshold } = await getConfig();
   const queryPassword = generateQueryPassword();
   const passwordHash = await hashQueryPassword(queryPassword);
 
@@ -163,7 +165,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         );
         const reserved = itemRows.map((r) => ({ productId: r.productId, quantity: r.quantity }));
         await reserveStock(tx, order.id, reserved);
-        await notifyLowStockCrossings(tx, reserved);
+        await notifyLowStockCrossings(tx, reserved, lowStockThreshold);
         return { orderId: order.id, orderNo: order.orderNo, totalCents: subtotal, itemRows };
       });
       break;
