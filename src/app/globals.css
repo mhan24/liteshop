@@ -1,38 +1,37 @@
 @import "tailwindcss";
 
 /*
- * 设计令牌：Signal Dark（规范见仓库根目录 DESIGN.md）。
+ * 设计令牌：Signal（规范见仓库根目录 DESIGN.md）。
  * 页面只用这里的语义类名，不写十六进制颜色。
  * 层级靠表面明度 + 1px 发丝线；唯一彩色是信号青（accent）。
  */
 @theme {
-  --color-bg: #0b0d0e;
-  --color-sunken: #08090a;
-  --color-surface: #111416;
-  --color-surface-2: #161a1d;
-  --color-surface-3: #1c2125;
-  --color-line: #22282c;
-  --color-line-strong: #30383d;
-  --color-fg: #e6e9ea;
-  --color-muted: #959fa5;
-  --color-faint: #5e686e;
+  --color-bg: #f6f8f7;
+  --color-sunken: #e6ece9;
+  --color-surface: #ffffff;
+  --color-surface-2: #edf2f0;
+  --color-surface-3: #e1e9e6;
+  --color-line: #cbd6d1;
+  --color-line-strong: #738780;
+  --color-fg: #172723;
+  --color-muted: #435550;
+  --color-faint: #55655f;
 
-  --color-accent: #5eead4;
-  --color-accent-hover: #99f6e4;
-  --color-accent-fg: #042f2a;
+  --color-accent: #00695d;
+  --color-accent-hover: #00564b;
+  --color-accent-fg: #ffffff;
 
-  --color-danger: #f87171;
-  --color-success: #4ade80;
+  --color-danger: #a32933;
+  --color-success: #0f7041;
 
-  /* 状态色：10% 淡底 + 同系浅色文字（深色界面上的「粉彩」） */
-  --color-tint-red: rgb(248 113 113 / 0.1);
-  --color-tint-red-fg: #fca5a5;
-  --color-tint-blue: rgb(125 211 252 / 0.1);
-  --color-tint-blue-fg: #7dd3fc;
-  --color-tint-green: rgb(74 222 128 / 0.1);
-  --color-tint-green-fg: #86efac;
-  --color-tint-yellow: rgb(251 191 36 / 0.1);
-  --color-tint-yellow-fg: #fcd34d;
+  --color-tint-red: #fbe9e9;
+  --color-tint-red-fg: #93232c;
+  --color-tint-blue: #e5f1fa;
+  --color-tint-blue-fg: #155785;
+  --color-tint-green: #e2f3e8;
+  --color-tint-green-fg: #13633b;
+  --color-tint-yellow: #fcf1d8;
+  --color-tint-yellow-fg: #795108;
 
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB",
@@ -43,11 +42,50 @@
   --radius-md: 10px;
 }
 
+/* 手动选择与系统深色共用一套令牌，首屏仅用 CSS 即可匹配系统偏好。 */
+@custom-variant dark-palette {
+  &[data-theme="dark"] { @slot; }
+  @media (prefers-color-scheme: dark) {
+    &:not([data-theme="light"]) { @slot; }
+  }
+}
+
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
+  @variant dark-palette {
+    --color-bg: #0b0d0e;
+    --color-sunken: #08090a;
+    --color-surface: #111416;
+    --color-surface-2: #161a1d;
+    --color-surface-3: #1c2125;
+    --color-line: #22282c;
+    --color-line-strong: #69767b;
+    --color-fg: #e6e9ea;
+    --color-muted: #959fa5;
+    --color-faint: #849097;
+
+    --color-accent: #5eead4;
+    --color-accent-hover: #99f6e4;
+    --color-accent-fg: #042f2a;
+
+    --color-danger: #f87171;
+    --color-success: #4ade80;
+
+    --color-tint-red: rgb(248 113 113 / 0.1);
+    --color-tint-red-fg: #fca5a5;
+    --color-tint-blue: rgb(125 211 252 / 0.1);
+    --color-tint-blue-fg: #7dd3fc;
+    --color-tint-green: rgb(74 222 128 / 0.1);
+    --color-tint-green-fg: #86efac;
+    --color-tint-yellow: rgb(251 191 36 / 0.1);
+    --color-tint-yellow-fg: #fcd34d;
+  }
   /* 原生复选框、单选、进度条统一用信号青 */
   accent-color: var(--color-accent);
 }
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 body {
   background-color: var(--color-bg);
@@ -60,7 +98,7 @@ body {
 }
 
 ::selection {
-  background-color: rgb(94 234 212 / 0.25);
+  background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
   color: var(--color-fg);
 }
 
@@ -88,9 +126,9 @@ body {
 /* 首页主视觉背景：极淡信号青径向光 + 细网格（全站唯一装饰） */
 .hero-backdrop {
   background-image:
-    radial-gradient(ellipse 60% 55% at 50% 0%, rgb(94 234 212 / 0.08), transparent 70%),
-    linear-gradient(to right, rgb(255 255 255 / 0.025) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(255 255 255 / 0.025) 1px, transparent 1px);
+    radial-gradient(ellipse 60% 55% at 50% 0%, color-mix(in srgb, var(--color-accent) 8%, transparent), transparent 70%),
+    linear-gradient(to right, color-mix(in srgb, var(--color-fg) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-fg) 4%, transparent) 1px, transparent 1px);
   background-size:
     100% 100%,
     40px 40px,
@@ -200,8 +238,8 @@ body {
   border-color: var(--color-line-strong);
 }
 .chip[data-active="true"] {
-  background: rgb(94 234 212 / 0.1);
-  border-color: rgb(94 234 212 / 0.4);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
   color: var(--color-accent);
 }
 

@@ -1,12 +1,12 @@
 ---
 version: 1
-name: liteshop · Signal Dark
+name: liteshop · Signal
 description: >
-  数字卡密商店的深色科技风界面。近黑画布、分层灰面、1px 发丝线分隔，
+  数字卡密商店的浅色与深色界面。浅色采用雾灰画布与白色卡片，深色采用近黑画布与分层灰面。
   唯一的彩色是「信号青」——只留给主操作、焦点与「有货」信号。
   价格、订单号、卡密一律等宽字体，读起来像终端里的确定数据。
 colors:
-  # 画布与表面（由深到浅 = 由底到顶）
+  # 深色外观。浅色对应值见下方颜色表。
   canvas: "#0B0D0E"          # 页面底色
   sunken: "#08090A"          # 凹陷区：卡密内容、代码块
   surface: "#111416"         # 卡片、面板
@@ -14,11 +14,11 @@ colors:
   surface-3: "#1C2125"       # hover / 选中行
   # 线
   hairline: "#22282C"        # 默认 1px 分隔与卡片边框
-  hairline-strong: "#30383D" # 输入框边框、hover 边框
+  hairline-strong: "#69767B" # 输入框边框、hover 边框
   # 文字
   ink: "#E6E9EA"             # 正文与标题（不用纯白）
   ink-mute: "#959FA5"        # 次要说明
-  ink-faint: "#5E686E"       # 占位符、禁用、元信息
+  ink-faint: "#849097"       # 占位符、禁用、元信息
   # 信号色（唯一品牌色）
   signal: "#5EEAD4"
   signal-hover: "#99F6E4"
@@ -35,17 +35,17 @@ rounded: { sm: 6px, md: 10px, full: 9999px }
 spacing: { xs: 4px, sm: 8px, md: 12px, lg: 16px, xl: 24px, xxl: 32px, section: 80px }
 ---
 
-# liteshop 设计规范（Signal Dark）
+# liteshop 设计规范（Signal）
 
 本文件是界面的唯一视觉依据：改 UI 前先读它，新增样式先查有没有现成令牌。
-令牌在 `src/app/globals.css` 的 `@theme` 中实现，Tailwind 类名与下表一一对应。
+颜色令牌统一定义在 `src/app/globals.css`，Tailwind 类名与下表一一对应。
+默认跟随系统外观。商城与后台共享手动选择的外观，原生表单和滚动条也跟随当前配色。
 
 ## 1. 气质
 
 - **确定、安静、可信。** 买家在这里付加密货币换卡密，界面要像一台运转正常的机器：
   信息直给，状态明确，没有营销式的喧闹。
-- **深色分层，而不是阴影。** 层级靠表面明度（canvas → surface → surface-2 → surface-3）
-  和 1px 发丝线表达；深色背景上阴影几乎不可见，不用。
+- **表面分层。** 两种外观均用表面明度（canvas → surface → surface-2 → surface-3）和 1px 发丝线区分层级。
 - **一个信号色。** 信号青只用于：主按钮、焦点环、链接 hover、「有货」指示点、选中态。
   页面上任何彩色若不是状态语义，就只能是信号青。
 - **数据用等宽。** 价格、订单号、查单密码、库存数、卡密内容、时间戳一律 `font-mono`
@@ -53,27 +53,27 @@ spacing: { xs: 4px, sm: 8px, md: 12px, lg: 16px, xl: 24px, xxl: 32px, section: 8
 
 ## 2. 颜色与角色
 
-| 令牌（Tailwind） | 值 | 角色 |
-|---|---|---|
-| `bg` | #0B0D0E | 页面画布 |
-| `sunken` | #08090A | 凹陷内容区：卡密、代码、查单密码展示 |
-| `surface` | #111416 | 卡片、面板、表格容器 |
-| `surface-2` | #161A1D | 输入框、次级按钮、表头、标签底 |
-| `surface-3` | #1C2125 | hover、选中行、按下态 |
-| `line` | #22282C | 默认分隔线与卡片边框 |
-| `line-strong` | #30383D | 输入框边框、卡片 hover 边框 |
-| `fg` | #E6E9EA | 主文字（禁止 #FFF 大段正文） |
-| `muted` | #959FA5 | 次要文字 |
-| `faint` | #5E686E | 占位符、禁用、元信息、眉题 |
-| `accent` | #5EEAD4 | 信号青：主操作与焦点 |
-| `accent-hover` | #99F6E4 | 主按钮 hover |
-| `accent-fg` | #042F2A | 信号青上的文字 |
-| `tint-green / -fg` | 绿 10% 底 / #86EFAC | 成功、已完成 |
-| `tint-yellow / -fg` | 黄 10% 底 / #FCD34D | 待处理、警示 |
-| `tint-red / -fg` | 红 10% 底 / #FCA5A5 | 错误、危险操作、缺货 |
-| `tint-blue / -fg` | 蓝 10% 底 / #7DD3FC | 进行中、提示 |
+| 令牌（Tailwind） | 浅色 | 深色 | 角色 |
+|---|---|---|---|
+| `bg` | #F6F8F7 | #0B0D0E | 页面画布 |
+| `sunken` | #E6ECE9 | #08090A | 卡密、代码与查单密码展示 |
+| `surface` | #FFFFFF | #111416 | 卡片、面板、表格容器 |
+| `surface-2` | #EDF2F0 | #161A1D | 输入框、次级按钮、表头、标签底 |
+| `surface-3` | #E1E9E6 | #1C2125 | 悬停、选中行、按下态 |
+| `line` | #CBD6D1 | #22282C | 默认分隔线与卡片边框 |
+| `line-strong` | #738780 | #69767B | 输入框边框、卡片悬停边框 |
+| `fg` | #172723 | #E6E9EA | 主文字 |
+| `muted` | #435550 | #959FA5 | 次要文字 |
+| `faint` | #55655F | #849097 | 占位符、元信息、眉题 |
+| `accent` | #00695D | #5EEAD4 | 主操作与焦点 |
+| `accent-hover` | #00564B | #99F6E4 | 主按钮悬停 |
+| `accent-fg` | #FFFFFF | #042F2A | 主按钮文字 |
+| `tint-green / -fg` | #E2F3E8 / #13633B | 绿 10% 底 / #86EFAC | 成功、已完成 |
+| `tint-yellow / -fg` | #FCF1D8 / #795108 | 黄 10% 底 / #FCD34D | 待处理、警示 |
+| `tint-red / -fg` | #FBE9E9 / #93232C | 红 10% 底 / #FCA5A5 | 错误、危险操作、缺货 |
+| `tint-blue / -fg` | #E5F1FA / #155785 | 蓝 10% 底 / #7DD3FC | 进行中、提示 |
 
-对比度：`fg` / `muted` 在 `bg` 与 `surface` 上均 ≥ 4.5:1；`faint` 只用于非必要信息（≥ 3:1）。
+正文、提示文字和状态标签文字在相应背景上的对比度至少为 4.5:1，输入框边框与相邻表面至少为 3:1。
 
 ## 3. 字体
 

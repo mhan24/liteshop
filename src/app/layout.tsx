@@ -1,6 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { getSiteName } from "@/server/settings";
+import { themeInitScript } from "@/lib/theme";
+
+export const viewport: Viewport = { colorScheme: "light dark" };
 
 export async function generateMetadata(): Promise<Metadata> {
   let siteName = "liteshop";
@@ -26,7 +29,10 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body>
         {children}
       </body>

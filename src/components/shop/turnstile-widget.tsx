@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { getThemePreference, subscribeTheme } from "@/lib/theme";
 
 declare global {
   interface Window {
@@ -66,6 +67,7 @@ export function TurnstileWidget({
 
   useEffect(() => {
     let cancelled = false;
+    let renderedTheme: ReturnType<typeof getThemePreference> | null = null;
     widgetIdRef.current = null;
     gotTokenRef.current = false;
 
@@ -85,16 +87,19 @@ export function TurnstileWidget({
       }
       if (widgetIdRef.current !== null) return;
       try {
+        renderedTheme = getThemePreference();
         widgetIdRef.current = window.turnstile.render(ref.current, {
           sitekey: siteKey,
-          theme: "light",
+          theme: renderedTheme === "system" ? "auto" : renderedTheme,
           callback: (token: string) => {
             if (cancelled) return;
             gotTokenRef.current = true;
             setState("ready");
             onTokenRef.current(token);
           },
-          "expired-callback": () => onTokenRef.current(""),
+          "expired-callback": () => {
+            if (!cancelled) onTokenRef.current("");
+          },
           "error-callback": (code?: string) => {
             const hint =
               (code && ERROR_HINTS[code.slice(0, 6)]) ??
@@ -145,8 +150,17 @@ export function TurnstileWidget({
       document.head.appendChild(script);
     }
 
+    const unsubscribe = subscribeTheme(() => {
+      if (cancelled || widgetIdRef.current === null || renderedTheme === getThemePreference()) return;
+      // 更换主题需要创建新的验证实例，旧 token 和迟到的回调均不再属于当前表单。
+      cancelled = true;
+      onTokenRef.current("");
+      setAttempt((value) => value + 1);
+    });
+
     return () => {
       cancelled = true;
+      unsubscribe();
       clearInterval(poll);
       if (widgetIdRef.current !== null) {
         window.turnstile?.remove(widgetIdRef.current);

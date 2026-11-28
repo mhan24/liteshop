@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CartProvider } from "@/components/shop/cart";
 import { CartLink } from "@/components/shop/cart-link";
+import { ThemeSelect } from "@/components/ui/theme-select";
 import { getSiteName, getSupportUrl } from "@/server/settings";
 
 export default async function ShopLayout({ children }: { children: React.ReactNode }) {
@@ -17,17 +18,17 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
     <CartProvider>
       <div className="flex min-h-screen flex-col">
         <header className="sticky top-0 z-20 border-b border-line bg-bg/80 backdrop-blur-md">
-          <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-            <Link href="/" className="group inline-flex items-center gap-2.5 font-semibold tracking-[-0.01em]">
+          <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6">
+            <Link href="/" className="group inline-flex min-w-0 items-center gap-1.5 font-semibold tracking-[-0.01em] sm:gap-2.5">
               <span
                 aria-hidden
-                className="data grid size-6 place-items-center rounded-sm border border-accent/40 bg-accent/10 text-[11px] text-accent transition-colors group-hover:bg-accent/20"
+                className="data grid size-6 shrink-0 place-items-center rounded-sm border border-accent/40 bg-accent/10 text-[11px] text-accent transition-colors group-hover:bg-accent/20"
               >
                 {siteName.slice(0, 1).toUpperCase()}
               </span>
-              {siteName}
+              <span className="truncate">{siteName}</span>
             </Link>
-            <nav className="flex items-center gap-5 text-sm text-muted sm:gap-7">
+            <nav className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-sm text-muted sm:gap-7">
               <Link href="/" className="transition-colors hover:text-fg">
                 商品
               </Link>
@@ -35,6 +36,7 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
               <Link href="/orders/query" className="transition-colors hover:text-fg">
                 订单查询
               </Link>
+              <ThemeSelect />
             </nav>
           </div>
         </header>

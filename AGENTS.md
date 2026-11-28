@@ -10,7 +10,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## 界面规范
 
-改 UI 前先读根目录 `DESIGN.md`（深色科技风 Signal Dark）。只用 `src/app/globals.css` 里的令牌类名，
+改 UI 前先读根目录 `DESIGN.md`（Signal 浅色与深色主题）。只用 `src/app/globals.css` 里的令牌类名，
 不写十六进制颜色；一个视图一个信号青主按钮；钱、订单号、卡密等数据用 `data`（等宽）样式；
 危险操作用 `variant="danger"` 并加 `confirmText` 二次确认。
 
