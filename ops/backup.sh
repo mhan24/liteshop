@@ -1,74 +1,88 @@
 #!/bin/sh
-# 数据库备份（backup 容器内运行，postgres:18-alpine）：
-# - 每天 pg_dump 一份到 /backups，保留最近 14 份
-# - 每份备份做目录完整性检查（pg_restore -l）
-# - 每周日把最新备份完整恢复到临时库，核对 orders / cards 行数与线上一致（恢复演练）
-# 结果写入 /backups/status.json，供 offsite 容器与人工排查读取。
+# 每天备份，保留最近 BACKUP_KEEP 份。周日额外做完整恢复演练。
 set -eu
+umask 077
 
-DB_HOST="${DB_HOST:-db}"
-DB_USER="${DB_USER:-liteshop}"
-DB_NAME="${DB_NAME:-liteshop}"
-CHECK_DB="liteshop_restore_check"
+export PGHOST="${DB_HOST:-db}" PGUSER="${DB_USER:-liteshop}" PGDATABASE="${DB_NAME:-liteshop}"
 KEEP="${BACKUP_KEEP:-14}"
+cd "${BACKUP_DIR:-/backups}"
+case "$KEEP" in ''|*[!0-9]*) echo "BACKUP_KEEP 必须为正整数" >&2; exit 1;; esac
+[ "$KEEP" -gt 0 ] || { echo "BACKUP_KEEP 必须为正整数" >&2; exit 1; }
 
 log() { echo "[backup] $(date '+%F %T') $*"; }
 
-status() { # $1=ok|fail $2=message
-  printf '{"time":"%s","result":"%s","message":"%s"}\n' "$(date -Iseconds)" "$1" "$2" > /backups/status.json
+status() {
+  printf '{"time":"%s","result":"%s","message":"%s"}\n' "$(date -Iseconds)" "$1" "$2" > "$work/status" &&
+    mv "$work/status" status.json
 }
 
-count() { # $1=database $2=table
-  psql -h "$DB_HOST" -U "$DB_USER" -d "$1" -Atc "SELECT count(*) FROM $2"
-}
+dump_for_drill() (
+  cd "$work" || exit 1
+  # psql 保持导出快照的事务，前台 pg_dump 和行数查询看到同一份数据。
+  psql -XqAt -v ON_ERROR_STOP=1 <<'SQL' || exit 1
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SELECT pg_export_snapshot() AS snapshot \gset
+\setenv LITESHOP_SNAPSHOT :snapshot
+\o counts
+SELECT (SELECT count(*) FROM public.orders), (SELECT count(*) FROM public.cards), (SELECT count(*) FROM public.deliveries);
+\o
+\! pg_dump --snapshot="$LITESHOP_SNAPSHOT" -Fc -f archive && touch dump-complete
+COMMIT;
+SQL
+  [ -f dump-complete ]
+)
 
-restore_drill() { # $1=dump file
-  log "恢复演练：$1 → $CHECK_DB"
-  psql -h "$DB_HOST" -U "$DB_USER" -d postgres -qc "DROP DATABASE IF EXISTS $CHECK_DB WITH (FORCE)"
-  psql -h "$DB_HOST" -U "$DB_USER" -d postgres -qc "CREATE DATABASE $CHECK_DB"
-  pg_restore -h "$DB_HOST" -U "$DB_USER" -d "$CHECK_DB" --no-owner --exit-on-error "$1"
-  for t in orders cards deliveries; do
-    restored=$(count "$CHECK_DB" "$t")
-    live=$(count "$DB_NAME" "$t")
-    # 备份之后线上可能新增了行：恢复数 ≤ 线上数，且线上数不应该比备份多出太多（>10% 说明备份过旧）
-    if [ "$restored" -gt "$live" ] || [ $((live - restored)) -gt $((live / 10 + 50)) ]; then
-      psql -h "$DB_HOST" -U "$DB_USER" -d postgres -qc "DROP DATABASE IF EXISTS $CHECK_DB WITH (FORCE)"
-      return 1
-    fi
-    log "  $t: 备份 $restored / 线上 $live"
-  done
-  psql -h "$DB_HOST" -U "$DB_USER" -d postgres -qc "DROP DATABASE IF EXISTS $CHECK_DB WITH (FORCE)"
-}
+restore_drill() (
+  check_db="liteshop_restore_${work##*.}"
+  log "恢复演练：$check_db"
+  createdb "$check_db" || exit 1
+  trap 'rc=$?; dropdb "$check_db" || rc=1; exit "$rc"' EXIT
+  pg_restore -d "$check_db" --no-owner --exit-on-error "$work/archive" || exit 1
+  counts=$(psql -XqAt -v ON_ERROR_STOP=1 -d "$check_db" -c 'SELECT (SELECT count(*) FROM public.orders), (SELECT count(*) FROM public.cards), (SELECT count(*) FROM public.deliveries)') || exit 1
+  expected=$(cat "$work/counts") || exit 1
+  [ -n "$counts" ] && [ "$counts" = "$expected" ]
+)
 
-run_once() {
+run_once() (
   ts=$(date +%Y%m%d-%H%M%S)
-  file="/backups/liteshop-$ts.dump"
-  if ! pg_dump -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -F c -f "$file.tmp"; then
-    rm -f "$file.tmp"; log "pg_dump 失败"; status fail "pg_dump 失败"; return 1
-  fi
-  if ! pg_restore -l "$file.tmp" > /dev/null; then
-    rm -f "$file.tmp"; log "备份文件损坏"; status fail "备份文件损坏"; return 1
-  fi
-  mv "$file.tmp" "$file"
-  log "已备份 ${file}（$(du -h "$file" | cut -f1)）"
-  ls -1t /backups/liteshop-*.dump 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
-
-  if [ "$(date +%u)" = 7 ] || [ "${FORCE_DRILL:-0}" = 1 ]; then
-    if restore_drill "$file"; then
-      status ok "备份 ${ts}，恢复演练通过"
-    else
-      log "恢复演练失败"; status fail "备份 $ts 恢复演练失败"; return 1
-    fi
+  work=$(mktemp -d ".liteshop-$ts.XXXXXX") || exit 1
+  trap 'rm -rf "$work"' EXIT
+  file="${work#.}.dump"
+  result="备份 $ts"
+  drill=0
+  if [ "$(date +%u)" = 7 ] || [ "${FORCE_DRILL:-0}" = 1 ]; then drill=1; fi
+  if [ "$drill" = 1 ]; then
+    dump_for_drill || { status fail "快照备份失败"; exit 1; }
   else
-    status ok "备份 $ts"
+    pg_dump -Fc -f "$work/archive" || { status fail "pg_dump 失败"; exit 1; }
   fi
-}
+  if ! pg_restore -l "$work/archive" > /dev/null; then
+    status fail "备份文件损坏"; exit 1
+  fi
+  if [ "$drill" = 1 ]; then
+    if ! restore_drill; then
+      status fail "备份 $ts 恢复演练失败"; exit 1
+    fi
+    result="${result}，恢复演练通过"
+  fi
+  if ! ln "$work/archive" "$file"; then
+    status fail "无法保存备份 $ts"; exit 1
+  fi
+  log "已备份 $file"
+  # shell 通配符按文件名排序。清理最旧的文件，多次并发删除同一路径是幂等的。
+  set -- liteshop-*.dump
+  while [ "$#" -gt "$KEEP" ]; do
+    rm -f "./$1" || exit 1
+    shift
+  done
+  status ok "$result"
+)
 
 if [ "${1:-}" = "--once" ]; then
   run_once
   exit $?
 fi
 while true; do
-  run_once || true
+  run_once || log "备份失败，24 小时后重试"
   sleep 86400
 done

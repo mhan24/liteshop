@@ -15,12 +15,20 @@ if [ -z "${RCLONE_CONFIG_OFFSITE_TYPE:-}" ]; then
   exec sleep infinity
 fi
 
+case "$KEEP_DAYS" in ''|*[!0-9]*) echo "OFFSITE_KEEP_DAYS 必须为正整数" >&2; exit 1;; esac
+[ "$KEEP_DAYS" -gt 0 ] || { echo "OFFSITE_KEEP_DAYS 必须为正整数" >&2; exit 1; }
+
 sync_once() {
   # 只传完整的 .dump（.tmp 是正在写的文件）
-  rclone copy /backups offsite: --include "liteshop-*.dump" --max-age 72h --immutable --stats-one-line -v
-  rclone delete offsite: --include "liteshop-*.dump" --min-age "${KEEP_DAYS}d"
-  newest=$(rclone lsf offsite: --include "liteshop-*.dump" | sort | tail -n 1)
-  log "同步完成，远端最新：${newest:-（无）}"
+  rclone copy /backups offsite: --include "liteshop-*.dump" --max-age "${KEEP_DAYS}d" --immutable --stats-one-line -v || return 1
+  recent=$(rclone lsf offsite: --files-only --include "liteshop-*.dump" --max-age "${KEEP_DAYS}d") || return 1
+  if [ -z "$recent" ]; then
+    log "远端没有保留期内的备份，保留现有文件"
+    return 1
+  fi
+  rclone delete offsite: --include "liteshop-*.dump" --min-age "${KEEP_DAYS}d" || return 1
+  newest=$(printf '%s\n' "$recent" | sort | tail -n 1)
+  log "同步完成，远端最新：$newest"
 }
 
 if [ "${1:-}" = "--once" ]; then

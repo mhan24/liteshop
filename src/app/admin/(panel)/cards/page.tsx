@@ -2,7 +2,7 @@ import { asc, desc, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { cards, products } from "@/db/schema";
 import { getConfig } from "@/server/settings";
-import { csrfToken } from "@/server/admin-auth";
+import { requireAdminPageSession } from "@/server/admin-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/input";
 import { Label, Select, Textarea } from "@/components/ui/input";
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 const CARD_STATUS = { available: "可售", reserved: "已锁定（待支付）", sold: "已售" } as const;
 
 export default async function AdminCardsPage() {
-  const csrf = await csrfToken();
+  const { csrf } = await requireAdminPageSession();
   const [productRows, recent, threshold, counts] = await Promise.all([
     db.select().from(products).orderBy(asc(products.id)),
     db.select().from(cards).orderBy(desc(cards.id)).limit(100),

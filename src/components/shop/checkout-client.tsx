@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { checkoutAction, type CheckoutSuccess } from "@/actions/shop";
 import { useCart } from "./cart";
 import { TurnstileWidget } from "./turnstile-widget";
@@ -22,14 +22,17 @@ export function CheckoutClient({
   human: TurnstileClientConfig;
   gatewayReady: boolean;
 }) {
-  const { items, setQuantity, remove, clear } = useCart();
+  const { items, setQuantity, remove, removePurchased } = useCart();
   const [state, formAction, pending] = useActionState(checkoutAction, null);
 
-  // 订单建好即清空购物车：商品已锁定在订单里，留着只会诱导重复下单
-  const created = state?.ok === true;
+  const receipt = state?.ok ? state.data : undefined;
+  const lastRemoved = useRef<string | null>(null);
   useEffect(() => {
-    if (created) clear();
-  }, [created, clear]);
+    if (receipt?.purchasedItems.length && lastRemoved.current !== receipt.orderNo) {
+      lastRemoved.current = receipt.orderNo;
+      removePurchased(receipt.purchasedItems);
+    }
+  }, [receipt, removePurchased]);
   const [cfToken, setCfToken] = useState("");
   const [verifyKey, setVerifyKey] = useState(0);
 
@@ -91,11 +94,14 @@ export function CheckoutClient({
           </a>
         ) : (
           <p className="rounded-sm border border-tint-yellow-fg/25 bg-tint-yellow px-4 py-3 text-xs leading-5 text-tint-yellow-fg">
-            收银台响应超时，订单已保留并等待核实。请勿重复下单，稍后可在「订单查询」查看最新状态。
+            {d.reconciling ? "订单正在核实，请勿重复付款。" : "当前无需继续付款。"}{" "}
+            <Link href={`/pay/${d.orderNo}`} className="underline">查看订单状态</Link>
           </p>
         )}
 
-        <p className="text-xs leading-5 text-faint">购物车已清空。后续可随时在「订单查询」查看订单状态与卡密。</p>
+        <p className="text-xs leading-5 text-faint">
+          {d.purchasedItems.length ? "本单商品已从购物车扣除。" : "本单商品已保留在购物车。"}可在「订单查询」查看订单状态。
+        </p>
       </div>
     );
   }
@@ -157,7 +163,7 @@ export function CheckoutClient({
           <div className="space-y-1.5">
             <Label htmlFor="co-email">下单邮箱</Label>
             <Input id="co-email" name="email" type="email" required placeholder="you@example.com" />
-            <p className="text-xs leading-5 text-muted">卡密将自动发送到此邮箱，请确保填写准确。</p>
+            <p className="text-xs leading-5 text-muted">查询订单和查看卡密时需要使用这个邮箱。</p>
           </div>
 
           <div className="space-y-1.5">

@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { sweepExpired } from "@/server/orders";
 import { flushDeliveryEmails } from "@/server/mail";
 import { flushNotifications } from "@/server/notify";
-import { db } from "@/db";
+import { db, pool } from "@/db";
 import { notifications, notifyLogs } from "@/db/schema";
 import { lt } from "drizzle-orm";
 import { env } from "@/lib/env";
@@ -25,6 +25,21 @@ export async function POST(request: Request) {
     return new Response("too many", { status: 429 });
   }
 
+  // Cron can overlap during a long SMTP send or a deployment. The session lock also covers other app instances.
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query<{ acquired: boolean }>(
+      "SELECT pg_try_advisory_lock(hashtextextended('liteshop:maintenance', 0)) AS acquired"
+    );
+    if (!rows[0]?.acquired) return Response.json({ ok: true, skipped: true });
+    return await runMaintenance();
+  } finally {
+    // Closing this connection releases its lock even when a maintenance step throws.
+    client.release(true);
+  }
+}
+
+async function runMaintenance() {
   const sweep = await sweepExpired();
   const mail = await flushDeliveryEmails(50);
   const notified = await flushNotifications(20);

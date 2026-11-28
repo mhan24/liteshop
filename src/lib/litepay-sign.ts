@@ -2,7 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 /**
  * LitePay 接口签名（BEpusdt 通用签名，与网关 internal/sign 逐字对齐）：
- * 1. 剔除 signature 与空值（null / undefined / ""）
+ * 1. 剔除 signature、空值（null / undefined / ""）、数组与对象
  * 2. 键 ASCII 升序
  * 3. k=v 用 & 拼接；布尔值按 true/false，数值取 JSON 原生十进制表示
  * 4. 末尾直接拼接接口令牌（无分隔符）
@@ -28,7 +28,7 @@ export function litepaySignString(params: Record<string, unknown>, token: string
   const parts: string[] = [];
   for (const k of keys) {
     const v = params[k];
-    if (v === null || v === undefined || v === "") continue;
+    if (v === null || v === undefined || v === "" || typeof v === "object") continue;
     parts.push(`${k}=${jsonValue(v)}`);
   }
   return parts.join("&") + token;

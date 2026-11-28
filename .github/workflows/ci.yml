@@ -58,8 +58,42 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: PostgreSQL backup and restore drill
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          directory=$(docker exec "$PG_CONTAINER" mktemp -d)
+          docker exec -i -e FORCE_DRILL=1 -e BACKUP_DIR="$directory" -e DB_HOST=127.0.0.1 \
+            -e DB_USER=postgres -e DB_NAME=liteshop_test -e PGPASSWORD=liteshop-test \
+            "$PG_CONTAINER" sh -s -- --once < ops/backup.sh
+          docker exec "$PG_CONTAINER" sh -ec '
+            cd "$1"
+            set -- *.dump
+            test "$#" -eq 1
+            test -s "$1"
+            pg_restore -l "$1" >/dev/null
+            grep -q "\"result\":\"ok\"" status.json
+          ' sh "$directory"
+          remaining=$(docker exec "$PG_CONTAINER" psql -U postgres -d postgres -Atc \
+            "SELECT count(*) FROM pg_database WHERE datname LIKE 'liteshop_restore_%'")
+          test "$remaining" = 0
+
       - name: Build
         run: npm run build
+
+      - name: Production admin alias routing
+        env:
+          HOSTNAME: 127.0.0.1
+          PORT: "39274"
+          ADMIN_PATH: /robots-txt-ops
+          DATABASE_URL: postgres://postgres:liteshop-test@127.0.0.1:54330/liteshop_test
+        run: |
+          node .next/standalone/server.js &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          curl -fsS --retry 15 --retry-connrefused --retry-delay 1 "http://127.0.0.1:$PORT$ADMIN_PATH/login" -o /dev/null
+          node tests/standalone/admin-routing.mjs
 
       # 部署脚本是上线路径的一部分：语法错误应在 CI 暴露
       - name: Shell checks

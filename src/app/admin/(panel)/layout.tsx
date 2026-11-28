@@ -1,13 +1,11 @@
-import { getAdminSession } from "@/server/admin-auth";
-import { redirect } from "next/navigation";
+import { requireAdminPageSession } from "@/server/admin-auth";
 import { env } from "@/lib/env";
 import { logoutAction } from "@/actions/admin";
 import { AdminNav } from "@/components/admin/admin-nav";
 
 /** 后台布局守卫：未登录一律跳登录页（/admin/login，经 ADMIN_PATH 伪装） */
 export default async function AdminPanelLayout({ children }: { children: React.ReactNode }) {
-  const session = await getAdminSession();
-  if (!session) redirect(`${env.ADMIN_PATH}/login`);
+  const session = await requireAdminPageSession();
 
   async function logout() {
     "use server";

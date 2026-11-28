@@ -51,6 +51,7 @@ describe("订单查询与生命周期", () => {
     const order = (await db.select().from(orders).where(eq(orders.orderNo, r.orderNo)))[0]!;
     await db.update(orders).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(orders.id, order.id));
 
+    expect((await queryOrder("buyer@test.dev", r.orderNo, r.queryPassword))?.paymentUrl).toBeNull();
     const result = await sweepExpired();
     expect(result.closedOrders).toContain(r.orderNo);
     expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("closed");
@@ -58,6 +59,20 @@ describe("订单查询与生命周期", () => {
     expect(cardRows.every((c) => c.status === "available")).toBe(true);
     const payRows = await db.select().from(payments).where(eq(payments.orderId, order.id));
     expect(payRows[0]!.status).toBe("expired");
+  });
+
+  it("建单中断后无有效期的订单转入对账，保留卡密，刚创建的订单继续等待", async () => {
+    await seedAutoProduct("stalled", 2);
+    const create = () => createOrder({ email: "buyer@test.dev", items: [{ slug: "stalled", quantity: 1 }] });
+    const stalled = await create();
+    const active = await create();
+    await db.update(orders).set({ expiresAt: null, updatedAt: new Date(Date.now() - 180_000) }).where(eq(orders.orderNo, stalled.orderNo));
+    await db.update(orders).set({ expiresAt: null, updatedAt: new Date() }).where(eq(orders.orderNo, active.orderNo));
+    expect((await sweepExpired()).closedOrders).toEqual([]);
+    const [held] = await db.select().from(orders).where(eq(orders.orderNo, stalled.orderNo));
+    expect(held!.status).toBe("reconciling");
+    expect((await db.select().from(cards).where(eq(cards.reservedOrderId, held!.id)))[0]!.status).toBe("reserved");
+    expect((await db.select().from(orders).where(eq(orders.orderNo, active.orderNo)))[0]!.status).toBe("pending");
   });
 
   it("买家取消：三因子校验 + 卡密退回库存", async () => {

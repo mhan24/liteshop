@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { activePaymentUrl } from "@/server/order-query";
 import { getOrderWithItems } from "@/server/orders";
 import { formatMoney } from "@/lib/money";
 import { Badge } from "@/components/ui/input";
@@ -17,8 +18,8 @@ const STATUS_META: Record<
   { label: string; tone: "neutral" | "green" | "yellow" | "blue"; subtitle: string }
 > = {
   pending: { label: "待支付", tone: "neutral", subtitle: "页面每 5 秒自动刷新，付款确认后立即发卡。" },
-  paid: { label: "已付款，发卡中", tone: "blue", subtitle: "已收到付款，正在分配卡密，请稍候刷新。" },
-  completed: { label: "已完成", tone: "green", subtitle: "卡密已发放并同步至下单邮箱。" },
+  paid: { label: "已付款，发卡中", tone: "blue", subtitle: "已收到付款，卡密发放后此页会自动更新。" },
+  completed: { label: "已完成", tone: "green", subtitle: "卡密已发放，可凭查单密码查看。" },
   closed: { label: "已关闭", tone: "neutral", subtitle: "订单已关闭，占用的卡密已退回库存。" },
   reconciling: { label: "待核实", tone: "yellow", subtitle: "收银台未返回明确结果，订单已保留待核实。" },
 };
@@ -84,7 +85,7 @@ export default async function PayPage({ params }: { params: Promise<{ orderNo: s
 
         {order.status === "completed" ? (
           <p className="rounded-sm border border-tint-green-fg/25 bg-tint-green px-4 py-3 text-sm leading-6 text-tint-green-fg">
-            卡密已发送到下单邮箱。如需在网页查看，请前往「订单查询」并输入订单号、下单邮箱和查单密码。
+            前往「订单查询」并输入订单号、下单邮箱和查单密码。
           </p>
         ) : null}
 
@@ -100,7 +101,7 @@ export default async function PayPage({ params }: { params: Promise<{ orderNo: s
           </p>
         ) : null}
 
-        <PayStatusActions orderNo={order.orderNo} status={order.status} paymentUrl={payment?.paymentUrl ?? null} />
+        <PayStatusActions orderNo={order.orderNo} status={order.status} paymentUrl={await activePaymentUrl(order, payment)} />
       </section>
     </div>
   );

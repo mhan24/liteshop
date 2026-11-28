@@ -1,4 +1,4 @@
-import { csrfToken } from "@/server/admin-auth";
+import { requireAdminPageSession } from "@/server/admin-auth";
 import { getGatewayStatus, webhookPath } from "@/server/payments";
 import { getConfig, getSiteUrl } from "@/server/settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +18,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function AdminSettingsPage() {
-  const csrf = await csrfToken();
+  const { csrf } = await requireAdminPageSession();
   const [c, gateway, siteUrl] = await Promise.all([getConfig(), getGatewayStatus(), getSiteUrl()]);
   const webhookUrl = `${siteUrl}${webhookPath("litepay")}`;
 

@@ -2,7 +2,7 @@ import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { categories } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
-import { csrfToken } from "@/server/admin-auth";
+import { requireAdminPageSession } from "@/server/admin-auth";
 import { listAllProducts } from "@/server/catalog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
  * 因此表单里没有「发货方式」「库存上限」这类字段。
  */
 export default async function AdminProductsPage() {
-  const csrf = await csrfToken();
+  const { csrf } = await requireAdminPageSession();
   const [items, cats] = await Promise.all([
     listAllProducts(),
     db.select().from(categories).orderBy(asc(categories.sortOrder)),

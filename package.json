@@ -13,7 +13,7 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=.env scripts/db/migrate.mjs",
-    "db:seed": "tsx scripts/db/seed.ts",
+    "db:seed": "node --env-file-if-exists=.env --import tsx scripts/db/seed.ts",
     "hash-password": "tsx scripts/admin/hash-password.ts"
   },
   "dependencies": {
@@ -43,5 +43,10 @@
     "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "0.25.12"
+    }
   }
 }

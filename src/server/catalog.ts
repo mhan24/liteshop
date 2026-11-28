@@ -71,7 +71,7 @@ export async function listStoreProducts(filter?: { categorySlug?: string; q?: st
   const conditions = [eq(products.status, "on")];
   if (filter?.categorySlug) conditions.push(eq(categories.slug, filter.categorySlug));
   if (filter?.q) {
-    const kw = `%${filter.q.replace(/[%_\\]/g, "")}%`;
+    const kw = `%${filter.q.replace(/[%_\\]/g, "\\$&")}%`;
     const search = or(ilike(products.name, kw), ilike(products.description, kw));
     if (search) conditions.push(search);
   }

@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useActionState } from "react";
 import { cancelOrderAction, resumePaymentAction } from "@/actions/shop";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -21,13 +20,24 @@ export function PayStatusActions({
   const router = useRouter();
 
   useEffect(() => {
-    if (status !== "pending") return;
-    const timer = setInterval(() => router.refresh(), 5000);
-    return () => clearInterval(timer);
+    if (!["pending", "paid", "reconciling"].includes(status)) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") router.refresh();
+    };
+    const timer = setInterval(refresh, 5000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, [router, status]);
 
   const [cancelState, cancelAction, cancelPending] = useActionState(cancelOrderAction, null);
   const [resumeState, resumeAction, resumePending] = useActionState(resumePaymentAction, null);
+
+  useEffect(() => {
+    if (resumeState?.ok || cancelState?.ok) router.refresh();
+  }, [router, resumeState, cancelState]);
 
   if (status !== "pending") return null;
 
@@ -49,30 +59,23 @@ export function PayStatusActions({
         />
       ) : null}
 
-      {resumeState?.ok && resumeState.data?.paymentUrl ? (
-        <a
-          href={resumeState.data.paymentUrl}
-          className="inline-flex h-10 w-full items-center justify-center rounded-sm bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover active:scale-[0.98]"
-        >
-          前往新收银台付款
-        </a>
-      ) : null}
-
       <details className="faq-item rounded-sm border border-line px-4">
         <summary>遇到支付问题或取消订单</summary>
         <div className="space-y-5 pb-4">
           <form action={resumeAction} className="space-y-3 border-t border-line pt-4">
             <input type="hidden" name="orderNo" value={orderNo} />
             <p className="text-xs leading-5 text-muted">
-              如果收银台打不开或已过期，验证下单邮箱与查单密码后可重新发起支付。旧支付链接将同时作废，请勿再向旧交易付款。
+              如果收银台打不开，可验证下单邮箱和查单密码，获取当前可用的付款链接。
             </p>
             <BuyerFields idPrefix="pay" />
             <Button type="submit" variant="outline" disabled={resumePending} className="w-full">
-              {resumePending ? "处理中…" : "重新发起支付"}
+              {resumePending ? "处理中…" : "获取付款链接"}
             </Button>
           </form>
 
-          <form action={cancelAction} className="space-y-3 border-t border-line pt-4">
+          <form action={cancelAction} onSubmit={(event) => {
+            if (!window.confirm("确认取消此订单并释放预留卡密？")) event.preventDefault();
+          }} className="space-y-3 border-t border-line pt-4">
             <input type="hidden" name="orderNo" value={orderNo} />
             <BuyerFields idPrefix="cancel" />
             <Button type="submit" variant="danger" disabled={cancelPending} className="w-full">

@@ -1,10 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { cards, orders, payments } from "@/db/schema";
 import { createOrder, OrderError } from "@/server/orders";
+import * as orderNumbers from "@/lib/order-no";
+import { checkoutAction } from "@/actions/shop";
+import { mockAdapter } from "@/server/payments/mock";
 import { hashQueryPassword, verifyQueryPassword } from "@/lib/query-password";
 import { resetDb, seedAutoProduct } from "../helpers";
+
+vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 
 /** 游客下单：金额服务端计算、卡密锁定、一次性查单密码 */
 describe("游客下单（createOrder）", () => {
@@ -44,11 +49,56 @@ describe("游客下单（createOrder）", () => {
     await seedAutoProduct("p2", 1);
     await expect(
       createOrder({ email: "buyer@test.dev", items: [{ slug: "p2", quantity: 3 }] })
-    ).rejects.toThrow(/OUT_OF_STOCK|库存不足/);
+    ).rejects.toMatchObject({ code: "OUT_OF_STOCK", message: expect.stringContaining("库存不足") });
     const allOrders = await db.select().from(orders);
     expect(allOrders).toHaveLength(0);
     const allCards = await db.select().from(cards);
     expect(allCards.every((c) => c.status === "available")).toBe(true);
+  });
+
+  it("订单号冲突后重试，库存仅按成功的订单占用", async () => {
+    await seedAutoProduct("retry", 2);
+    const input = { email: "buyer@test.dev", items: [{ slug: "retry", quantity: 1 }] };
+    const first = await createOrder(input);
+    const generate = vi.spyOn(orderNumbers, "generateOrderNo").mockReturnValueOnce(first.orderNo);
+    try {
+      const second = await createOrder(input);
+      expect(second.orderNo).not.toBe(first.orderNo);
+      expect(generate).toHaveBeenCalledTimes(2);
+      expect(await db.select().from(orders)).toHaveLength(2);
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it("部分数量非法时拒绝整单", async () => {
+    await seedAutoProduct("invalid-lines", 3);
+    for (const quantity of [0, 1.5]) {
+      await expect(createOrder({
+        email: "buyer@test.dev",
+        items: [{ slug: "invalid-lines", quantity: 1 }, { slug: "invalid-lines", quantity }],
+      })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    }
+    expect(await db.select().from(orders)).toHaveLength(0);
+  });
+
+  it("建单时网关已关闭交易，回执保留查单密码和购物车", async () => {
+    await seedAutoProduct("already-closed", 1);
+    const adapter = vi.spyOn(mockAdapter, "createPayment").mockResolvedValueOnce({
+      kind: "closed", providerRef: "closed-transaction", message: "网关已关闭",
+    });
+    const form = new FormData();
+    form.set("email", "buyer@test.dev");
+    form.set("items", JSON.stringify([{ slug: "already-closed", quantity: 1 }]));
+    try {
+      const receipt = await checkoutAction(null, form);
+      expect(receipt).toMatchObject({
+        ok: true, message: expect.stringContaining("已关闭"),
+        data: { purchasedItems: [], queryPassword: expect.any(String), paymentUrl: null },
+      });
+    } finally {
+      adapter.mockRestore();
+    }
   });
 
   it("下架商品不可下单", async () => {

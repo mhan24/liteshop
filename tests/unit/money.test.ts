@@ -23,6 +23,11 @@ describe("money：美元金额换算（禁浮点误差）", () => {
     expect(() => toMinorUnits("-1.5")).toThrow();
   });
 
+  it("只接受可精确表示的整数美分", () => {
+    expect(toMinorUnits("90071992547409.91")).toBe(Number.MAX_SAFE_INTEGER);
+    expect(() => toMinorUnits("90071992547409.92")).toThrow();
+  });
+
   it("格式化输出", () => {
     expect(formatMinor(1234)).toBe("12.34");
     expect(formatMoney(1234)).toBe("$12.34");

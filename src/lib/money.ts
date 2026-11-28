@@ -23,7 +23,9 @@ export function toMinorUnits(input: string | number): number {
   const [, intPart, frac = ""] = m;
   if (/[1-9]/.test(frac.slice(2))) throw new MoneyParseError(`金额精度低于 0.01，无法结算: ${input}`);
   const frac2 = frac.slice(0, 2).padEnd(2, "0");
-  return Number(intPart) * 100 + Number(frac2);
+  const cents = Number(intPart + frac2);
+  if (!Number.isSafeInteger(cents)) throw new MoneyParseError("金额超出可精确表示的范围");
+  return cents;
 }
 
 /** 美分整数 → "12.34" */

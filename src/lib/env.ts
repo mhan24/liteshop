@@ -15,7 +15,7 @@ const schema = z.object({
   ADMIN_PASSWORD_HASH: z.string().min(1).default(""),
   ADMIN_PATH: z
     .string()
-    .regex(/^\/[a-z0-9-/]*$/i, "ADMIN_PATH 需为 / 开头路径")
+    .regex(/^\/(?:[a-z0-9-]+(?:\/[a-z0-9-]+)*\/?)?$/i, "ADMIN_PATH 需为 / 开头的本机路径，不能含空路径段")
     .refine((v) => !/^\/(api|_next)(\/|$)/i.test(v), "ADMIN_PATH 不能占用 /api 或 /_next")
     .default("/admin")
     .transform(normalizeAdminPath),

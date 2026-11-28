@@ -1,6 +1,8 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { deliveries, orderItems, orders, payments } from "@/db/schema";
+import { litepayCashierUrl } from "./payments/litepay";
+import { getConfig } from "./settings";
 import { verifyQueryPassword } from "@/lib/query-password";
 
 /**
@@ -24,6 +26,20 @@ export interface OrderQueryView {
   deliveryContent: string | null;
   /** 待支付订单的收银台地址 */
   paymentUrl: string | null;
+}
+
+export async function activePaymentUrl(
+  order: Pick<typeof orders.$inferSelect, "status" | "expiresAt">,
+  payment: Pick<typeof payments.$inferSelect, "status" | "expiresAt" | "paymentUrl" | "isCurrent" | "channel" | "providerRef"> | null | undefined
+): Promise<string | null> {
+  const now = Date.now();
+  if (order.status !== "pending" || !payment?.isCurrent || payment.status !== "pending") return null;
+  if ((order.expiresAt && order.expiresAt.getTime() <= now) || (payment.expiresAt && payment.expiresAt.getTime() <= now)) return null;
+  if (payment.channel === "litepay") {
+    const apiBase = /^\s*http:/i.test(payment.paymentUrl ?? "") ? (await getConfig()).litepayApiBase : null;
+    return litepayCashierUrl(payment.paymentUrl, payment.providerRef, apiBase);
+  }
+  return payment.paymentUrl;
 }
 
 export async function queryOrder(
@@ -73,6 +89,6 @@ export async function queryOrder(
       lineTotalCents: i.lineTotalCents,
     })),
     deliveryContent: order.status === "completed" ? (deliveryRows[0]?.content ?? null) : null,
-    paymentUrl: order.status === "pending" ? (paymentRows[0]?.paymentUrl ?? null) : null,
+    paymentUrl: await activePaymentUrl(order, paymentRows[0]),
   };
 }

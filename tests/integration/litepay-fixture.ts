@@ -35,7 +35,7 @@ async function prepareLitepayOrder(slug: string, quantity = 1, cardCount = 3) {
   const providerRef = `LP${Date.now().toString(36)}`;
   await db
     .update(payments)
-    .set({ channel: "litepay", providerRef })
+    .set({ channel: "litepay", providerRef, paymentUrl: `https://pay.test.local/pay/${providerRef}`, expectedAmount: null })
     .where(eq(payments.orderId, order.id));
   const payRows = await db.select().from(payments).where(eq(payments.orderId, order.id));
   return { r, order, payment: payRows[0]! };

@@ -14,5 +14,7 @@ describe("环境变量校验", () => {
     expect(parseEnv({ ...base, ADMIN_PATH: "/secret/" }).ADMIN_PATH).toBe("/secret");
     expect(parseEnv(base).ADMIN_PATH).toBe("/admin");
     expect(() => parseEnv({ ...base, ADMIN_PATH: "/api/x" })).toThrow(/ADMIN_PATH/);
+    expect(() => parseEnv({ ...base, ADMIN_PATH: "//ops" })).toThrow(/ADMIN_PATH/);
+    expect(() => parseEnv({ ...base, ADMIN_PATH: "/ops//login" })).toThrow(/ADMIN_PATH/);
   });
 });

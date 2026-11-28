@@ -2,7 +2,8 @@
  * 支付适配器接口。站点只接一个网关（LitePay），mock 仅用于开发与测试。
  *
  * 结果分类（决定上层能否安全释放库存）：
- * - created ：网关明确返回交易
+ * - created ：网关明确返回可付款交易
+ * - closed  ：网关明确返回原交易已过期或取消 → 保留交易号并释放库存
  * - rejected：网关明确拒绝本次请求（未建单）→ 可安全关单释放库存
  * - unknown ：结果未知（超时/5xx/响应损坏）→ 网关可能已建单，必须保留订单进入对账
  */
@@ -42,6 +43,7 @@ export interface CreatedPayment {
 
 export type CreateOutcome =
   | { kind: "created"; payment: CreatedPayment }
+  | { kind: "closed"; providerRef: string; message: string }
   | { kind: "rejected"; message: string }
   | { kind: "unknown"; message: string };
 

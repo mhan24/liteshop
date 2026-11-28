@@ -40,6 +40,7 @@ const checkoutSchema = z.object({
 });
 
 export interface CheckoutSuccess {
+  purchasedItems: { slug: string; quantity: number }[];
   orderNo: string;
   queryPassword: string;
   totalDisplay: string;
@@ -81,12 +82,15 @@ export async function checkoutAction(
       items: parsed.items,
       note: parsed.note,
     });
+    const closed = result.status === "closed";
+    let message = "订单已创建，请先保存查单密码";
+    if (closed) message = "订单已关闭，请保存查单密码以便核对";
+    else if (result.reconciling) message = "订单已保留，等待核实";
     return {
       ok: true,
-      message: result.reconciling
-        ? "订单已保留，等待核实"
-        : "订单已创建，请先保存查单密码",
+      message,
       data: {
+        purchasedItems: closed ? [] : parsed.items,
         orderNo: result.orderNo,
         queryPassword: result.queryPassword,
         totalDisplay: formatMoney(result.totalCents),
@@ -110,8 +114,12 @@ export async function queryOrderAction(
   _prev: ActionResult<QuerySuccess> | null,
   formData: FormData
 ): Promise<ActionResult<QuerySuccess>> {
-  const email = String(formData.get("email") ?? "");
-  const limited = rateLimit(`query:${await clientIp()}:${email.trim().toLowerCase()}`, 10, 10 * 60_000);
+  const ip = await clientIp();
+  const ipLimit = rateLimit(`query-ip:${ip}`, 60, 10 * 60_000);
+  if (!ipLimit.ok) return { ok: false, message: `查询过于频繁，请 ${ipLimit.retryAfterSeconds} 秒后重试` };
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!email || email.length > 200) return { ok: false, message: "请填写下单时使用的邮箱" };
+  const limited = rateLimit(`query:${ip}:${email}`, 10, 10 * 60_000);
   if (!limited.ok) {
     return { ok: false, message: `查询过于频繁，请 ${limited.retryAfterSeconds} 秒后重试` };
   }

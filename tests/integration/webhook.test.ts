@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { cards, deliveries, orders, payments } from "@/db/schema";
-import { createOrder, handlePaymentWebhook } from "@/server/orders";
+import { createOrder, getOrderWithItems, handlePaymentWebhook, resumePayment } from "@/server/orders";
+import { activePaymentUrl } from "@/server/order-query";
 import { buildMockNotifyBody } from "@/server/payments/mock";
 import { lipayTestHelpers } from "./litepay-fixture";
 import { resetDb, seedAutoProduct } from "../helpers";
@@ -176,6 +177,46 @@ describe("LitePay 渠道回调", () => {
     expect(await db.select().from(deliveries).where(eq(deliveries.orderId, order.id))).toHaveLength(1);
   });
 
+  it("继续付款沿用网关交易和付款期限，过期后不再展示链接", async () => {
+    const { r, order, payment } = await lipayTestHelpers.prepareLitepayOrder("lp-resume");
+    const resume = () => resumePayment(r.orderNo, order.email, r.queryPassword);
+    for (const result of await Promise.all([resume(), resume()])) {
+      expect(result.ok).toBe(true);
+      expect(result.data?.paymentUrl).toBe(payment.paymentUrl);
+    }
+    await db.update(payments).set({ paymentUrl: "https://pay.test.local/pay/stale-trade" }).where(eq(payments.id, payment.id));
+    const stale = (await getOrderWithItems(r.orderNo))!;
+    expect(await activePaymentUrl(stale.order, stale.payment)).toBeNull();
+    expect((await resume()).ok).toBe(false);
+    await db.update(payments).set({ paymentUrl: payment.paymentUrl }).where(eq(payments.id, payment.id));
+    await db.update(payments).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(payments.id, payment.id));
+    expect((await resume()).ok).toBe(false);
+    const attempts = await db.select().from(payments).where(eq(payments.orderId, order.id));
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({ id: payment.id, providerRef: payment.providerRef, isCurrent: true });
+  });
+
+  it("回调认领丢失响应时同时核对渠道和金额，关闭后到账留作人工核对", async () => {
+    const { r, order, payment } = await lipayTestHelpers.prepareLitepayOrder("lp-lost-ref");
+    await db.update(payments).set({ providerRef: null }).where(eq(payments.id, payment.id));
+    const body = (amountCents: number) => lipayTestHelpers.signedNotify({
+      orderNo: r.orderNo, providerRef: payment.providerRef!, amountCents, status: 2,
+    });
+    expect((await handlePaymentWebhook("litepay", body(order.totalCents + 1))).respond).toBe("fail");
+    expect((await db.select().from(payments).where(eq(payments.id, payment.id)))[0]!.providerRef).toBeNull();
+    await db.update(payments).set({ channel: "mock" }).where(eq(payments.id, payment.id));
+    expect((await handlePaymentWebhook("litepay", body(order.totalCents))).respond).toBe("fail");
+    await db.update(payments).set({ channel: "litepay", status: "expired" }).where(eq(payments.id, payment.id));
+    await db.update(orders).set({ status: "closed" }).where(eq(orders.id, order.id));
+    for (let i = 0; i < 2; i++) {
+      expect((await handlePaymentWebhook("litepay", body(order.totalCents))).respond).toBe("success");
+    }
+    expect((await db.select().from(payments).where(eq(payments.id, payment.id)))[0]).toMatchObject({
+      providerRef: payment.providerRef, status: "late", anomaly: "late",
+    });
+    expect(await db.select().from(deliveries).where(eq(deliveries.orderId, order.id))).toHaveLength(0);
+  });
+
   it("签名不符：拒绝处理，订单保持待支付", async () => {
     const { r, order, payment } = await lipayTestHelpers.prepareLitepayOrder("lp2");
     const body = lipayTestHelpers.signedNotify({
@@ -187,7 +228,7 @@ describe("LitePay 渠道回调", () => {
     const tampered = JSON.stringify({ ...JSON.parse(body), amount: 0.01 });
 
     const result = await handlePaymentWebhook("litepay", tampered);
-    expect(result.respond).toBe("success");
+    expect(result.respond).toBe("fail");
     expect(result.handled).toBe(false);
     expect((await db.select().from(orders).where(eq(orders.id, order.id)))[0]!.status).toBe("pending");
   });

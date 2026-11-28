@@ -90,6 +90,38 @@ describe("LitePay 建单", () => {
     expect((await litepayAdapter.createPayment(gateway, input)).kind).toBe("unknown");
   });
 
+  it.each([{ expiration_time: 0 }, { expiration_time: 999999999 }, { status: 2 }, { order_id: "other-order" }, { amount: "11.34" }])(
+    "网关返回已结束或不符的交易时保留对账：%o", async (fields) => {
+      const mock = stubFetch(() => Response.json({ status_code: 200, data: {
+        trade_id: "T1", payment_url: "https://pay.test.local/pay/T1", ...fields,
+      } }));
+      const result = await litepayAdapter.createPayment(gateway, { ...input, subject: "数字商品".repeat(30) });
+      expect(result.kind).toBe("unknown");
+      const body = JSON.parse(String(mock.mock.calls[0]![1]!.body));
+      expect(body.name).toBe(input.orderNo);
+    }
+  );
+
+  it.each([3, 4])("识别网关终态 %s，核对订单号和金额后保留交易号", async (status) => {
+    stubFetch(() => Response.json({ status_code: 200, data: {
+      status, trade_id: "T1", order_id: input.orderNo, amount: "12.34", expiration_time: 0,
+    } }));
+    expect(await litepayAdapter.createPayment(gateway, input)).toMatchObject({ kind: "closed", providerRef: "T1" });
+  });
+
+  it.each([
+    ["https://checkout.test/pay/T1", "created"],
+    ["https://checkout.test/pay/T2", "unknown"],
+    ["https://checkout.test/pay/T1?next=other", "unknown"],
+    ["https://name@checkout.test/pay/T1", "unknown"],
+    ["http://checkout.test/pay/T1", "unknown"],
+  ])("核对收银台路径、交易号与协议：%s", async (paymentUrl, kind) => {
+    stubFetch(() => Response.json({ status_code: 200, data: {
+      trade_id: "T1", payment_url: paymentUrl, expiration_time: 120,
+    } }));
+    expect((await litepayAdapter.createPayment(gateway, input)).kind).toBe(kind);
+  });
+
   it("金额超出网关受理范围时直接拒绝，不发起请求", async () => {
     const mock = stubFetch(() => new Response("{}", { status: 200 }));
     expect((await litepayAdapter.createPayment(gateway, { ...input, amountCents: 0 })).kind).toBe(
@@ -134,6 +166,17 @@ describe("LitePay 回调验签", () => {
     expect(
       litepayAdapter.verifyNotify(gateway, JSON.stringify({ trade_id: "T1", order_id: "LS1" })).ok
     ).toBe(false);
+  });
+
+  it("忽略未知结构化扩展，不接受非标量业务字段或空白令牌", () => {
+    const valid = { trade_id: "T1", order_id: "LS1", amount: 12.34, actual_amount: 12.34, status: 2 };
+    const body = JSON.stringify({ ...JSON.parse(signed(valid)), extension: { note: "extra" } });
+    expect(litepayAdapter.verifyNotify(gateway, body).ok).toBe(true);
+    for (const key of ["trade_id", "order_id", "amount", "actual_amount", "status"]) {
+      expect(litepayAdapter.verifyNotify(gateway, signed({ ...valid, [key]: ["2"] })).ok).toBe(false);
+    }
+    const whitespace = { ...valid, signature: litepaySign(valid, "  ") };
+    expect(litepayAdapter.verifyNotify({ ...gateway, token: "  " }, JSON.stringify(whitespace)).ok).toBe(false);
   });
 
   it("令牌缺失时无法验签", () => {

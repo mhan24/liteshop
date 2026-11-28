@@ -41,7 +41,7 @@ export function AddToCart({
           min={1}
           max={99}
           value={quantity}
-          onChange={(e) => setQuantity(Math.min(99, Math.max(1, Number(e.target.value) || 1)))}
+          onChange={(e) => setQuantity(Math.min(99, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))}
           aria-label="购买数量"
           className="w-24"
         />

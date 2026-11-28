@@ -1,5 +1,6 @@
 import { count, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { requireAdminPageSession } from "@/server/admin-auth";
 import { orders } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
 import { Badge } from "@/components/ui/input";
@@ -15,6 +16,7 @@ const STATUS_LABEL: Record<string, { label: string; tone: "neutral" | "green" | 
 };
 
 export default async function AdminDashboard() {
+  await requireAdminPageSession();
   const [recent, statusCounts] = await Promise.all([
     db.select().from(orders).orderBy(sql`created_at desc`).limit(15),
     db.select({ status: orders.status, c: count() }).from(orders).groupBy(orders.status),

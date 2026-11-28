@@ -17,7 +17,8 @@ function hashPassword(password: string): string {
 }
 
 async function main() {
-  const url = process.env.DATABASE_URL ?? "postgres://liteshop:liteshop@localhost:54329/liteshop";
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("缺少 DATABASE_URL，请指定开发数据库");
   const pool = new Pool({ connectionString: url, max: 1 });
   const db = drizzle(pool);
 
@@ -27,7 +28,7 @@ async function main() {
     const existing = await db.select().from(admins).where(eq(admins.username, adminUser)).limit(1);
     if (existing.length === 0) {
       await db.insert(admins).values({ username: adminUser, passwordHash: hashPassword(adminPass) });
-      console.log(`[seed] 管理员已创建: ${adminUser} / ${adminPass}（仅开发用）`);
+      console.log(`[seed] 已创建开发管理员 ${adminUser}`);
     }
 
     let catRows = await db.select().from(categories).where(eq(categories.slug, "demo")).limit(1);

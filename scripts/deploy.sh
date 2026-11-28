@@ -38,6 +38,16 @@ else
   run_remote() { ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" "$@"; }
 fi
 
+# 在 SSH 和 Hatoba 下都通过 stdin 传脚本。路径作为参数独立引用，保留原始值。
+remote_script() {
+  local command="sh -s --" arg
+  for arg do
+    arg=$(printf '%s' "$arg" | sed "s~'~'\"'\"'~g")
+    command+=" '$arg'"
+  done
+  run_remote "$command"
+}
+
 # ---- 1. 确定要部署的提交，并确认 CI 已为它构建镜像 ----
 git fetch -q origin main
 SHA="$(git rev-parse "${1:-origin/main}")"
@@ -62,68 +72,94 @@ if ! curl -fsS -o /dev/null -H "Authorization: Bearer $TOKEN" \
 fi
 
 # ---- 2. 服务器前置检查 ----
-echo "▶ 记录服务器 .env 指纹（部署过程不得改变它）"
-ENV_BEFORE="$(run_remote "sha256sum $REMOTE_DIR/.env" | awk '{print $1}')"
+SITE_HOST="$(printf '%s' "$SITE_URL" | sed -E 's#^https?://##; s#[/:].*$##')"
+echo "▶ 校验 Caddy 域名并记录服务器 .env 指纹"
+ENV_BEFORE="$(remote_script "$REMOTE_DIR" "$SITE_HOST" <<'REMOTE'
+set -eu
+cd "$1"
+domain=$(sed -n 's/^DOMAIN=//p' .env | tail -n 1 | tr -d "\r\"' ")
+[ "$domain" = "$2" ] || { echo "服务器 DOMAIN 与 SITE_URL 域名不一致" >&2; exit 1; }
+sha256sum .env | cut -d' ' -f1
+REMOTE
+)"
+[[ "$ENV_BEFORE" =~ ^[a-f0-9]{64}$ ]] || { echo "无法读取服务器 .env 指纹" >&2; exit 1; }
 echo "  ${ENV_BEFORE:0:16}"
 
-echo "▶ 校验 Caddy 域名（DOMAIN 必须与 SITE_URL 一致）"
-SITE_HOST="$(printf '%s' "$SITE_URL" | sed -E 's#^https?://##; s#[/:].*$##')"
-REMOTE_DOMAIN="$(run_remote "sed -n 's/^DOMAIN=//p' $REMOTE_DIR/.env | tail -n 1" | tr -d "\r\"' ")"
-if [ "$REMOTE_DOMAIN" != "$SITE_HOST" ]; then
-  echo "✗ 服务器 .env 的 DOMAIN（${REMOTE_DOMAIN:-未设置}）与 SITE_URL 域名（${SITE_HOST}）不一致"
-  exit 1
-fi
-
-# ---- 3. 准备新编排（先放到暂存目录校验，校验通过才替换） ----
-echo "▶ 上传编排文件到暂存目录并校验"
-STAGE="/tmp/liteshop-deploy-$SHA"
-run_remote "rm -rf $STAGE && mkdir -p $STAGE"
-for f in docker-compose.yml Caddyfile ops; do
-  git archive "$SHA" "$f" | run_remote "tar -x -C $STAGE"
-done
-run_remote "docker compose --project-directory $REMOTE_DIR -f $STAGE/docker-compose.yml config -q"
-
-# ---- 4. 备份 + 拉镜像（此时线上服务未受影响） ----
-echo "▶ 部署前备份数据库"
-run_remote "set -e; cd $REMOTE_DIR
-  ts=\$(date +%Y%m%d-%H%M%S)
-  docker compose exec -T db pg_dump -U liteshop -d liteshop -F c > backups/pre-deploy-\$ts.dump
-  docker compose exec -T db pg_restore -l < backups/pre-deploy-\$ts.dump > /dev/null
-  echo \"  backups/pre-deploy-\$ts.dump\""
+# ---- 3. 校验提交中的编排文件 ----
+STAGE="$(run_remote "mktemp -d /tmp/liteshop-deploy-$SHA.XXXXXX")"
+[[ "$STAGE" =~ ^/tmp/liteshop-deploy-[a-f0-9]+\.[a-zA-Z0-9]+$ ]] || { echo "暂存目录无效" >&2; exit 1; }
+trap 'run_remote "rm -rf $STAGE" >/dev/null || true' EXIT
+git archive "$SHA" docker-compose.yml Caddyfile ops | run_remote "tar -x -C $STAGE"
+remote_script "$REMOTE_DIR" "$STAGE" <<'REMOTE'
+docker compose --project-directory "$1" -f "$2/docker-compose.yml" config -q
+REMOTE
 
 echo "▶ 服务器拉取镜像"
 run_remote "docker pull -q $IMAGE"
 
-# ---- 5. 切换 ----
-echo "▶ 切换：保留旧镜像为 liteshop:previous → 更新编排 → 滚动更新"
-run_remote "set -e; cd $REMOTE_DIR
-  docker image inspect liteshop:latest >/dev/null 2>&1 && docker tag liteshop:latest liteshop:previous
-  docker tag $IMAGE liteshop:latest
-  ts=\$(date +%Y%m%d-%H%M%S)
-  cp docker-compose.yml backups/docker-compose.yml.pre-\$ts
-  cp Caddyfile backups/Caddyfile.pre-\$ts
-  rm -rf ops && cp -r $STAGE/ops ops && cp $STAGE/docker-compose.yml $STAGE/Caddyfile .
-  echo $SHA > DEPLOYED_REVISION
-  docker compose up -d --no-build --remove-orphans
-  rm -rf $STAGE
-  docker image prune -f >/dev/null"
+# ---- 4. 备份与切换 ----
+echo "▶ 部署前备份并等待新版本健康"
+remote_script "$REMOTE_DIR" "$STAGE" "$REPO" "$SHA" "$ENV_BEFORE" <<'REMOTE'
+set -eu
+cd "$1"
+stage=$2 repo=$3 sha=$4 env_before=$5
+exec 9>.deploy.lock
+flock -n 9 || { echo "另一项部署正在切换，请稍后重试" >&2; exit 1; }
+test "$env_before" = "$(sha256sum .env | cut -d' ' -f1)"
 
-# ---- 6. 验证 ----
-echo "▶ 等待应用容器 healthy"
-if ! run_remote "cd $REMOTE_DIR && docker compose ps app | grep -F '(healthy)' >/dev/null"; then
-  echo "✗ 应用容器未达 healthy。回滚：scripts/deploy.sh <上一个提交号>"
-  echo "  或在服务器执行：docker tag liteshop:previous liteshop:latest && cd $REMOTE_DIR && docker compose up -d --no-build"
-  exit 1
+# 在发布新 revision 之前始终保留上次验证通过的版本，失败后重试也能回滚。
+if [ -s DEPLOYED_REVISION ]; then
+  good=$(cat DEPLOYED_REVISION)
+  if [ "$good" != "$sha" ]; then docker tag "$repo:$good" liteshop:previous; fi
+elif ! docker image inspect liteshop:previous >/dev/null 2>&1; then
+  current=$(docker compose ps -q app)
+  if [ -n "$current" ] && [ "$(docker inspect -f '{{.State.Health.Status}}' "$current")" = healthy ]; then
+    docker tag "$(docker inspect -f '{{.Image}}' "$current")" liteshop:previous
+  fi
 fi
-echo "  app (healthy)"
 
-echo "▶ 复核 .env 指纹"
-ENV_AFTER="$(run_remote "sha256sum $REMOTE_DIR/.env" | awk '{print $1}')"
-if [ "$ENV_BEFORE" != "$ENV_AFTER" ]; then
-  echo "✗ 服务器 .env 在部署过程中被修改（${ENV_BEFORE:0:16} → ${ENV_AFTER:0:16}），请立即检查！"
-  exit 1
-fi
-echo "  一致"
+mkdir -p backups
+tmp=$(mktemp "backups/pre-deploy-$(date +%Y%m%d-%H%M%S).XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+docker compose exec -T db pg_dump -U liteshop -d liteshop -F c > "$tmp"
+docker compose exec -T db pg_restore -l < "$tmp" > /dev/null
+ln "$tmp" "$tmp.dump"
+echo "  $tmp.dump"
+suffix=${tmp#backups/pre-deploy-}
+cp docker-compose.yml "backups/docker-compose.yml.pre-$suffix"
+cp Caddyfile "backups/Caddyfile.pre-$suffix"
 
-echo "▶ 外部可达性检查 $SITE_URL"
-curl -fsS "$SITE_URL/api/health" >/dev/null && echo "✓ 部署完成：${SHA:0:12}"
+for service in backup offsite; do
+  if [ -f "ops/$service.sh" ] && [ -f "$stage/ops/$service.sh" ] && ! cmp -s "ops/$service.sh" "$stage/ops/$service.sh"; then
+    docker compose ps -q "$service" > "$stage/$service.old"
+  fi
+done
+echo "$stage" > .deploy-attempt
+docker tag "$repo:$sha" liteshop:latest
+mkdir -p ops
+cp -R "$stage/ops/." ops/
+cp "$stage/docker-compose.yml" "$stage/Caddyfile" .
+docker compose up -d --no-build --remove-orphans --wait --wait-timeout 180
+# Compose 看不到绑定目录中文件的变化。仅重启仍为旧实例的脚本服务。
+for service in backup offsite; do
+  if [ -s "$stage/$service.old" ] && [ "$(cat "$stage/$service.old")" = "$(docker compose ps -q "$service")" ]; then
+    docker compose restart "$service"
+  fi
+done
+REMOTE
+
+# ---- 5. 外部验收和确认 ----
+echo "▶ 从部署端验证 $SITE_URL"
+curl -fsS --max-time 15 "$SITE_URL/api/health" >/dev/null
+remote_script "$REMOTE_DIR" "$STAGE" "$SHA" "$ENV_BEFORE" <<'REMOTE'
+set -eu
+cd "$1"
+exec 9>.deploy.lock
+flock -n 9 || { echo "另一项部署正在切换，本次验收已失效" >&2; exit 1; }
+[ "$(cat .deploy-attempt)" = "$2" ] || { echo "部署版本已被替换，本次验收已失效" >&2; exit 1; }
+[ "$4" = "$(sha256sum .env | cut -d' ' -f1)" ] || { echo "部署期间 .env 指纹发生变化" >&2; exit 1; }
+echo "$3" > DEPLOYED_REVISION.tmp
+mv DEPLOYED_REVISION.tmp DEPLOYED_REVISION
+rm -f .deploy-attempt
+REMOTE
+echo "✓ 部署完成：${SHA:0:12}"

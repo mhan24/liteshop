@@ -2,7 +2,7 @@
 
 Next.js 16 (App Router) · React 19 · TypeScript Strict · Tailwind CSS v4 · Drizzle ORM · PostgreSQL · Docker Compose + Caddy
 
-只卖数字卡密：游客下单 → LitePay 收银台付款 → 事务内原子发卡 → 同步发送邮件，并可在「订单查询」凭订单号、邮箱和查单密码随时查看。没有买家账户。
+只卖数字卡密：游客下单 → LitePay 收银台付款 → 事务内原子发卡。买家可在「订单查询」凭订单号、邮箱和查单密码随时查看卡密。启用 SMTP 后，后台任务也会将卡密发送到下单邮箱。没有买家账户。
 
 ## 功能
 
@@ -20,10 +20,14 @@ Next.js 16 (App Router) · React 19 · TypeScript Strict · Tailwind CSS v4 · D
 # 1. 启动开发数据库（或自备 PostgreSQL，写入 .env 的 DATABASE_URL）
 docker run -d --name liteshop-pg-dev \
   -e POSTGRES_PASSWORD=liteshop-dev -e POSTGRES_DB=liteshop \
-  -p 54329:5432 postgres:18-alpine
+  -p 127.0.0.1:54329:5432 postgres:18-alpine
 
 # 2. 配置环境
 cp .env.example .env   # 填 AUTH_SECRET（openssl rand -hex 32）
+# 使用上面的开发容器时，在 .env 中设置
+# DATABASE_URL=postgres://postgres:liteshop-dev@localhost:54329/liteshop
+# SITE_URL=http://localhost:3000
+# PAYMENT_DRIVER=mock
 
 # 3. 安装 + 迁移 + 种子
 npm install
@@ -42,9 +46,9 @@ npm run dev            # http://localhost:3000（后台 /admin）
 # 测试需要独立 PostgreSQL（vitest 自动迁移）
 docker run -d --name liteshop-pg-test \
   -e POSTGRES_PASSWORD=liteshop-test -e POSTGRES_DB=liteshop_test \
-  -p 54330:5432 postgres:18-alpine
+  -p 127.0.0.1:54330:5432 postgres:18-alpine
 
-npm test        # 94 用例：金额/签名/适配器/入口伪装单元 + 下单/回调幂等/并发发卡/补货重发/过期清扫/鉴权集成
+npm test        # 运行单元测试和 PostgreSQL 集成测试
 npx tsc --noEmit
 npm run lint
 ```
@@ -60,8 +64,10 @@ docker compose up -d --build
 # 数据库备份：backup 服务每日 pg_dump 至 ./backups（保留 14 份）
 ```
 
-上线后在后台「设置 · 支付网关」填写 LitePay 网关地址与接口令牌，并将
-`https://<站点>/api/webhooks/litepay` 填到网关后台的商店设置中。
+在后台「设置 · 支付网关」填写 LitePay 网关地址与接口令牌，并在 LitePay 的
+`server.notify_hosts` 中加入商店域名。LiteShop 建单时自动提交回调地址
+`https://<商店域名>/api/webhooks/litepay`。如果网关启用了 `server.cancel_sync_required`，
+接单还依赖网关确认取消同步服务健康。LiteShop 会主动发送关单请求，但不提供独角数卡的同步心跳。
 
 ### 日常部署
 
@@ -82,7 +88,7 @@ HATOBA_HOST=ORACLE scripts/deploy.sh   # 远程命令改经 Hatoba 执行（凭�
 
 ### 备份
 
-- `backup`：每天备份至 `./backups`（保留 14 份），每份做完整性检查；每周日完整恢复到临时库并核对订单与卡密数量（恢复演练）。最近一次结果见 `backups/status.json`。
+- `backup`：每天备份至 `./backups`（保留 14 份），每份做完整性检查；每周日完整恢复到临时库并与备份时的快照核对订单、卡密和交付记录数量（恢复演练）。最近一次结果见 `backups/status.json`。
 - `offsite`：每天将备份**加密**上传到异地存储（支持 R2 / S3 / B2 / SFTP 等 rclone 兼容后端），远端保留 30 天。
   配置方式：将 `.env.offsite.example` 复制为服务器上的 `/opt/liteshop/.env.offsite` 并填写；未配置时仅打印提醒。
 

@@ -7,6 +7,7 @@
 
 interface Bucket {
   hits: number[];
+  expiresAt: number;
 }
 
 const buckets = new Map<string, Bucket>();
@@ -15,14 +16,12 @@ let lastSweep = Date.now();
 const SWEEP_INTERVAL_MS = 60_000;
 const MAX_KEYS = 5_000;
 
-function sweep(now: number, windowMs: number): void {
+function sweep(now: number): void {
   if (now - lastSweep < SWEEP_INTERVAL_MS) return;
   lastSweep = now;
   for (const [k, b] of buckets) {
-    b.hits = b.hits.filter((t) => now - t < windowMs);
-    if (b.hits.length === 0) buckets.delete(k);
+    if (now >= b.expiresAt) buckets.delete(k);
   }
-  if (buckets.size > MAX_KEYS) buckets.clear();
 }
 
 export interface RateLimitResult {
@@ -33,8 +32,12 @@ export interface RateLimitResult {
 
 export function rateLimit(key: string, limit: number, windowMs: number): RateLimitResult {
   const now = Date.now();
-  sweep(now, windowMs);
-  const bucket = buckets.get(key) ?? { hits: [] };
+  sweep(now);
+  const existing = buckets.get(key);
+  if (!existing && buckets.size >= MAX_KEYS) {
+    return { ok: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((lastSweep + SWEEP_INTERVAL_MS - now) / 1000)) };
+  }
+  const bucket = existing ?? { hits: [], expiresAt: now + windowMs };
   bucket.hits = bucket.hits.filter((t) => now - t < windowMs);
   if (bucket.hits.length >= limit) {
     buckets.set(key, bucket);
@@ -46,8 +49,13 @@ export function rateLimit(key: string, limit: number, windowMs: number): RateLim
     };
   }
   bucket.hits.push(now);
+  bucket.expiresAt = now + windowMs;
   buckets.set(key, bucket);
   return { ok: true, remaining: limit - bucket.hits.length, retryAfterSeconds: 0 };
+}
+
+export function resetRateLimit(key: string): void {
+  buckets.delete(key);
 }
 
 /** 客户端 IP（受信反代写入 XFF 最后一段；无代理时取连接地址） */

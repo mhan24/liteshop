@@ -42,8 +42,7 @@ async function sendMail(cfg: SmtpConfig, to: string, subject: string, text: stri
 }
 
 /** 交付邮件（内容即卡密文本） */
-export async function sendDeliveryEmail(orderNo: string, email: string, content: string): Promise<SendResult> {
-  const cfg = await getSmtpConfig();
+export async function sendDeliveryEmail(orderNo: string, email: string, content: string, cfg?: SmtpConfig): Promise<SendResult> {
   const siteName = await getSiteName();
   const text = [
     `您在 ${siteName} 的订单已完成发货。`,
@@ -57,7 +56,7 @@ export async function sendDeliveryEmail(orderNo: string, email: string, content:
     "—",
     "如需再次查看，请访问商店「订单查询」页，凭订单号、下单邮箱和查单密码查询。",
   ].join("\n");
-  return sendMail(cfg, email, `【${siteName}】卡密已发放 · ${orderNo}`, text);
+  return sendMail(cfg ?? await getSmtpConfig(), email, `【${siteName}】卡密已发放 · ${orderNo}`, text);
 }
 
 /** 发送测试邮件（后台 SMTP 设置） */
@@ -69,12 +68,15 @@ export async function sendTestEmail(to: string): Promise<SendResult> {
 
 /** cron / 交付后调用：投递所有待发送邮件（幂等，attempts < 5） */
 export async function flushDeliveryEmails(limit = 50): Promise<{ sent: number; failed: number }> {
+  const cfg = await getSmtpConfig();
+  if (!cfg.enabled || !cfg.host || !cfg.from) return { sent: 0, failed: 0 };
   const rows = await pendingDeliveryEmails(limit);
   let sent = 0;
   let failed = 0;
   for (const row of rows) {
-    if (!row.content.trim()) continue;
-    const result = await sendDeliveryEmail(row.orderNo, row.email, row.content);
+    const result = row.content.trim()
+      ? await sendDeliveryEmail(row.orderNo, row.email, row.content, cfg)
+      : { ok: false, error: "交付内容为空" };
     if (result.ok) {
       await markDeliveryEmailSent(row.deliveryId);
       sent += 1;

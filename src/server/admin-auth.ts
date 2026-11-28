@@ -1,11 +1,13 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { cache } from "react";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { admins, auditLogs } from "@/db/schema";
 import { env } from "@/lib/env";
-import { rateLimit, clientIpFromHeaders } from "@/lib/rate-limit";
-import { getConfig, updateConfig } from "./settings";
+import { rateLimit, resetRateLimit, clientIpFromHeaders } from "@/lib/rate-limit";
+import { getAdminSessionVersion, invalidateConfig, updateConfig, updateConfigInTx } from "./settings";
 
 /**
  * 管理员认证：独立 Session（HttpOnly Cookie），与买家体系完全隔离。
@@ -37,6 +39,8 @@ export function verifyPassword(password: string, stored: string): boolean {
   if (!m) return false;
   const [, n, r, p, saltHex, hashHex] = m;
   if (!n || !r || !p || !saltHex || !hashHex) return false;
+  // Buffer.from(hex) 会静默截去半个字节；拒绝截断或弱于 256 位的摘要。
+  if (saltHex.length % 2 || hashHex.length % 2 || hashHex.length < 64) return false;
   try {
     const expected = Buffer.from(hashHex, "hex");
     const actual = scryptSync(password, Buffer.from(saltHex, "hex"), expected.length, {
@@ -64,25 +68,30 @@ export async function ensureAdminBootstrapped(): Promise<void> {
 
 export interface AdminSession {
   username: string;
+  version: number;
 }
 
 /** 校验用户名密码；成功返回会话信息，失败返回 null（含限速） */
 export async function loginAdmin(username: string, password: string): Promise<AdminSession | null> {
   const ip = clientIpFromHeaders(await headers());
-  const key = `login:${ip}:${username}`;
+  if (!rateLimit(`login-ip:${ip}`, 60, 15 * 60_000).ok) return null;
+  const key = `login:${ip}:${createHash("sha256").update(username).digest("hex")}`;
   const limited = rateLimit(key, 5, 15 * 60_000);
   if (!limited.ok) return null;
 
   await ensureAdminBootstrapped();
+  // 先读版本，确保正在校验的旧密码最多签出旧版本会话。
+  const version = await getAdminSessionVersion();
   const rows = await db.select().from(admins).where(eq(admins.username, username)).limit(1);
   const admin = rows[0];
   if (!admin) {
     // 抹平「用户不存在」与「密码错误」的时间差
-    verifyPassword(password, "scrypt:16384:8:1:00:00");
+    verifyPassword(password, `scrypt:16384:8:1:${"00".repeat(16)}:${"00".repeat(64)}`);
     return null;
   }
   if (!verifyPassword(password, admin.passwordHash)) return null;
-  return { username: admin.username };
+  resetRateLimit(key);
+  return { username: admin.username, version };
 }
 
 /* ===== 会话令牌 ===== */
@@ -97,8 +106,7 @@ function sign(data: string): string {
   return createHmac("sha256", env.AUTH_SECRET).update(data).digest("base64url");
 }
 
-export async function createSessionCookie(username: string): Promise<void> {
-  const version = (await getConfig()).adminSessionVersion;
+export async function createSessionCookie({ username, version }: AdminSession): Promise<void> {
   const payload: SessionPayload = {
     u: username,
     v: version,
@@ -140,10 +148,10 @@ export async function getAdminSession(): Promise<AdminSession | null> {
   } catch {
     return null;
   }
-  if (payload.exp < Math.floor(Date.now() / 1000)) return null;
-  const version = (await getConfig()).adminSessionVersion;
+  if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
+  const version = await getAdminSessionVersion();
   if (payload.v !== version) return null;
-  return { username: payload.u };
+  return { username: payload.u, version };
 }
 
 export async function requireAdminSession(): Promise<AdminSession> {
@@ -152,18 +160,44 @@ export async function requireAdminSession(): Promise<AdminSession> {
   return session;
 }
 
+/** RSC 布局与页面各自验证；同一次服务端渲染共用查询。 */
+export const requireAdminPageSession = cache(async () => {
+  const session = await getAdminSession();
+  if (!session) redirect(`${env.ADMIN_PATH}/login`);
+  return { ...session, csrf: csrfForVersion(session.version) };
+});
+
 /** 全局登出（改密后调用）：递增版本使所有会话失效 */
 export async function revokeAllSessions(): Promise<void> {
   // 行锁内自增：并发改密不会丢失一次递增
   await updateConfig((c) => ({ adminSessionVersion: c.adminSessionVersion + 1 }));
 }
 
+export async function changeAdminCredentials(username: string, password: string, newUsername: string, newPassword: string): Promise<boolean> {
+  const changed = await db.transaction(async (tx) => {
+    const [admin] = await tx.select().from(admins).where(eq(admins.username, username)).for("update");
+    if (!admin || !verifyPassword(password, admin.passwordHash)) return false;
+    await tx.update(admins).set({
+      username: newUsername || admin.username,
+      passwordHash: newPassword ? hashPassword(newPassword) : admin.passwordHash,
+      updatedAt: new Date(),
+    }).where(eq(admins.id, admin.id));
+    await updateConfigInTx(tx, (c) => ({ adminSessionVersion: c.adminSessionVersion + 1 }));
+    return true;
+  });
+  if (changed) invalidateConfig();
+  return changed;
+}
+
 /* ===== CSRF ===== */
 
 /** 无状态 CSRF 令牌：HMAC(session_version)；页面渲染时嵌入，Action 提交时比对 */
-export async function csrfToken(): Promise<string> {
-  const version = (await getConfig()).adminSessionVersion;
+function csrfForVersion(version: number): string {
   return sign(`csrf:${version}`);
+}
+
+export async function csrfToken(): Promise<string> {
+  return csrfForVersion(await getAdminSessionVersion());
 }
 
 export async function assertCsrf(value: FormDataEntryValue | null): Promise<void> {

@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   // 单体 standalone 部署（Docker 多阶段构建直接运行 server.js）
   output: "standalone",
   reactStrictMode: true,
+  // 保留监听地址，避免后台路径重写把 127.0.0.1 规范化为不同源的 localhost。
+  skipProxyUrlNormalize: true,
   poweredByHeader: false,
   async headers() {
     return [

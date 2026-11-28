@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { env } from "@/lib/env";
 import { LoginForm } from "@/components/admin/login-form";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = { title: "管理后台登录", robots: { index: false, follow: false } };
 
 export default function AdminLoginPage() {

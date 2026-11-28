@@ -101,7 +101,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             <h2 className="text-lg font-semibold tracking-[-0.01em]">交付方式</h2>
             <ul className="space-y-2.5 text-sm leading-6 text-muted">
               <li>付款确认后自动发卡，无需人工处理。</li>
-              <li>卡密自动发送到下单邮箱，也可凭订单号、邮箱和查单密码在「订单查询」查看。</li>
+              <li>凭订单号、下单邮箱和查单密码，在「订单查询」查看卡密。</li>
               <li>数字商品一经发出无法收回，非商品质量问题不支持退款。</li>
             </ul>
           </section>

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   auditLogs,
@@ -15,7 +15,8 @@ import { sha256Hex } from "@/lib/litepay-sign";
 import { toMinorUnits } from "@/lib/money";
 import { releaseStock, reserveStock, sellOrderCards } from "./catalog";
 import type { Tx } from "./db-tx";
-import { getActiveGateway, getAdapter, getGatewayByType, webhookPath } from "./payments";
+import { type ActiveGateway, getActiveGateway, getAdapter, getGatewayByType, webhookPath } from "./payments";
+import { litepayCashierUrl } from "./payments/litepay";
 import type { CreateOutcome, GatewayType, NotifyPayload } from "./payments/types";
 import { getConfig, getSiteUrl } from "./settings";
 import { notifyLatePayment, notifyLowStockCrossings, notifyPaidUndelivered, notifyReconciling } from "./notify";
@@ -90,8 +91,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   const merged = new Map<string, number>();
   for (const i of input.items) {
     const slug = i.slug.trim();
-    const quantity = Math.trunc(i.quantity);
-    if (slug === "" || !(quantity > 0)) continue;
+    const quantity = i.quantity;
+    if (!slug || !Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
+      throw new OrderError("INVALID_INPUT", "请检查商品及数量，每件商品可购买 1–99 件");
+    }
     merged.set(slug, (merged.get(slug) ?? 0) + quantity);
   }
   const items = [...merged].map(([slug, quantity]) => ({ slug, quantity }));
@@ -102,12 +105,14 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     throw new OrderError("INVALID_INPUT", "单件商品购买数量需在 1–99 之间");
   }
   // 网关没配置就不要建单：否则会留下占着卡密却无法付款的僵尸订单
-  if (!(await getActiveGateway())) {
+  const gateway = await getActiveGateway();
+  if (!gateway) {
     throw new OrderError("NO_PAYMENT_CHANNEL", "收款通道暂不可用，请稍后再试或联系客服");
   }
   const note = input.note?.trim().slice(0, 500) ?? "";
   // 事务外读配置：事务内不得再向连接池借连接（见 notifyLowStockCrossings）
   const { lowStockThreshold } = await getConfig();
+  const siteUrl = await getSiteUrl();
   const queryPassword = generateQueryPassword();
   const passwordHash = await hashQueryPassword(queryPassword);
 
@@ -123,9 +128,13 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       created = await db.transaction(async (tx) => {
         const itemRows: Array<PendingItemRow & { unitPriceCents: number; lineTotalCents: number }> = [];
         let subtotal = 0;
+        // 共享锁允许并发下单，阻止快照读取后商品被下架或删除。
+        const snapshots = await tx.select().from(products)
+          .where(inArray(products.slug, items.map((item) => item.slug)))
+          .orderBy(asc(products.id)).for("share");
+        const bySlug = new Map(snapshots.map((p) => [p.slug, p]));
         for (const item of items) {
-          const rows = await tx.select().from(products).where(eq(products.slug, item.slug)).limit(1);
-          const p = rows[0];
+          const p = bySlug.get(item.slug);
           if (!p || p.status !== "on") throw new OrderError("PRODUCT_NOT_FOUND", "商品不存在或已下架");
           const lineTotal = p.priceCents * item.quantity;
           subtotal += lineTotal;
@@ -170,7 +179,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       });
       break;
     } catch (err) {
-      if (isUniqueViolation(err) && attempt < 2) continue;
+      if (isOrderNoCollision(err)) continue;
+      if (err instanceof Error && err.message === "OUT_OF_STOCK") {
+        throw new OrderError("OUT_OF_STOCK", "商品库存不足，请调整数量后再提交");
+      }
       throw err;
     }
   }
@@ -178,6 +190,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
   // 2) 网关建单（网络调用在库存事务之外）
   const outcome = await startPaymentAttempt({
+    gateway,
+    siteUrl,
     orderId: created.orderId,
     orderNo: created.orderNo,
     amountCents: created.totalCents,
@@ -185,46 +199,55 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   });
 
   if (outcome.kind === "rejected") {
-    await closeOrderInternal(created.orderId, created.orderNo, outcome.message);
-    throw new OrderError("PAYMENT_FAILED", `创建支付失败：${outcome.message}`);
+    const status = await closeOrderInternal(created.orderId, created.orderNo, outcome.message);
+    if (status === "closed") throw new OrderError("PAYMENT_FAILED", `创建支付失败：${outcome.message}`);
+    return { orderNo: created.orderNo, queryPassword, totalCents: created.totalCents, status,
+      paymentUrl: null, reconciling: status === "reconciling" };
   }
   if (outcome.kind === "unknown") {
-    await markReconciling(created.orderId, outcome.message);
+    const status = await markReconciling(created.orderId, outcome.message);
     return {
       orderNo: created.orderNo,
       queryPassword,
       totalCents: created.totalCents,
-      status: "reconciling",
+      status,
       paymentUrl: null,
-      reconciling: true,
+      reconciling: status === "reconciling",
     };
   }
   return {
     orderNo: created.orderNo,
     queryPassword,
     totalCents: created.totalCents,
-    status: "pending",
-    paymentUrl: outcome.payment.paymentUrl,
-    reconciling: false,
+    status: outcome.kind === "inactive" ? outcome.status : "pending",
+    paymentUrl: outcome.kind === "inactive" ? null : outcome.payment.paymentUrl,
+    reconciling: outcome.kind === "inactive" && outcome.status === "reconciling",
   };
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === "object" && err !== null && (err as { code?: string }).code === "23505";
+function isOrderNoCollision(err: unknown): boolean {
+  const cause = err instanceof Error && err.cause ? err.cause : err;
+  return typeof cause === "object" && cause !== null &&
+    "code" in cause && cause.code === "23505" &&
+    "constraint" in cause && cause.constraint === "orders_order_no_unique";
 }
 
-async function markReconciling(orderId: string, reason: string): Promise<void> {
-  await db.transaction(async (tx) => {
+async function markReconciling(orderId: string, reason: string): Promise<string> {
+  return db.transaction(async (tx) => {
     const rows = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for("update");
     const order = rows[0];
-    if (!order || order.status !== "pending") return;
-    assertTransition(order.status, "reconciling");
-    await tx
-      .update(orders)
-      .set({ status: "reconciling", expiresAt: null, updatedAt: new Date() })
-      .where(eq(orders.id, orderId));
-    await notifyReconciling(tx, order.orderNo, order.totalCents, reason);
+    if (!order || order.status !== "pending") return order?.status ?? "closed";
+    await markReconcilingInTx(tx, order, reason);
+    return "reconciling";
   });
+}
+
+async function markReconcilingInTx(tx: Tx, order: typeof orders.$inferSelect, reason: string): Promise<void> {
+  assertTransition(order.status, "reconciling");
+  await tx.update(orders)
+    .set({ status: "reconciling", expiresAt: null, updatedAt: new Date() })
+    .where(eq(orders.id, order.id));
+  await notifyReconciling(tx, order.orderNo, order.totalCents, reason);
 }
 
 interface PendingItemRow {
@@ -234,6 +257,7 @@ interface PendingItemRow {
 }
 
 type AttemptOutcome =
+  | { kind: "inactive"; status: string; message: string }
   | { kind: "created"; payment: { paymentUrl: string | null; expiresAt: Date | null } }
   | { kind: "rejected"; message: string }
   | { kind: "unknown"; message: string };
@@ -246,24 +270,35 @@ type AttemptOutcome =
  * 「pending + 无有效期」这种清扫永远扫不到、卡密永久占用的状态。
  */
 async function startPaymentAttempt(input: {
+  gateway: ActiveGateway | null;
+  siteUrl: string;
   orderId: string;
   orderNo: string;
   amountCents: number;
   subject: string;
 }): Promise<AttemptOutcome> {
-  const gateway = await getActiveGateway();
-  if (!gateway) {
-    // 校验与调用之间网关被停用：按「明确拒绝」处理，让上层关单并退回卡密
-    return { kind: "rejected", message: "支付网关未配置或已停用" };
-  }
-  const adapter = getAdapter(gateway.type);
-  const base = await getSiteUrl();
-
+  const { siteUrl: base } = input;
   // 先落一条 pending 支付记录（作废旧尝试），让「unknown」也有归属。
   // 订单行锁 + 状态复核：并发的「重新支付」/回调/关单不会与本次尝试交错。
   const attempt = await db.transaction(async (tx) => {
     const rows = await tx.select().from(orders).where(eq(orders.id, input.orderId)).limit(1).for("update");
-    if (rows[0]?.status !== "pending") return null;
+    const order = rows[0];
+    if (!order || order.status !== "pending" || (order.expiresAt && order.expiresAt.getTime() <= Date.now())) {
+      return { kind: "inactive" as const, status: order?.status ?? "closed", message: "订单已结束付款" };
+    }
+    // LitePay 以商户订单号幂等建单。撤销后再发同一个订单号仍会得到原交易。
+    const [existing] = await tx.select().from(payments).where(and(
+      eq(payments.orderId, order.id), eq(payments.isCurrent, true), eq(payments.channel, "litepay"),
+    )).limit(1);
+    if (existing) {
+      const paymentUrl = litepayCashierUrl(existing.paymentUrl, existing.providerRef, input.gateway?.runtime.apiBase);
+      if (existing.status === "pending" && paymentUrl && existing.expiresAt && existing.expiresAt.getTime() > Date.now()) {
+        return { kind: "created" as const, payment: { paymentUrl, expiresAt: existing.expiresAt } };
+      }
+      return { kind: "inactive" as const, status: order.status, message: "付款链接暂不可用，请查看订单状态" };
+    }
+    const gateway = input.gateway;
+    if (!gateway) return { kind: "rejected" as const, message: "支付网关未配置或已停用" };
     const superseded = await tx
       .update(payments)
       .set({ isCurrent: false, status: "expired", updatedAt: new Date() })
@@ -279,9 +314,11 @@ async function startPaymentAttempt(input: {
         amountCents: input.amountCents,
       })
       .returning({ id: payments.id });
-    return { paymentId: inserted[0]!.id, superseded };
+    return { kind: "reserved" as const, gateway, paymentId: inserted[0]!.id, superseded };
   });
-  if (!attempt) return { kind: "rejected", message: "订单已不在待支付状态" };
+  if (attempt.kind !== "reserved") return attempt;
+  const { gateway } = attempt;
+  const adapter = getAdapter(gateway.type);
   // 旧交易通知网关撤销（best-effort）；若买家仍向旧交易付款，回调会记为 late 人工核对
   for (const o of attempt.superseded) {
     if (o.providerRef) cancelAtGateway(o.channel, o.providerRef, "supersede");
@@ -303,7 +340,7 @@ async function startPaymentAttempt(input: {
   if (outcome.kind === "created") {
     const created = outcome.payment;
     try {
-      await db.transaction(async (tx) => {
+      const state = await db.transaction(async (tx) => {
         // 锁顺序与建尝试时一致：先订单行，再支付行（避免 40P01 死锁）
         const rows = await tx
           .select()
@@ -322,20 +359,47 @@ async function startPaymentAttempt(input: {
             raw: (created.raw ?? null) as never,
             updatedAt: new Date(),
           })
-          .where(eq(payments.id, attempt.paymentId))
+          .where(and(eq(payments.id, attempt.paymentId), or(
+            isNull(payments.providerRef),
+            created.providerRef ? eq(payments.providerRef, created.providerRef) : undefined,
+          )))
           .returning({ isCurrent: payments.isCurrent });
+        if (!updated.length) throw new Error("建单响应与已绑定的交易号不符");
         if (rows[0]?.status === "pending" && updated[0]?.isCurrent) {
           await tx
             .update(orders)
             .set({ expiresAt: created.expiresAt, updatedAt: new Date() })
             .where(eq(orders.id, input.orderId));
         }
+        return { status: rows[0]?.status ?? "closed", current: updated[0]?.isCurrent };
       });
+      if (state.status !== "pending" || !state.current) {
+        if (created.providerRef && (state.status === "closed" || !state.current)) {
+          cancelAtGateway(gateway.type, created.providerRef, "closed-during-create");
+        }
+        return { kind: "inactive", status: state.status, message: "订单状态已更新，请查看订单" };
+      }
     } catch (err) {
       console.error("[payment] 网关已建单但回填失败，转对账", err);
       return { kind: "unknown", message: "网关已建单但本地记录失败" };
     }
     return { kind: "created", payment: { paymentUrl: created.paymentUrl, expiresAt: created.expiresAt } };
+  }
+
+  if (outcome.kind === "closed") {
+    const status = await db.transaction(async (tx) => {
+      const order = await lockOrderByNo(tx, input.orderNo);
+      if (!order || order.status !== "pending") return order?.status ?? "closed";
+      const recorded = await tx.update(payments)
+        .set({ providerRef: outcome.providerRef, updatedAt: new Date() })
+        .where(and(eq(payments.id, attempt.paymentId), eq(payments.isCurrent, true), eq(payments.status, "pending"),
+          or(isNull(payments.providerRef), eq(payments.providerRef, outcome.providerRef))))
+        .returning({ id: payments.id });
+      if (!recorded.length) return order.status;
+      await closePendingInTx(tx, order);
+      return "closed";
+    });
+    return { kind: "inactive", status, message: outcome.message };
   }
 
   // rejected：本次尝试作废；unknown：保持 pending（网关可能已建单，等回调认领或人工核对）
@@ -384,11 +448,11 @@ async function lockOrderByNo(tx: Tx, orderNo: string) {
 }
 
 /** 明确拒绝：补偿关单并释放卡密 */
-async function closeOrderInternal(orderId: string, orderNo: string, reason: string): Promise<void> {
-  await db.transaction(async (tx) => {
+async function closeOrderInternal(orderId: string, orderNo: string, reason: string): Promise<string> {
+  return db.transaction(async (tx) => {
     const rows = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for("update");
     const order = rows[0];
-    if (!order || order.status !== "pending") return;
+    if (!order || order.status !== "pending") return order?.status ?? "closed";
     await closePendingInTx(tx, order);
     await tx.insert(notifyLogs).values({
       channel: "internal",
@@ -397,6 +461,7 @@ async function closeOrderInternal(orderId: string, orderNo: string, reason: stri
       payload: `网关建单被拒绝，订单已关闭并释放卡密：${reason}`.slice(0, 2000),
       handled: true,
     });
+    return "closed";
   });
 }
 
@@ -416,7 +481,7 @@ export async function handlePaymentWebhook(channel: GatewayType, rawBody: string
   if (!verification.ok || !verification.payload) {
     // 未认证请求不落库（防写满磁盘），只留一行日志
     console.warn(`[webhook] ${channel} 拒绝: ${verification.error ?? "验签失败"}`);
-    return { respond: "success", handled: false, message: verification.error ?? "验签失败" };
+    return { respond: channel === "litepay" ? "fail" : "success", handled: false, message: verification.error ?? "验签失败" };
   }
   const payload = verification.payload;
   const payloadHash = sha256Hex(rawBody);
@@ -459,6 +524,7 @@ async function processWebhook(
   payload: NotifyPayload,
   payloadHash: string
 ): Promise<WebhookResult> {
+  const unaccepted = channel === "litepay" ? "fail" : "success";
   const markHandled = async (handled: boolean) => {
     await tx.update(notifyLogs).set({ handled }).where(eq(notifyLogs.payloadHash, payloadHash));
   };
@@ -477,8 +543,8 @@ async function processWebhook(
     .for("update");
   const order = orderRows[0];
   if (!order) {
-    await markHandled(true);
-    return { respond: "success", handled: false, message: "订单不存在" };
+    await markHandled(false);
+    return { respond: unaccepted, handled: false, message: "订单不存在" };
   }
 
   // 定位支付记录：优先 (channel, providerRef)
@@ -489,56 +555,52 @@ async function processWebhook(
     .limit(1);
   let payment = paymentRows[0];
 
-  // 当前尝试缺 providerRef = 建单响应丢失；验签通过的回调可以认领它
-  if (!payment && (order.status === "reconciling" || order.status === "pending")) {
-    const currentRows = await tx
-      .select()
-      .from(payments)
-      .where(and(eq(payments.orderId, order.id), eq(payments.isCurrent, true)))
-      .limit(1);
-    const current = currentRows[0];
-    if (current && current.providerRef === null) {
-      const claimed = await tx
-        .update(payments)
-        .set({ providerRef: payload.providerRef, updatedAt: new Date() })
-        .where(and(eq(payments.id, current.id), sql`provider_ref is null`))
-        .returning();
-      payment = claimed[0];
-    }
+  // 响应丢失时先核对渠道与金额，再把已验签的交易号绑定到当前尝试。
+  // 已关闭的订单也保留晚到账的证据，交给下方的人工核对分支。
+  if (!payment) {
+    const [current] = await tx.select().from(payments).where(and(
+      eq(payments.orderId, order.id), eq(payments.channel, channel), eq(payments.isCurrent, true),
+      sql`provider_ref is null`,
+    )).limit(1);
+    payment = current;
   }
 
   if (!payment || payment.orderId !== order.id) {
     await markHandled(false);
-    return { respond: "success", handled: false, message: "交易不属于当前订单" };
-  }
-
-  if (payment.status === "confirmed") {
-    await markHandled(true);
-    return { respond: "success", handled: true, message: "该交易已确认（幂等）" };
+    return { respond: unaccepted, handled: false, message: "交易不属于当前订单" };
   }
 
   if (payload.amount == null) {
     await markHandled(false);
-    return { respond: "success", handled: false, message: "回调缺少金额字段" };
+    return { respond: unaccepted, handled: false, message: "回调缺少金额字段" };
   }
   let amountMinor: number;
   try {
     amountMinor = toMinorUnits(payload.amount);
   } catch {
     await markHandled(false);
-    return { respond: "success", handled: false, message: "回调金额非法" };
+    return { respond: unaccepted, handled: false, message: "回调金额非法" };
   }
   if (amountMinor !== order.totalCents) {
     await markHandled(false);
-    return { respond: "success", handled: false, message: `金额不匹配: ${String(payload.amount)}` };
+    return { respond: unaccepted, handled: false, message: `金额不匹配: ${String(payload.amount)}` };
   }
   if (
     payment.expectedAmount &&
-    payload.actualAmount &&
-    normalizeAmount(payload.actualAmount) !== normalizeAmount(payment.expectedAmount)
+    (!payload.actualAmount || normalizeAmount(payload.actualAmount) !== normalizeAmount(payment.expectedAmount))
   ) {
     await markHandled(false);
-    return { respond: "success", handled: false, message: "actual_amount 与快照不匹配" };
+    return { respond: unaccepted, handled: false, message: "actual_amount 与快照不匹配" };
+  }
+
+  if (payment.providerRef === null) {
+    await tx.update(payments).set({ providerRef: payload.providerRef, updatedAt: new Date() })
+      .where(eq(payments.id, payment.id));
+  }
+
+  if (payment.status === "confirmed") {
+    await markHandled(true);
+    return { respond: "success", handled: true, message: "该交易已确认（幂等）" };
   }
 
   // 订单已终结/已由其它交易完成/非当前尝试 → 延迟到账，登记对账特例
@@ -641,17 +703,30 @@ export interface SweepResult {
 export async function sweepExpired(limit = 200): Promise<SweepResult> {
   const cancels: Array<{ channel: GatewayType; providerRef: string }> = [];
   const closed = await db.transaction(async (tx) => {
+    const now = new Date();
+    // 建单请求限时 15 秒。进程中断会留下没有有效期的订单，保留卡密等待核对。
+    const stalledBefore = new Date(now.getTime() - 2 * 60_000);
     const candidates = await tx
       .select()
       .from(orders)
-      .where(and(eq(orders.status, "pending"), isNotNull(orders.expiresAt), lt(orders.expiresAt, new Date())))
+      .where(and(eq(orders.status, "pending"), or(
+        lt(orders.expiresAt, now),
+        and(isNull(orders.expiresAt), lt(orders.updatedAt, stalledBefore)),
+      )))
+      .orderBy(asc(orders.id))
       .limit(limit)
       .for("update", { skipLocked: true });
+    const closed: string[] = [];
     for (const order of candidates) {
+      if (!order.expiresAt) {
+        await markReconcilingInTx(tx, order, "支付建单中断，未能确认网关订单状态");
+        continue;
+      }
       const ref = await closePendingInTx(tx, order);
       if (ref) cancels.push(ref);
+      closed.push(order.orderNo);
     }
-    return candidates.map((o) => o.orderNo);
+    return closed;
   });
   for (const c of cancels) cancelAtGateway(c.channel, c.providerRef, "sweep");
   return { closedOrders: closed };
@@ -695,7 +770,7 @@ export async function cancelPendingOrder(
   return { ok: true, message: "订单已取消，占用的卡密已退回库存" };
 }
 
-/** 待支付订单重新发起支付（旧尝试作废并通知网关撤销） */
+/** 待支付订单继续付款；LitePay 复用尚在有效期的原交易。 */
 export async function resumePayment(
   orderNo: string,
   email: string,
@@ -707,14 +782,17 @@ export async function resumePayment(
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
   if (items.length === 0) return { ok: false, message: "订单缺少商品明细" };
   const outcome = await startPaymentAttempt({
+    gateway: await getActiveGateway(),
+    siteUrl: await getSiteUrl(),
     orderId: order.id,
     orderNo: order.orderNo,
     amountCents: order.totalCents,
     subject: items.map((i) => i.productName).join(" + "),
   });
   if (outcome.kind === "created") {
-    return { ok: true, message: "已生成新的支付链接", data: { paymentUrl: outcome.payment.paymentUrl } };
+    return { ok: true, message: "请继续付款", data: { paymentUrl: outcome.payment.paymentUrl } };
   }
+  if (outcome.kind === "inactive") return { ok: false, message: outcome.message };
   if (outcome.kind === "rejected") {
     await closeOrderInternal(order.id, order.orderNo, outcome.message);
     return { ok: false, message: `创建支付失败：${outcome.message}` };
@@ -851,18 +929,18 @@ export async function markDeliveryEmailFailed(deliveryId: number, error: string)
     .where(eq(deliveries.id, deliveryId));
 }
 
-/** 按订单号取订单与明细（后台与查询页共用） */
+/** 公开付款状态页只读取展示所需的订单、商品与当前付款链接。 */
 export async function getOrderWithItems(orderNo: string) {
-  const rows = await db.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1);
-  const order = rows[0];
-  if (!order) return null;
-  const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
-  const deliveryRows = await db.select().from(deliveries).where(eq(deliveries.orderId, order.id)).limit(1);
-  const paymentRows = await db
-    .select()
-    .from(payments)
-    .where(eq(payments.orderId, order.id))
-    .orderBy(desc(payments.id))
-    .limit(1);
-  return { order, items, delivery: deliveryRows[0] ?? null, payment: paymentRows[0] ?? null };
+  const [row] = await db.select({
+    order: { id: orders.id, orderNo: orders.orderNo, status: orders.status, totalCents: orders.totalCents, expiresAt: orders.expiresAt },
+    payment: { status: payments.status, expiresAt: payments.expiresAt, paymentUrl: payments.paymentUrl, isCurrent: payments.isCurrent, channel: payments.channel, providerRef: payments.providerRef },
+  }).from(orders)
+    .leftJoin(payments, and(eq(payments.orderId, orders.id), eq(payments.isCurrent, true)))
+    .where(eq(orders.orderNo, orderNo)).orderBy(desc(payments.id)).limit(1);
+  if (!row) return null;
+  const items = await db.select({
+    id: orderItems.id, productName: orderItems.productName,
+    quantity: orderItems.quantity, lineTotalCents: orderItems.lineTotalCents,
+  }).from(orderItems).where(eq(orderItems.orderId, row.order.id)).orderBy(asc(orderItems.id));
+  return { ...row, items };
 }

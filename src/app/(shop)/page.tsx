@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "数字卡密商店",
-  description: "数字卡密商品，付款确认后自动发放并发送至下单邮箱，凭订单号、邮箱和查单密码可随时查看。",
+  description: "数字卡密商品，付款确认后自动发放，凭订单号、邮箱和查单密码可随时查看。",
   alternates: { canonical: "/" },
 };
 
@@ -23,7 +23,7 @@ const STEPS = [
   },
   {
     title: "收卡密",
-    body: "付款确认后自动发卡，同步发送到下单邮箱，也可在「订单查询」随时查看。查单密码仅在下单后显示一次，请妥善保存。",
+    body: "付款确认后，可在「订单查询」查看卡密。查单密码仅在下单后显示一次，请妥善保存。",
   },
 ] as const;
 
@@ -34,7 +34,7 @@ const FAQ = [
   },
   {
     q: "卡密在哪里查看？",
-    a: "两个地方：下单时填写的邮箱，以及「订单查询」页（需填写订单号、下单邮箱和查单密码）。如邮箱未收到，请检查垃圾邮件箱。",
+    a: "打开「订单查询」，填写订单号、下单邮箱和查单密码。商店启用邮件通知时，卡密也会发送到下单邮箱。",
   },
   {
     q: "查单密码忘了怎么办？",
@@ -57,9 +57,11 @@ const FAQ = [
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; category?: string }>;
+  searchParams: Promise<{ q?: string | string[]; category?: string | string[] }>;
 }) {
-  const { q, category } = await searchParams;
+  const params = await searchParams;
+  const q = Array.isArray(params.q) ? params.q[0] : params.q;
+  const category = Array.isArray(params.category) ? params.category[0] : params.category;
   const [items, cats] = await Promise.all([
     listStoreProducts({ q, categorySlug: category }),
     listCategories(),
@@ -80,10 +82,10 @@ export default async function HomePage({
           <h1 className="mt-5 text-[32px] font-semibold leading-[1.1] tracking-[-0.02em] sm:text-[40px]">
             付款确认后，
             <br className="sm:hidden" />
-            卡密<span className="text-accent">自动</span>发至下单邮箱。
+            卡密<span className="text-accent">自动</span>发放。
           </h1>
           <p className="mt-5 max-w-xl text-[15px] leading-7 text-muted">
-            填写邮箱提交订单，收款确认后立即发卡并同步至邮箱。之后可凭订单号、邮箱和查单密码随时找回。
+            下单后请保存订单号和查单密码。付款完成后，凭这两项和下单邮箱即可在「订单查询」查看卡密。
           </p>
 
           <form action="/" className="mt-8 flex max-w-md gap-2" role="search">

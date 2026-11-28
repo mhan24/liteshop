@@ -69,11 +69,22 @@ function normalizeApiBase(raw: string | null | undefined): string | null {
   return origin ? origin.replace(/\/+$/, "") : null;
 }
 
+/** 网关对外的收银台域名可以与内部 API 不同，但路径必须指向同一笔交易。 */
+export function litepayCashierUrl(raw: string | null, tradeId: string | null, apiBase?: string | null): string | null {
+  const safe = normalizeHttpUrl(raw);
+  if (!safe || !tradeId) return null;
+  const cashier = new URL(safe);
+  if (cashier.pathname !== `/pay/${encodeURIComponent(tradeId)}` || cashier.search || cashier.hash) return null;
+  if (cashier.protocol === "http:" && !apiBase?.toLowerCase().startsWith("http://")) return null;
+  return cashier.href;
+}
+
 /** 读取网关配置（令牌解密后仅存在于服务端内存） */
 export async function getLitepayConfig(): Promise<LitepayConfig> {
   const c = await getConfig();
   // AUTH_SECRET 变更后旧密文解不开：视为未配置，等后台重新录入令牌
-  const token = revealSecret(c.litepayTokenEnc) || null;
+  const rawToken = revealSecret(c.litepayTokenEnc);
+  const token = rawToken?.trim() ? rawToken : null;
   return {
     enabled: c.litepayEnabled,
     apiBase: normalizeApiBase(c.litepayApiBase),
@@ -106,6 +117,8 @@ interface CreateOrderResponse {
   message?: string;
   data?: {
     trade_id?: string;
+    order_id?: string;
+    status?: number;
     payment_url?: string;
     expiration_time?: number | string;
     amount?: string | number;
@@ -116,7 +129,7 @@ export const litepayAdapter: PaymentAdapter = {
   type: LITEPAY_CHANNEL,
 
   async createPayment(gateway, input: CreatePaymentInput): Promise<CreateOutcome> {
-    if (!gateway.apiBase || !gateway.token) {
+    if (!gateway.apiBase || !gateway.token?.trim()) {
       return { kind: "rejected", message: "LitePay 网关地址或接口令牌未配置" };
     }
     if (input.amountCents < MIN_AMOUNT_CENTS || input.amountCents > MAX_AMOUNT_CENTS) {
@@ -131,7 +144,8 @@ export const litepayAdapter: PaymentAdapter = {
       redirect_url: input.redirectUrl,
       amount: minorToNumber(input.amountCents),
       fiat: SITE_CURRENCY,
-      name: input.subject,
+      // LitePay limits name to 255 UTF-8 bytes; the itemized receipt stays in the shop.
+      name: Buffer.byteLength(input.subject, "utf8") <= 255 ? input.subject : input.orderNo,
       timeout: normalizeTimeout(gateway.timeoutSeconds),
       reselect: gateway.reselect,
       ...(gateway.currencies ? { currencies: gateway.currencies } : {}),
@@ -177,8 +191,19 @@ export const litepayAdapter: PaymentAdapter = {
     if (typeof parsed.status_code === "number" && parsed.status_code >= 400) {
       return { kind: "rejected", message: parsed.message ?? `网关拒绝建单（${parsed.status_code}）` };
     }
+    if (parsed.status_code !== 200) return { kind: "unknown", message: "网关未确认建单结果" };
     const data = parsed.data;
+    if ((data?.order_id !== undefined && data.order_id !== input.orderNo) ||
+        (data?.amount !== undefined && toMinorUnitsOrNull(data.amount) !== input.amountCents)) {
+      return { kind: "unknown", message: "网关返回的商户订单号或金额不符，订单保留待核实" };
+    }
     const tradeId = typeof data?.trade_id === "string" ? data.trade_id.trim() : "";
+    if ((data?.status === 3 || data?.status === 4) && tradeId && data.order_id === input.orderNo && data.amount !== undefined) {
+      return { kind: "closed", providerRef: tradeId, message: data.status === 3 ? "网关订单已过期" : "网关订单已取消" };
+    }
+    if (data?.status !== undefined && data.status !== 1) {
+      return { kind: "unknown", message: "网关交易已结束付款，订单保留待核实" };
+    }
     const rawUrl = typeof data?.payment_url === "string" ? data.payment_url.trim() : "";
     if (!tradeId || !rawUrl) {
       return {
@@ -186,14 +211,17 @@ export const litepayAdapter: PaymentAdapter = {
         message: `创建订单响应不完整：${parsed.message ?? JSON.stringify(parsed).slice(0, 200)}`,
       };
     }
-    const paymentUrl = normalizeHttpUrl(rawUrl);
+    const paymentUrl = litepayCashierUrl(rawUrl, tradeId, gateway.apiBase);
     if (!paymentUrl) {
-      return { kind: "unknown", message: "收银台地址协议或格式不安全，订单保留待核实" };
+      return { kind: "unknown", message: "收银台地址与网关交易不符，订单保留待核实" };
     }
     // expiration_time 是「剩余秒数」而非 Unix 时间戳
     const expSeconds =
       typeof data?.expiration_time === "string" ? Number(data.expiration_time) : data?.expiration_time;
-    const hasExpiry = typeof expSeconds === "number" && Number.isFinite(expSeconds) && expSeconds > 0;
+    const seconds = expSeconds ?? normalizeTimeout(gateway.timeoutSeconds);
+    if (!Number.isInteger(seconds) || seconds <= 0 || seconds > MAX_TIMEOUT_SECONDS) {
+      return { kind: "unknown", message: "网关交易已到期或有效期异常，订单保留待核实" };
+    }
     return {
       kind: "created",
       payment: {
@@ -202,36 +230,42 @@ export const litepayAdapter: PaymentAdapter = {
         // 建单响应只有法币金额；加密货币实付数量由回调 actual_amount 给出，
         // 两者口径不同，不能互相核对。
         expectedAmount: null,
-        expiresAt: hasExpiry
-          ? new Date(Date.now() + (expSeconds as number) * 1000)
-          : new Date(Date.now() + normalizeTimeout(gateway.timeoutSeconds) * 1000),
+        expiresAt: new Date(Date.now() + seconds * 1000),
         raw: data,
       },
     };
   },
 
   verifyNotify(gateway, rawBody): NotifyVerification {
-    if (!gateway.token) return { ok: false, error: "接口令牌未配置" };
+    if (!gateway.token?.trim()) return { ok: false, error: "接口令牌未配置" };
     const parsed = parseJsonObject(rawBody);
     if (!parsed.ok) return { ok: false, error: parsed.error };
     const body = parsed.value;
+    if (Object.values(body).some((v) => typeof v === "number" && !Number.isFinite(v))) {
+      return { ok: false, error: "回调报文含无效数值" };
+    }
     const given = body["signature"];
     if (typeof given !== "string" || given === "") return { ok: false, error: "缺少签名" };
-    if (!safeEqualHex(litepaySign(body, gateway.token), given)) {
+    if (!safeEqualHex(litepaySign(body, gateway.token), given.trim())) {
       return { ok: false, error: "签名校验失败" };
     }
-    const status = Number(body["status"]);
-    if (!Number.isInteger(status)) return { ok: false, error: `非法 status: ${String(body["status"])}` };
-    const orderNo = String(body["order_id"] ?? "").trim();
+    const statusValue = body["status"];
+    const status = typeof statusValue === "number" || (typeof statusValue === "string" && /^\d+$/.test(statusValue))
+      ? Number(statusValue) : NaN;
+    if (!Number.isSafeInteger(status)) return { ok: false, error: "回调状态非法" };
+    const orderNo = typeof body["order_id"] === "string" ? body["order_id"].trim() : "";
     if (!orderNo) return { ok: false, error: "缺少 order_id" };
-    const providerRef = body["trade_id"] != null ? String(body["trade_id"]).trim() : "";
+    const providerRef = typeof body["trade_id"] === "string" ? body["trade_id"].trim() : "";
     if (!providerRef) return { ok: false, error: "缺少 trade_id" };
     const amount = body["amount"] ?? null;
-    if (amount !== null && typeof amount !== "string" && typeof amount !== "number") {
-      return { ok: false, error: "回调金额类型非法" };
+    const actual = body["actual_amount"] ?? null;
+    if ((amount !== null && ((typeof amount !== "string" && typeof amount !== "number") || toMinorUnitsOrNull(amount) === null)) ||
+        (status === 2 && amount === null)) {
+      return { ok: false, error: "回调金额非法" };
     }
-    if (amount !== null && toMinorUnitsOrNull(amount) === null) {
-      return { ok: false, error: `回调金额非法: ${String(amount)}` };
+    if ((actual !== null && ((typeof actual !== "string" && typeof actual !== "number") || !/^\d+(?:\.\d{1,6})?$/.test(String(actual)) || !Number.isFinite(Number(actual)) || Number(actual) <= 0)) ||
+        (status === 2 && actual === null)) {
+      return { ok: false, error: "回调实付金额非法" };
     }
     return {
       ok: true,
@@ -239,14 +273,14 @@ export const litepayAdapter: PaymentAdapter = {
         providerRef,
         orderNo,
         amount: amount as string | number | null,
-        actualAmount: body["actual_amount"] != null ? String(body["actual_amount"]) : null,
+        actualAmount: actual === null ? null : String(actual),
         status,
       },
     };
   },
 
   async cancelPayment(gateway, providerRef) {
-    if (!gateway.apiBase || !gateway.token) return { ok: false, message: "网关未配置，跳过撤销" };
+    if (!gateway.apiBase || !gateway.token?.trim()) return { ok: false, message: "网关未配置，跳过撤销" };
     const body = { trade_id: providerRef };
     try {
       const res = await fetch(`${gateway.apiBase}${CANCEL_PATH}`, {

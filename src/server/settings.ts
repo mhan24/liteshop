@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { appConfig } from "@/db/schema";
+import type { Tx } from "./db-tx";
 import { normalizeHttpUrl } from "@/lib/http-url";
 import { isEncryptedSecret, revealSecret } from "@/lib/secret-box";
 
@@ -84,20 +85,33 @@ export function invalidateConfig(): void {
   cache = null;
 }
 
-/** 修改配置：行锁内读取最新值 → 合并补丁（可为函数）→ 整体校验 → 写回 */
-export async function updateConfig(
-  patch: Partial<AppConfig> | ((current: AppConfig) => Partial<AppConfig>)
-): Promise<AppConfig> {
-  const next = await db.transaction(async (tx) => {
-    await tx.execute(sql`INSERT INTO app_config (id, data) VALUES (1, '{}'::jsonb) ON CONFLICT (id) DO NOTHING`);
-    const rows = await tx.select({ data: appConfig.data }).from(appConfig).where(eq(appConfig.id, 1)).for("update");
-    const current = configSchema.parse(rows[0]?.data ?? {});
-    const merged = configSchema.parse({ ...current, ...(typeof patch === "function" ? patch(current) : patch) });
-    await tx.update(appConfig).set({ data: merged, updatedAt: new Date() }).where(eq(appConfig.id, 1));
-    return merged;
-  });
-  cache = Promise.resolve(next);
+type ConfigPatch = Partial<AppConfig> | ((current: AppConfig) => Partial<AppConfig>);
+
+/** 调用方持有事务，提交后使配置缓存失效。 */
+export async function updateConfigInTx(tx: Tx, patch: ConfigPatch): Promise<AppConfig> {
+  await tx.execute(sql`INSERT INTO app_config (id, data) VALUES (1, '{}'::jsonb) ON CONFLICT (id) DO NOTHING`);
+  const rows = await tx.select({ data: appConfig.data }).from(appConfig).where(eq(appConfig.id, 1)).for("update");
+  const current = configSchema.parse(rows[0]?.data ?? {});
+  const merged = configSchema.parse({ ...current, ...(typeof patch === "function" ? patch(current) : patch) });
+  await tx.update(appConfig).set({ data: merged, updatedAt: new Date() }).where(eq(appConfig.id, 1));
+  return merged;
+}
+
+export async function updateConfig(patch: ConfigPatch): Promise<AppConfig> {
+  const next = await db.transaction((tx) => updateConfigInTx(tx, patch));
+  invalidateConfig();
   return next;
+}
+
+/** 鉴权直接读取已提交的版本，其他进程撤销会话后立即生效。 */
+export async function getAdminSessionVersion(): Promise<number> {
+  const [row] = await db.select({ version: sql<unknown>`${appConfig.data}->'adminSessionVersion'` })
+    .from(appConfig).where(eq(appConfig.id, 1));
+  if (row?.version == null) return 1;
+  if (typeof row.version !== "number" || !Number.isSafeInteger(row.version) || row.version < 1) {
+    throw new Error("管理员会话版本无效");
+  }
+  return row.version;
 }
 
 /* ===== 派生读取（调用方不必关心存储细节） ===== */

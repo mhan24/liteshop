@@ -1,8 +1,8 @@
-import { desc } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { deliveries, orders } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
-import { csrfToken } from "@/server/admin-auth";
+import { requireAdminPageSession } from "@/server/admin-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/input";
 import { AdminForm } from "@/components/admin/admin-form";
@@ -23,9 +23,10 @@ const STATUS_LABEL: Record<string, { label: string; tone: "neutral" | "green" | 
 };
 
 export default async function AdminOrdersPage() {
-  const csrf = await csrfToken();
+  const { csrf } = await requireAdminPageSession();
   const rows = await db.select().from(orders).orderBy(desc(orders.createdAt)).limit(100);
-  const deliveryRows = await db.select().from(deliveries);
+  const deliveryRows = rows.length ? await db.select().from(deliveries)
+    .where(inArray(deliveries.orderId, rows.map((order) => order.id))) : [];
   const deliveryByOrder = new Map(deliveryRows.map((d) => [d.orderId, d]));
 
   return (
